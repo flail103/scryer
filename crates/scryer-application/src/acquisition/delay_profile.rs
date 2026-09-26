@@ -298,6 +298,7 @@ impl DelayProfile {
             Some(DownloadSourceKind::TorrentFile | DownloadSourceKind::MagnetUri) => {
                 self.enable_torrent
             }
+            Some(DownloadSourceKind::DownloadUrl) => false,
             None => true,
         }
     }
@@ -311,6 +312,7 @@ impl DelayProfile {
             Some(DownloadSourceKind::TorrentFile | DownloadSourceKind::MagnetUri) => {
                 self.preferred_protocol == PreferredProtocol::Torrent
             }
+            Some(DownloadSourceKind::DownloadUrl) => false,
             None => false,
         }
     }

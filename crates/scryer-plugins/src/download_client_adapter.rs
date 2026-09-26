@@ -406,6 +406,7 @@ fn map_source_kind(kind: DownloadSourceKind) -> DownloadInputKind {
         DownloadSourceKind::NzbUrl => DownloadInputKind::NzbUrl,
         DownloadSourceKind::TorrentFile => DownloadInputKind::TorrentFile,
         DownloadSourceKind::MagnetUri => DownloadInputKind::MagnetUri,
+        DownloadSourceKind::DownloadUrl => DownloadInputKind::DownloadUrl,
     }
 }
 

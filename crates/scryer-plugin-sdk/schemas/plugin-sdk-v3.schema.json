@@ -1239,8 +1239,30 @@
         "torrent_file",
         "torrent_url",
         "torrent_bytes",
-        "magnet_uri"
+        "magnet_uri",
+        "download_url"
       ]
+    },
+    "DownloadResourceRole": {
+      "type": "string",
+      "enum": [
+        "required",
+        "alternative",
+        "subtitle",
+        "metadata"
+      ]
+    },
+    "PluginDownloadResource": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "kind": { "$ref": "#/$defs/DownloadInputKind" },
+        "role": { "$ref": "#/$defs/DownloadResourceRole" },
+        "selection_group": { "type": ["string", "null"] },
+        "file_name": { "type": ["string", "null"] },
+        "size_bytes": { "type": ["integer", "null"], "format": "uint64" }
+      },
+      "required": ["url", "kind"]
     },
     "DownloadIsolationMode": {
       "type": "string",
@@ -5308,6 +5330,12 @@
             "string",
             "null"
           ]
+        },
+        "download_resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginDownloadResource"
+          }
         },
         "size_bytes": {
           "type": [

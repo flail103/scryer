@@ -1188,6 +1188,15 @@ fn merge_result_extra(
     let provider_extra = result.provider_extra.clone();
     let mut extra = std::collections::HashMap::new();
 
+    // Keep the typed multi-resource contract intact as it crosses into the
+    // application result's extensible metadata map. The legacy singular URL
+    // remains independently available and is not overwritten here.
+    if !result.download_resources.is_empty()
+        && let Ok(resources) = serde_json::to_value(&result.download_resources)
+    {
+        extra.insert("download_resources".to_string(), resources);
+    }
+
     insert_value(&mut extra, "source_kind", result.source_kind);
     insert_value(&mut extra, "protocol", result.protocol);
 

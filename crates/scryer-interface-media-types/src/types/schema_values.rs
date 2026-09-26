@@ -405,6 +405,29 @@ pub enum DownloadSourceKindValue {
     TorrentFile,
     /// Torrent supplied as a magnet URI.
     MagnetUri,
+    /// Provider-neutral URL interpreted by the selected download client.
+    DownloadUrl,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
+pub enum DownloadResourceKindValue {
+    Nzb,
+    NzbUrl,
+    TorrentFile,
+    TorrentUrl,
+    TorrentBytes,
+    MagnetUri,
+    DownloadUrl,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
+pub enum DownloadResourceRoleValue {
+    Required,
+    Alternative,
+    Subtitle,
+    Metadata,
 }
 
 /// Reason a queued download was requested.

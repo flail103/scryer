@@ -1,5 +1,6 @@
 use super::{
-    ConvergenceStateValue, DownloadQueueStateValue, DownloadSourceKindValue, Long, MediaFacetValue,
+    ConvergenceStateValue, DownloadQueueStateValue, DownloadSourceKindValue,
+    DownloadResourceKindValue, DownloadResourceRoleValue, Long, MediaFacetValue,
     PendingReleaseStatusValue, PluginConfigFieldOptionPayload, PluginConfigFieldRoleValue,
     PluginConfigFieldTypeValue, PluginConfigValueSourceValue, QueueDownloadPurposeValue,
     QueueDownloadScopeInput, WantedKindValue, WantedStatusValue,
@@ -33,6 +34,8 @@ pub struct IndexerSearchResultPayload {
     pub link: Option<String>,
     /// Direct download URL, or null when unavailable.
     pub download_url: Option<String>,
+    /// Additional selectable URL and sidecar resources reported by the indexer.
+    pub download_resources: Vec<DownloadResourcePayload>,
     /// Source kind such as Usenet or torrent, or null when unknown.
     pub source_kind: Option<DownloadSourceKindValue>,
     /// Release size in bytes, or null when unknown.
@@ -70,6 +73,16 @@ pub struct IndexerSearchResultPayload {
     pub auto_decision_code: Option<String>,
     /// Human-readable automatic acquisition decision summary, or null when not evaluated.
     pub auto_decision_summary: Option<String>,
+}
+
+#[derive(SimpleObject, Clone)]
+pub struct DownloadResourcePayload {
+    pub url: String,
+    pub kind: DownloadResourceKindValue,
+    pub role: DownloadResourceRoleValue,
+    pub selection_group: Option<String>,
+    pub file_name: Option<String>,
+    pub size_bytes: Option<Long>,
 }
 
 /// Acquisition scope targeted by a queued download.

@@ -1632,6 +1632,12 @@ impl AppUseCase {
                     result.title
                 )));
             };
+            if source_kind == crate::DownloadSourceKind::DownloadUrl {
+                return Err(AppError::Validation(format!(
+                    "{} is a provider URL and cannot be fetched as an indexer artifact",
+                    result.title
+                )));
+            }
             // With no title there is no owner facet, so the search kind stands
             // in for one exactly as the unlinked grab reads it.
             let facet = kind
@@ -1802,19 +1808,69 @@ impl AppUseCase {
             .get(search_id)
             .filter(|entry| entry.actor_id == actor.id)
             .ok_or_else(|| AppError::NotFound(format!("interactive release search {search_id}")))?;
-        let result = entry
+        let mut result = entry
             .snapshot
             .results
             .iter()
             .find(|result| {
-                result
-                    .download_url
-                    .as_deref()
-                    .or(result.link.as_deref())
-                    .is_some_and(|value| value == download_url)
+                result.download_url.as_deref() == Some(download_url)
+                    || result.link.as_deref() == Some(download_url)
+                    || result
+                        .download_resources()
+                        .iter()
+                        .any(|resource| {
+                            resource.url == download_url
+                                && resource.is_valid_for_submission()
+                                && matches!(
+                                    resource.role,
+                                    crate::DownloadResourceRole::Required
+                                        | crate::DownloadResourceRole::Alternative
+                                )
+                        })
             })
             .cloned()
             .ok_or_else(|| AppError::NotFound("release is no longer in this search".to_string()))?;
+        let selected_resource = result.download_resources().into_iter().find(|resource| {
+            resource.url == download_url
+                && matches!(
+                    resource.role,
+                    crate::DownloadResourceRole::Required
+                        | crate::DownloadResourceRole::Alternative
+                )
+        });
+        let selected_kind = selected_resource
+            .as_ref()
+            .map(|resource| resource.kind.source_kind())
+            .or(result.source_kind)
+            .or_else(|| crate::DownloadSourceKind::infer_from_hint(Some(download_url)))
+            .unwrap_or(if result.download_url.is_some() {
+                crate::DownloadSourceKind::DownloadUrl
+            } else {
+                crate::DownloadSourceKind::TorrentFile
+            });
+        if selected_kind == crate::DownloadSourceKind::DownloadUrl
+            && !crate::is_http_download_url(download_url)
+        {
+            return Err(AppError::Validation(
+                "download URL resources must use HTTP or HTTPS".to_string(),
+            ));
+        }
+        if let Some(resource) = result
+            .download_resources()
+            .into_iter()
+                .find(|resource| {
+                    resource.url == download_url
+                        && resource.is_valid_for_submission()
+                        && matches!(
+                        resource.role,
+                        crate::DownloadResourceRole::Required
+                            | crate::DownloadResourceRole::Alternative
+                    )
+            })
+        {
+            result.download_url = Some(resource.url);
+            result.source_kind = Some(resource.kind.source_kind());
+        }
         Ok((result, entry.kind))
     }
 
