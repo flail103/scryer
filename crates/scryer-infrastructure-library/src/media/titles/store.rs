@@ -6,11 +6,12 @@ use scryer_application::{
     AppError, AppResult, CatalogOwnedExternalIdRecord, CatalogOwnedTitleRecord, CreateTitleOutcome,
     MAX_USER_TAGS_PER_TITLE, MetadataFieldUpdate, PendingImportStatus, PendingTitleHydration,
     SortDirection, TitleArtworkUrlUpdate, TitleCatalogContentStatus, TitleCatalogFilter,
-    TitleCatalogFilterCounts, TitleCatalogFilterOptions, TitleCatalogProfileNames,
-    TitleCatalogResult, TitleCatalogSort, TitleCatalogSortKey, TitleCatalogTagFilterOption,
-    TitleCredit, TitleDeletePreviewInfo, TitleExternalIdLookup, TitleExternalIdLookupMatch,
-    TitleListProjection, TitleMetadataUpdate, TitleOptionsPatch, TitleRatingSummary,
-    TitleRepository, TitleTagDefinitionSummary, TitleTagMembershipCounts, is_reserved_title_tag,
+    TitleCatalogFilterCounts, TitleCatalogFilterOptions, TitleCatalogPresence,
+    TitleCatalogProfileNames, TitleCatalogResult, TitleCatalogSort, TitleCatalogSortKey,
+    TitleCatalogTagFilterOption, TitleCredit, TitleDeletePreviewInfo, TitleExternalIdLookup,
+    TitleExternalIdLookupMatch, TitleListProjection, TitleMetadataUpdate, TitleOptionsPatch,
+    TitleRatingSummary, TitleRepository, TitleTagDefinitionSummary, TitleTagMembershipCounts,
+    is_reserved_title_tag,
     persisted_records::{
         PersistedTitleDecodeOptions, PersistedTitleReadMode, finalize_persisted_title,
     },
@@ -3713,6 +3714,125 @@ async fn fetch_title_catalog_managed_bytes(
     )
 }
 
+/// The four file counts for one catalogue scope.
+#[derive(Debug, Default)]
+struct TitleCatalogFileCounts {
+    missing: usize,
+    partial: usize,
+    complete: usize,
+    needs_attention: usize,
+}
+
+/// Builds the single-scan query behind [`fetch_title_catalog_file_counts`].
+fn build_title_catalog_file_counts_sql(
+    facet: Option<MediaFacet>,
+    library_ids: &[String],
+    query: Option<&crate::queries::title_search::ResolvedTitleSearch>,
+    active_filter: &TitleCatalogFilter,
+    dialect: TitleCatalogSqlDialect,
+) -> (String, Vec<SqlArg>) {
+    let mut scoped = active_filter.clone();
+    scoped.presences.clear();
+    scoped.needs_attention = None;
+    let (where_sql, args) =
+        build_title_catalog_where_sql(facet, library_ids, query, &scoped, dialect);
+
+    // A dimension that a count is not swapping stays exactly as the operator left
+    // it, including when they left it off.
+    let active_presence = if active_filter.presences.is_empty() {
+        "1 = 1".to_string()
+    } else {
+        format!(
+            "({})",
+            active_filter
+                .presences
+                .iter()
+                .map(|presence| title_catalog_presence_predicate(*presence, dialect))
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        )
+    };
+    let active_attention = match active_filter.needs_attention {
+        None => "1 = 1".to_string(),
+        Some(true) => title_catalog_needs_attention_predicate(dialect),
+        Some(false) => format!("NOT {}", title_catalog_needs_attention_predicate(dialect)),
+    };
+    let counted = |condition: &str, keep: &str| {
+        format!("COALESCE(SUM(CASE WHEN ({condition}) AND ({keep}) THEN 1 ELSE 0 END), 0)")
+    };
+
+    let sql = format!(
+        "SELECT {} AS missing, {} AS partial, {} AS complete, {} AS needs_attention \
+           FROM titles{where_clause}",
+        counted(
+            &title_catalog_presence_predicate(TitleCatalogPresence::Missing, dialect),
+            &active_attention
+        ),
+        counted(
+            &title_catalog_presence_predicate(TitleCatalogPresence::Partial, dialect),
+            &active_attention
+        ),
+        counted(
+            &title_catalog_presence_predicate(TitleCatalogPresence::Complete, dialect),
+            &active_attention
+        ),
+        counted(
+            title_catalog_needs_attention_predicate(dialect).as_str(),
+            &active_presence
+        ),
+        where_clause = if where_sql.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {where_sql}")
+        },
+    );
+    (sql, args)
+}
+
+/// The four file counts in one scan.
+///
+/// Each is the page predicate with one dimension swapped, which is the convention
+/// the monitored and status counts already follow: every count answers "how many
+/// would I see if this were the one I picked", with the operator's other filters
+/// still applied. They differ only in the condition each one counts, so four separate
+/// COUNT queries would read the same rows four times over.
+///
+/// The swapped dimensions move out of the WHERE clause and into the conditions
+/// being counted, which is what makes one scan enough. Every expression names the
+/// joined episode progress, so this query always carries that join even when the
+/// operator has no presence filter active.
+async fn fetch_title_catalog_file_counts(
+    datastore: &StoreDatastore,
+    facet: Option<MediaFacet>,
+    library_ids: &[String],
+    query: Option<&crate::queries::title_search::ResolvedTitleSearch>,
+    active_filter: &TitleCatalogFilter,
+) -> AppResult<TitleCatalogFileCounts> {
+    let (sql, args) = build_title_catalog_file_counts_sql(
+        facet,
+        library_ids,
+        query,
+        active_filter,
+        title_catalog_dialect_for_datastore(datastore),
+    );
+
+    let row = SqlRuntime::fetch_optional(datastore.read_exec(), &sql, &args).await?;
+    let count = |column: &str| -> AppResult<usize> {
+        Ok(row
+            .as_ref()
+            .map(|row| row.i64(column))
+            .transpose()?
+            .unwrap_or(0)
+            .max(0) as usize)
+    };
+    Ok(TitleCatalogFileCounts {
+        missing: count("missing")?,
+        partial: count("partial")?,
+        complete: count("complete")?,
+        needs_attention: count("needs_attention")?,
+    })
+}
+
 async fn fetch_title_catalog_filter_counts(
     datastore: &StoreDatastore,
     facet: Option<MediaFacet>,
@@ -3745,6 +3865,14 @@ async fn fetch_title_catalog_filter_counts(
         content_statuses: vec![TitleCatalogContentStatus::Ended],
         ..active_filter.clone()
     };
+    let file_counts = fetch_title_catalog_file_counts(
+        datastore,
+        facet.clone(),
+        library_ids,
+        query,
+        active_filter,
+    )
+    .await?;
 
     Ok(TitleCatalogFilterCounts {
         all: fetch_title_catalog_count(datastore, facet.clone(), library_ids, query, &all_filter)
@@ -3773,8 +3901,18 @@ async fn fetch_title_catalog_filter_counts(
             &continuing_filter,
         )
         .await?,
-        ended: fetch_title_catalog_count(datastore, facet, library_ids, query, &ended_filter)
-            .await?,
+        ended: fetch_title_catalog_count(
+            datastore,
+            facet.clone(),
+            library_ids,
+            query,
+            &ended_filter,
+        )
+        .await?,
+        missing: file_counts.missing,
+        partial: file_counts.partial,
+        complete: file_counts.complete,
+        needs_attention: file_counts.needs_attention,
     })
 }
 
@@ -3898,6 +4036,117 @@ fn build_title_catalog_page_sql(
     (sql, args)
 }
 
+/// The primary-file test that tells a title with nothing on disk from one with
+/// something.
+///
+/// "On disk" is the same notion the size column already counts: a primary file that
+/// is not parked in the recycle bin or staged as an upgrade replacement. A file
+/// whose scan failed or that needs review therefore counts as present here, and
+/// shows up under [`title_catalog_needs_attention_predicate`] instead.
+fn title_catalog_live_primary_file_exists(dialect: TitleCatalogSqlDialect, alias: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM media_files {alias} \
+          WHERE {alias}.title_id = titles.id \
+            AND {alias}.role = 'primary' \
+            AND {})",
+        title_catalog_live_media_file_predicate(dialect, alias)
+    )
+}
+
+/// A monitored episode that has aired and holds no live primary file: exactly the
+/// work [`TitleCatalogPresence`] disagrees about.
+///
+/// This is a correlated lookup rather than a join against a per-title count of the
+/// whole library. The episode-progress aggregate the Episodes sort already pays for
+/// was the obvious reuse, but pairing it with the page means every catalogue load
+/// that shows counts joins a grouped scan of every episode in the library, whether
+/// or not a presence filter is selected. Two index probes per monitored episode of
+/// the titles in scope answer the same question, and `episodes.title_id` and
+/// `file_episode_map.episode_id` are both indexed.
+///
+/// The episodes counted are the ones the progress counts use: specials, placeholders
+/// and episodes without a date are left out. On top of that they have to have aired,
+/// so an announced season is not work yet, and they are compared against the same
+/// live-file rule presence uses, so a failed scan in the recycle bin stays absent.
+fn title_catalog_outstanding_episode_exists(dialect: TitleCatalogSqlDialect) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM episodes catalog_episode \
+           JOIN collections catalog_episode_collection \
+             ON catalog_episode_collection.id = catalog_episode.collection_id \
+          WHERE catalog_episode.title_id = titles.id \
+            AND catalog_episode_collection.collection_type <> 'specials' \
+            AND catalog_episode_collection.collection_index <> '0' \
+            AND trim(COALESCE(catalog_episode.title, '')) <> '' \
+            AND upper(trim(catalog_episode.title)) NOT IN ('TBA', 'TBD') \
+            AND trim(COALESCE(catalog_episode.air_date, '')) <> '' \
+            AND {} \
+            AND {} \
+            AND NOT EXISTS (SELECT 1 FROM file_episode_map catalog_episode_file \
+                   JOIN media_files catalog_episode_media \
+                     ON catalog_episode_media.id = catalog_episode_file.file_id \
+                  WHERE catalog_episode_file.episode_id = catalog_episode.id \
+                    AND catalog_episode_media.role = 'primary' \
+                    AND {}))",
+        title_catalog_aired_episode_predicate(dialect, "catalog_episode"),
+        title_catalog_bool_column_is_true(dialect, "catalog_episode.monitored"),
+        title_catalog_live_media_file_predicate(dialect, "catalog_episode_media")
+    )
+}
+
+/// One file-presence state as SQL. The three partition the catalogue, so nothing
+/// falls between them: a title holds no file, or it holds one and is short of a
+/// monitored episode that has aired, or it holds one and is not short of anything.
+fn title_catalog_presence_predicate(
+    presence: TitleCatalogPresence,
+    dialect: TitleCatalogSqlDialect,
+) -> String {
+    let file_exists = title_catalog_live_primary_file_exists(dialect, "catalog_presence_file");
+    match presence {
+        TitleCatalogPresence::Missing => format!("NOT {file_exists}"),
+        TitleCatalogPresence::Partial => format!(
+            "({file_exists} AND {})",
+            title_catalog_outstanding_episode_exists(dialect)
+        ),
+        TitleCatalogPresence::Complete => format!(
+            "({file_exists} AND NOT {})",
+            title_catalog_outstanding_episode_exists(dialect)
+        ),
+    }
+}
+
+/// The two states a file can be stuck in and need a person.
+///
+/// The file has to be one presence counts, or a failed scan parked in the recycle bin
+/// or replaced by a staged upgrade would keep the title flagged while the catalogue
+/// says it holds nothing.
+///
+/// `imported` is left out on purpose: a file waiting to be analysed is work the
+/// system does on its own, and counting it would light this filter up across a fresh
+/// library.
+fn title_catalog_needs_attention_predicate(dialect: TitleCatalogSqlDialect) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM media_files catalog_attention \
+          WHERE catalog_attention.title_id = titles.id \
+            AND catalog_attention.role = 'primary' \
+            AND catalog_attention.scan_status IN ('scan_failed', 'review_required') \
+            AND {})",
+        title_catalog_live_media_file_predicate(dialect, "catalog_attention")
+    )
+}
+
+/// An episode that has already aired, in the terms the catalogue stores air dates.
+///
+/// The column is text and dates are compared as text elsewhere, so today's date is the
+/// bound; an announced season is not missing work yet.
+fn title_catalog_aired_episode_predicate(dialect: TitleCatalogSqlDialect, alias: &str) -> String {
+    match dialect {
+        TitleCatalogSqlDialect::Sqlite => format!("{alias}.air_date <= CURRENT_DATE"),
+        TitleCatalogSqlDialect::Postgres => {
+            format!("{alias}.air_date <= CAST(CURRENT_DATE AS TEXT)")
+        }
+    }
+}
+
 fn build_title_catalog_where_sql(
     facet: Option<MediaFacet>,
     library_ids: &[String],
@@ -3979,6 +4228,33 @@ fn build_title_catalog_where_sql(
     if let Some(monitored) = filter.monitored {
         clauses.push("monitored = {}".to_string());
         args.push(SqlArg::Bool(monitored));
+    }
+
+    // Presence and attention are facts about rows in `media_files`, so they are
+    // predicates here rather than a set the application layer derives. Nothing about
+    // either depends on acquisition policy, a facet registry, or a setting, which is
+    // what lets the page query, the total count, and the per-facet counts stay one
+    // predicate over one table.
+    //
+    // Any-of, because the states are toggles an operator combines: asking for the
+    // titles that are missing *or* half-downloaded is one question, not two.
+    if !filter.presences.is_empty() {
+        let any_of = filter
+            .presences
+            .iter()
+            .map(|presence| title_catalog_presence_predicate(*presence, dialect))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        clauses.push(format!("({any_of})"));
+    }
+
+    if let Some(needs_attention) = filter.needs_attention {
+        let attention = title_catalog_needs_attention_predicate(dialect);
+        clauses.push(if needs_attention {
+            attention
+        } else {
+            format!("NOT {attention}")
+        });
     }
 
     let statuses = title_catalog_content_status_values(&filter.content_statuses);
@@ -5481,6 +5757,9 @@ async fn delete_indexer_search_learning_for_title_tx(
 }
 
 #[cfg(test)]
+mod catalog_presence_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -6509,6 +6788,7 @@ mod tests {
             minimum_year: Some(2000),
             maximum_year: Some(2020),
             minimum_rating: Some(7.5),
+            ..TitleCatalogFilter::default()
         };
 
         let (sql, args) = build_title_catalog_where_sql(
@@ -6531,6 +6811,236 @@ mod tests {
         assert!(sql.contains("monitored = {}"));
         assert!(sql.contains("LOWER(TRIM(COALESCE(content_status, ''))) IN"));
         assert_eq!(args.len(), 15);
+    }
+
+    /// Presence is a fact about `media_files`, so it is a predicate in the same
+    /// WHERE every other filter writes into. Nothing here derives, and nothing here
+    /// can drift from acquisition policy.
+    #[test]
+    fn title_catalog_where_sql_scopes_presence_to_files_on_disk() {
+        let sql_for = |presences: Vec<TitleCatalogPresence>| {
+            build_title_catalog_where_sql(
+                Some(MediaFacet::Series),
+                &["library-1".to_string()],
+                None,
+                &TitleCatalogFilter {
+                    presences,
+                    ..TitleCatalogFilter::default()
+                },
+                TitleCatalogSqlDialect::Sqlite,
+            )
+            .0
+        };
+
+        let missing = sql_for(vec![TitleCatalogPresence::Missing]);
+        assert!(
+            missing.contains("NOT EXISTS (SELECT 1 FROM media_files"),
+            "{missing}"
+        );
+        assert!(
+            missing.contains("catalog_presence_file.role = 'primary'"),
+            "{missing}"
+        );
+        // Missing asks nothing about episodes, so it must not carry that lookup.
+        assert!(!missing.contains("FROM episodes"), "{missing}");
+
+        // Partial asks for a monitored episode that has aired and holds no file.
+        let partial = sql_for(vec![TitleCatalogPresence::Partial]);
+        assert!(
+            partial.contains("EXISTS (SELECT 1 FROM episodes catalog_episode"),
+            "{partial}"
+        );
+        assert!(
+            partial.contains("catalog_episode.monitored = 1"),
+            "{partial}"
+        );
+        assert!(
+            partial.contains("catalog_episode.air_date <= CURRENT_DATE"),
+            "{partial}"
+        );
+        assert!(
+            partial.contains("file_episode_map catalog_episode_file"),
+            "{partial}"
+        );
+        // The evidence for the episode is its own lookup, not a grouped scan joined
+        // into every catalogue query.
+        assert!(!partial.contains("GROUP BY"), "{partial}");
+        assert!(!partial.contains("catalog_episode_progress"), "{partial}");
+
+        // The three states partition the catalogue: complete is "has a file and is
+        // not short of anything", so nothing falls between them.
+        let complete = sql_for(vec![TitleCatalogPresence::Complete]);
+        assert!(
+            complete.contains("EXISTS (SELECT 1 FROM media_files"),
+            "{complete}"
+        );
+        assert!(
+            complete.contains("AND NOT EXISTS (SELECT 1 FROM episodes catalog_episode"),
+            "{complete}"
+        );
+
+        // Any-of, because the states are toggles an operator combines.
+        let combined = sql_for(vec![
+            TitleCatalogPresence::Missing,
+            TitleCatalogPresence::Partial,
+        ]);
+        assert!(combined.contains(" OR "), "{combined}");
+        assert!(
+            combined.contains("NOT EXISTS (SELECT 1 FROM media_files"),
+            "{combined}"
+        );
+        assert!(
+            combined.contains("FROM episodes catalog_episode"),
+            "{combined}"
+        );
+
+        // The Postgres spelling has to say the same thing.
+        let postgres = build_title_catalog_where_sql(
+            Some(MediaFacet::Series),
+            &["library-1".to_string()],
+            None,
+            &TitleCatalogFilter {
+                presences: vec![TitleCatalogPresence::Partial],
+                ..TitleCatalogFilter::default()
+            },
+            TitleCatalogSqlDialect::Postgres,
+        )
+        .0;
+        assert!(
+            postgres.contains("catalog_episode.air_date <= CAST(CURRENT_DATE AS TEXT)"),
+            "{postgres}"
+        );
+    }
+
+    #[test]
+    fn title_catalog_where_sql_filters_attention_on_the_two_file_states() {
+        let sql_for = |needs_attention: Option<bool>| {
+            build_title_catalog_where_sql(
+                None,
+                &["library-1".to_string()],
+                None,
+                &TitleCatalogFilter {
+                    needs_attention,
+                    ..TitleCatalogFilter::default()
+                },
+                TitleCatalogSqlDialect::Sqlite,
+            )
+            .0
+        };
+
+        let flagged = sql_for(Some(true));
+        assert!(
+            flagged.contains("catalog_attention.scan_status IN ('scan_failed', 'review_required')"),
+            "{flagged}"
+        );
+        assert!(
+            !flagged.contains("NOT EXISTS (SELECT 1 FROM media_files catalog_attention"),
+            "{flagged}"
+        );
+        // A file still waiting to be analysed is work the system does on its own;
+        // counting it would light this filter up across a fresh library.
+        assert!(!flagged.contains("'imported'"), "{flagged}");
+
+        let clear = sql_for(Some(false));
+        assert!(
+            clear.contains("NOT EXISTS (SELECT 1 FROM media_files catalog_attention"),
+            "{clear}"
+        );
+
+        assert!(!sql_for(None).contains("catalog_attention"));
+    }
+
+    /// Every filter count is the page predicate with one dimension swapped, so the
+    /// file counts have to keep whatever else the operator filtered on. A count that
+    /// dropped the other filters would tell them a number the page can never deliver.
+    #[test]
+    fn title_catalog_filter_counts_keep_the_other_active_filters() {
+        let sql_for = |filter: &TitleCatalogFilter| {
+            build_title_catalog_count_sql(
+                Some(MediaFacet::Movie),
+                &["library-1".to_string()],
+                None,
+                filter,
+                TitleCatalogSqlDialect::Sqlite,
+            )
+            .0
+        };
+
+        let active = TitleCatalogFilter {
+            monitored: Some(true),
+            minimum_year: Some(2000),
+            ..TitleCatalogFilter::default()
+        };
+        let missing = TitleCatalogFilter {
+            presences: vec![TitleCatalogPresence::Missing],
+            ..active.clone()
+        };
+        let attention = TitleCatalogFilter {
+            needs_attention: Some(true),
+            ..active.clone()
+        };
+
+        for sql in [sql_for(&missing), sql_for(&attention)] {
+            assert!(sql.contains("monitored = {}"), "{sql}");
+            assert!(sql.contains("titles.year >= {}"), "{sql}");
+        }
+        assert!(
+            sql_for(&missing).contains("NOT EXISTS (SELECT 1 FROM media_files"),
+            "{missing:?}"
+        );
+        assert!(
+            sql_for(&attention).contains("catalog_attention.scan_status IN"),
+            "{}",
+            sql_for(&attention)
+        );
+    }
+
+    /// The four file counts share one scan because they differ only in the condition
+    /// each one counts. The dimensions being swapped have to leave the WHERE clause
+    /// and move into the conditions, or the four numbers would be four queries.
+    #[test]
+    fn title_catalog_file_counts_swap_one_dimension_per_condition() {
+        let (sql, args) = build_title_catalog_file_counts_sql(
+            Some(MediaFacet::Movie),
+            &["library-1".to_string()],
+            None,
+            &TitleCatalogFilter {
+                monitored: Some(true),
+                presences: vec![TitleCatalogPresence::Partial],
+                needs_attention: Some(true),
+                ..TitleCatalogFilter::default()
+            },
+            TitleCatalogSqlDialect::Sqlite,
+        );
+
+        for column in ["missing", "partial", "complete", "needs_attention"] {
+            assert!(sql.contains(&format!("AS {column}")), "{sql}");
+        }
+        assert_eq!(sql.matches("FROM titles").count(), 1, "{sql}");
+        // One scan of the titles in scope, with the file tests as conditions: no
+        // grouped episode scan is joined in, so the counts cost the same queries the
+        // page does.
+        assert!(!sql.contains("GROUP BY"), "{sql}");
+        assert!(
+            sql.contains("EXISTS (SELECT 1 FROM episodes catalog_episode"),
+            "{sql}"
+        );
+        // The count's own dimension is swapped, so neither presence nor attention is
+        // left in the WHERE clause deciding what gets counted.
+        assert!(
+            !sql.contains("WHERE monitored = {} AND catalog_attention"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("NOT EXISTS (SELECT 1 FROM media_files"),
+            "{sql}"
+        );
+        assert!(sql.contains("catalog_attention.scan_status IN"), "{sql}");
+        assert_eq!(
+            args.len(),
+            3,
+            "library scope, facet, and the monitored filter only: the four file conditions bind nothing, because they are conditions rather than predicates: {sql}"
+        );
     }
 
     #[test]
