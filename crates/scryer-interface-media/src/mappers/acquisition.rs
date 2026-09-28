@@ -106,6 +106,18 @@ pub fn from_search_result(result: IndexerSearchResult) -> IndexerSearchResultPay
         title: result.title,
         link: result.link,
         download_url: result.download_url,
+        download_resources: result
+            .download_resources()
+            .into_iter()
+            .map(|resource| DownloadResourcePayload {
+                url: resource.url,
+                kind: DownloadResourceKindValue::from_application(resource.kind),
+                role: DownloadResourceRoleValue::from_application(resource.role),
+                selection_group: resource.selection_group,
+                file_name: resource.file_name,
+                size_bytes: resource.size_bytes.map(Long::from_u64_saturating),
+            })
+            .collect(),
         source_kind: result
             .source_kind
             .map(DownloadSourceKindValue::from_application),

@@ -156,6 +156,7 @@ fn source_kind_matches_preference(result: &IndexerSearchResult, preferred: &str)
         Some(DownloadSourceKind::TorrentFile | DownloadSourceKind::MagnetUri) => {
             preferred == "torrent"
         }
+        Some(DownloadSourceKind::DownloadUrl) => false,
         None => false,
     }
 }
@@ -1029,6 +1030,7 @@ impl AppUseCase {
             Some(DownloadSourceKind::TorrentFile | DownloadSourceKind::MagnetUri) => {
                 prepared.has_torrent_client
             }
+            Some(DownloadSourceKind::DownloadUrl) => true,
             None => true,
         });
         let requested_episode = resolve_requested_episode(
@@ -1215,6 +1217,7 @@ impl AppUseCase {
                     Some(DownloadSourceKind::TorrentFile | DownloadSourceKind::MagnetUri) => {
                         torrent
                     }
+                    Some(DownloadSourceKind::DownloadUrl) => false,
                     None => true,
                 }
             });

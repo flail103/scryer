@@ -3,7 +3,8 @@ use scryer_application::{
     AcquisitionScopeStatus as AppWantedStatus, ActivityChannel as AppActivityChannel,
     ActivityKind as AppActivityKind, ActivitySeverity as AppActivitySeverity,
     DownloadHistorySortKey as AppDownloadHistorySortKey,
-    DownloadSourceKind as AppDownloadSourceKind,
+    DownloadResourceKind as AppDownloadResourceKind,
+    DownloadResourceRole as AppDownloadResourceRole, DownloadSourceKind as AppDownloadSourceKind,
     DownloadSubmissionPurpose as AppDownloadSubmissionPurpose, JobCategory as AppJobCategory,
     JobKey as AppJobKey, JobRunStatus as AppJobRunStatus, JobScheduleKind as AppJobScheduleKind,
     JobSection as AppJobSection, JobTriggerSource as AppJobTriggerSource,
@@ -81,6 +82,7 @@ impl IntoApplication<AppDownloadSourceKind> for DownloadSourceKindValue {
             Self::NzbUrl => AppDownloadSourceKind::NzbUrl,
             Self::TorrentFile => AppDownloadSourceKind::TorrentFile,
             Self::MagnetUri => AppDownloadSourceKind::MagnetUri,
+            Self::DownloadUrl => AppDownloadSourceKind::DownloadUrl,
         }
     }
 }
@@ -92,6 +94,32 @@ impl FromApplication<AppDownloadSourceKind> for DownloadSourceKindValue {
             AppDownloadSourceKind::NzbUrl => Self::NzbUrl,
             AppDownloadSourceKind::TorrentFile => Self::TorrentFile,
             AppDownloadSourceKind::MagnetUri => Self::MagnetUri,
+            AppDownloadSourceKind::DownloadUrl => Self::DownloadUrl,
+        }
+    }
+}
+
+impl FromApplication<AppDownloadResourceKind> for DownloadResourceKindValue {
+    fn from_application(value: AppDownloadResourceKind) -> Self {
+        match value {
+            AppDownloadResourceKind::Nzb => Self::Nzb,
+            AppDownloadResourceKind::NzbUrl => Self::NzbUrl,
+            AppDownloadResourceKind::TorrentFile => Self::TorrentFile,
+            AppDownloadResourceKind::TorrentUrl => Self::TorrentUrl,
+            AppDownloadResourceKind::TorrentBytes => Self::TorrentBytes,
+            AppDownloadResourceKind::MagnetUri => Self::MagnetUri,
+            AppDownloadResourceKind::DownloadUrl => Self::DownloadUrl,
+        }
+    }
+}
+
+impl FromApplication<AppDownloadResourceRole> for DownloadResourceRoleValue {
+    fn from_application(value: AppDownloadResourceRole) -> Self {
+        match value {
+            AppDownloadResourceRole::Required => Self::Required,
+            AppDownloadResourceRole::Alternative => Self::Alternative,
+            AppDownloadResourceRole::Subtitle => Self::Subtitle,
+            AppDownloadResourceRole::Metadata => Self::Metadata,
         }
     }
 }

@@ -1269,6 +1269,7 @@ impl PrioritizedDownloadClientRouter {
             DownloadSourceKind::NzbUrl => "NZB URL",
             DownloadSourceKind::TorrentFile => "torrent file",
             DownloadSourceKind::MagnetUri => "magnet",
+            DownloadSourceKind::DownloadUrl => "download URL",
         }
     }
 
@@ -1385,6 +1386,11 @@ impl PrioritizedDownloadClientRouter {
             });
             prepared.source_kind = Some(DownloadSourceKind::MagnetUri);
             return Ok(prepared);
+        }
+        if request.source_kind == Some(DownloadSourceKind::DownloadUrl) {
+            // Provider-neutral URLs belong to capable clients (for example a
+            // file-host plugin), not Scryer's bounded NZB/torrent resolvers.
+            return Ok(request.clone());
         }
         Err(AppError::DownloadSubmitUnavailable(
             "The indexer did not resolve this download artifact before client routing.".into(),

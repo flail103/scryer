@@ -33,7 +33,7 @@ pub use notification::{
     PluginNotificationTargetResult, coalesce_media_updates, rich_embed_from_request,
     to_script_environment, to_webhook_json,
 };
-pub const SDK_VERSION: &str = "3.11.0";
+pub const SDK_VERSION: &str = "3.12.0";
 
 pub fn current_sdk_constraint() -> String {
     legacy_sdk_constraint(SDK_VERSION)
@@ -1207,6 +1207,38 @@ pub enum DownloadInputKind {
     TorrentUrl,
     TorrentBytes,
     MagnetUri,
+    /// A provider-neutral URL that the selected download client interprets.
+    /// This may be a file URL or a provider landing page; it does not promise
+    /// that fetching the URL directly returns media bytes.
+    DownloadUrl,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadResourceRole {
+    /// Submit together with every other required resource.
+    #[default]
+    Required,
+    /// One choice in a selection group; do not submit every variant together.
+    Alternative,
+    /// A subtitle sidecar, not a primary media/download input.
+    Subtitle,
+    /// Descriptive sidecar metadata, not a primary media/download input.
+    Metadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PluginDownloadResource {
+    pub url: String,
+    pub kind: DownloadInputKind,
+    #[serde(default)]
+    pub role: DownloadResourceRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -2839,6 +2871,10 @@ pub struct PluginSearchResult {
     pub link: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download_url: Option<String>,
+    /// Additional typed download inputs. `download_url` remains for backward
+    /// compatibility and is authoritative when present.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub download_resources: Vec<PluginDownloadResource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

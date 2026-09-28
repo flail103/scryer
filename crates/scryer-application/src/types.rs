@@ -1338,6 +1338,18 @@ pub struct MediaRequestCounts {
     pub anime: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadResourceKind {
+    Nzb,
+    NzbUrl,
+    TorrentFile,
+    TorrentUrl,
+    TorrentBytes,
+    MagnetUri,
+    DownloadUrl,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PendingImportStatus {
@@ -1937,6 +1949,59 @@ pub enum DownloadSourceKind {
     NzbUrl,
     TorrentFile,
     MagnetUri,
+    /// Provider-neutral URL passed unchanged to a compatible download client.
+    #[serde(rename = "download_url")]
+    DownloadUrl,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadResourceRole {
+    #[default]
+    Required,
+    Alternative,
+    Subtitle,
+    Metadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadResource {
+    pub url: String,
+    pub kind: DownloadResourceKind,
+    #[serde(default)]
+    pub role: DownloadResourceRole,
+    #[serde(default)]
+    pub selection_group: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+}
+
+impl DownloadResource {
+    pub fn is_valid_for_submission(&self) -> bool {
+        self.kind != DownloadResourceKind::DownloadUrl || is_http_download_url(&self.url)
+    }
+}
+
+pub fn is_http_download_url(value: &str) -> bool {
+    reqwest::Url::parse(value.trim()).is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https") && url.host().is_some()
+    })
+}
+
+impl DownloadResourceKind {
+    pub fn source_kind(self) -> DownloadSourceKind {
+        match self {
+            Self::Nzb => DownloadSourceKind::NzbFile,
+            Self::NzbUrl => DownloadSourceKind::NzbUrl,
+            Self::TorrentFile | Self::TorrentUrl | Self::TorrentBytes => {
+                DownloadSourceKind::TorrentFile
+            }
+            Self::MagnetUri => DownloadSourceKind::MagnetUri,
+            Self::DownloadUrl => DownloadSourceKind::DownloadUrl,
+        }
+    }
 }
 
 impl DownloadSourceKind {
@@ -1946,6 +2011,7 @@ impl DownloadSourceKind {
             Self::NzbUrl => "nzb_url",
             Self::TorrentFile => "torrent_file",
             Self::MagnetUri => "magnet_uri",
+            Self::DownloadUrl => "download_url",
         }
     }
 
@@ -1955,6 +2021,7 @@ impl DownloadSourceKind {
             "nzb_url" => Some(Self::NzbUrl),
             "torrent" | "torrent_file" | "torrent_url" | "torrent_bytes" => Some(Self::TorrentFile),
             "magnet" | "magnet_uri" => Some(Self::MagnetUri),
+            "download_url" | "http_url" => Some(Self::DownloadUrl),
             _ => None,
         }
     }
@@ -2244,6 +2311,17 @@ pub fn is_valid_magnet_uri(value: &str) -> bool {
 }
 
 impl IndexerSearchResult {
+    /// Typed resources emitted by a plugin indexer. The application keeps the
+    /// serialized representation in `extra` to avoid altering legacy result
+    /// records; absent or malformed legacy data is treated as no resources.
+    pub fn download_resources(&self) -> Vec<DownloadResource> {
+        self.extra
+            .get("download_resources")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default()
+    }
+
     /// Selects the source that should be submitted to a download client.
     /// Explicit NZB results retain their HTTP source; torrent results prefer
     /// a validated magnet emitted by the plugin.
@@ -2269,23 +2347,71 @@ impl IndexerSearchResult {
                 }
             }
         }
-        self.download_url
+        let resources = self.download_resources();
+        let legacy = self
+            .download_url
             .as_deref()
-            .or(self.link.as_deref())
+            .or_else(|| {
+                if resources.is_empty() {
+                    self.link.as_deref()
+                } else {
+                    None
+                }
+            })
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| {
-                let source_kind = match self.source_kind {
-                    Some(DownloadSourceKind::MagnetUri) => {
-                        DownloadSourceKind::infer_from_hint(Some(value))
-                            .unwrap_or(DownloadSourceKind::TorrentFile)
+                let resource_kind = resources.iter().find(|resource| {
+                    resource.url.trim() == value
+                        && matches!(
+                            resource.role,
+                            DownloadResourceRole::Required | DownloadResourceRole::Alternative
+                        )
+                });
+                let source_kind = if let Some(resource) = resource_kind {
+                    resource.kind.source_kind()
+                } else {
+                    match self.source_kind {
+                        Some(DownloadSourceKind::MagnetUri) => {
+                            DownloadSourceKind::infer_from_hint(Some(value)).unwrap_or_else(|| {
+                                if self.download_url.is_some() {
+                                    DownloadSourceKind::DownloadUrl
+                                } else {
+                                    DownloadSourceKind::TorrentFile
+                                }
+                            })
+                        }
+                        Some(kind) => kind,
+                        None => DownloadSourceKind::infer_from_hint(Some(value)).unwrap_or_else(
+                            || {
+                                if self.download_url.is_some() {
+                                    DownloadSourceKind::DownloadUrl
+                                } else {
+                                    DownloadSourceKind::TorrentFile
+                                }
+                            },
+                        ),
                     }
-                    Some(kind) => kind,
-                    None => DownloadSourceKind::infer_from_hint(Some(value))
-                        .unwrap_or(DownloadSourceKind::TorrentFile),
                 };
                 (value.to_string(), source_kind)
             })
+            .filter(|(url, kind)| {
+                *kind != DownloadSourceKind::DownloadUrl || is_http_download_url(url)
+            });
+        legacy.or_else(|| {
+            resources
+                .into_iter()
+                .find(|resource| {
+                    matches!(
+                        resource.role,
+                        DownloadResourceRole::Required | DownloadResourceRole::Alternative
+                    ) && !resource.url.trim().is_empty()
+                        && resource.is_valid_for_submission()
+                })
+                .map(|resource| {
+                    (resource.url.trim().to_string(), resource.kind.source_kind())
+                })
+        })
     }
 }
 
