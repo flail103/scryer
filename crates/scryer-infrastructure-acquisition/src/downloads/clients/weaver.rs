@@ -190,35 +190,40 @@ impl WeaverSchemaFeature {
 /// Runtime errors with an extensions.code never enter this compatibility path.
 fn classify_weaver_schema_error(message: &str) -> Option<WeaverSchemaFeature> {
     let normalized = message.to_ascii_lowercase();
+    let field = ["unknown field ", "cannot query field "]
+        .into_iter()
+        .find_map(|prefix| normalized.split_once(prefix).map(|(_, tail)| tail))
+        .and_then(|tail| {
+            tail.trim_start()
+                .trim_start_matches('"')
+                .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+                .next()
+        });
+    if let Some(field) = field {
+        // Match the complete GraphQL identifier so historyItems cannot be
+        // mistaken for historyItem, including diagnostics without quotes.
+        return match field {
+            "systemmetrics" => Some(WeaverSchemaFeature::SystemMetrics),
+            "queueitems" => Some(WeaverSchemaFeature::QueueItems),
+            "attributeequals" => Some(WeaverSchemaFeature::AttributeEquals),
+            "historyitem" => Some(WeaverSchemaFeature::HistoryItem),
+            "historyitems" => Some(WeaverSchemaFeature::HistoryItems),
+            "postedfilenames" => Some(WeaverSchemaFeature::PostedFileNames),
+            "passwordcandidates" => Some(WeaverSchemaFeature::PasswordCandidates),
+            "accepted" => Some(WeaverSchemaFeature::SubmissionAccepted),
+            "status" => Some(WeaverSchemaFeature::SubmissionStatus),
+            "message" => Some(WeaverSchemaFeature::SubmissionMessage),
+            "jobid" => Some(WeaverSchemaFeature::SubmissionJobId),
+            "errorcode" => Some(WeaverSchemaFeature::SubmissionErrorCode),
+            "pausequeueitem" => Some(WeaverSchemaFeature::PauseQueueItem),
+            "resumequeueitem" => Some(WeaverSchemaFeature::ResumeQueueItem),
+            "reprocessjob" => Some(WeaverSchemaFeature::ReprocessJob),
+            "removehistoryitems" => Some(WeaverSchemaFeature::RemoveHistoryItems),
+            "cancelqueueitem" => Some(WeaverSchemaFeature::CancelQueueItem),
+            _ => None,
+        };
+    }
     [
-        (
-            "unknown field \"systemmetrics\"",
-            WeaverSchemaFeature::SystemMetrics,
-        ),
-        (
-            "unknown field \"queueitems\"",
-            WeaverSchemaFeature::QueueItems,
-        ),
-        (
-            "unknown field \"attributeequals\"",
-            WeaverSchemaFeature::AttributeEquals,
-        ),
-        (
-            "unknown field \"historyitem\"",
-            WeaverSchemaFeature::HistoryItem,
-        ),
-        (
-            "unknown field \"historyitems\"",
-            WeaverSchemaFeature::HistoryItems,
-        ),
-        (
-            "unknown field \"postedfilenames\"",
-            WeaverSchemaFeature::PostedFileNames,
-        ),
-        (
-            "unknown field \"passwordcandidates\"",
-            WeaverSchemaFeature::PasswordCandidates,
-        ),
         (
             "unknown type \"submitnzbinput\"",
             WeaverSchemaFeature::SubmitNzbInput,
@@ -228,40 +233,8 @@ fn classify_weaver_schema_error(message: &str) -> Option<WeaverSchemaFeature> {
             WeaverSchemaFeature::SubmitInputArgument,
         ),
         (
-            "unknown field \"accepted\"",
-            WeaverSchemaFeature::SubmissionAccepted,
-        ),
-        (
-            "unknown field \"status\"",
-            WeaverSchemaFeature::SubmissionStatus,
-        ),
-        (
-            "unknown field \"message\"",
-            WeaverSchemaFeature::SubmissionMessage,
-        ),
-        (
-            "unknown field \"jobid\"",
-            WeaverSchemaFeature::SubmissionJobId,
-        ),
-        (
-            "unknown field \"errorcode\"",
-            WeaverSchemaFeature::SubmissionErrorCode,
-        ),
-        (
-            "unknown field \"pausequeueitem\"",
-            WeaverSchemaFeature::PauseQueueItem,
-        ),
-        (
-            "unknown field \"resumequeueitem\"",
-            WeaverSchemaFeature::ResumeQueueItem,
-        ),
-        (
             "unknown argument \"password\"",
             WeaverSchemaFeature::PasswordArgument,
-        ),
-        (
-            "unknown field \"reprocessjob\"",
-            WeaverSchemaFeature::ReprocessJob,
         ),
         (
             "unknown argument \"deletefiles\"",
@@ -270,14 +243,6 @@ fn classify_weaver_schema_error(message: &str) -> Option<WeaverSchemaFeature> {
         (
             "variable \"$deletefiles\"",
             WeaverSchemaFeature::DeleteFilesVariable,
-        ),
-        (
-            "unknown field \"removehistoryitems\"",
-            WeaverSchemaFeature::RemoveHistoryItems,
-        ),
-        (
-            "unknown field \"cancelqueueitem\"",
-            WeaverSchemaFeature::CancelQueueItem,
         ),
     ]
     .into_iter()
@@ -3505,26 +3470,60 @@ mod tests {
 
     #[test]
     fn schema_compatibility_is_classified_at_decode_and_respects_runtime_codes() {
-        let body = r#"{"errors":[{"message":"Unknown field \"queueItems\""}]}"#;
+        for (message, expected) in [
+            (
+                "Unknown field \"queueItems\"",
+                super::WeaverSchemaFeature::QueueItems,
+            ),
+            (
+                "Unknown field historyItem",
+                super::WeaverSchemaFeature::HistoryItem,
+            ),
+            (
+                "Cannot query field \"historyItem\" on type \"Query\".",
+                super::WeaverSchemaFeature::HistoryItem,
+            ),
+            (
+                "Unknown field \"historyItems\"",
+                super::WeaverSchemaFeature::HistoryItems,
+            ),
+        ] {
+            let body = json!({"errors": [{"message": message}]}).to_string();
+            let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
+                reqwest::StatusCode::OK,
+                &body,
+            )
+            .unwrap_err();
+            assert!(super::is_weaver_schema_error(&error, expected), "{message}");
+        }
+        let body = json!({"errors": [{"message": "Unknown field historyItemFuture"}]}).to_string();
         let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
             reqwest::StatusCode::OK,
-            body,
-        )
-        .unwrap_err();
-        assert!(super::is_weaver_schema_error(
-            &error,
-            super::WeaverSchemaFeature::QueueItems
-        ));
-        let coded = r#"{"errors":[{"message":"Unknown field \"queueItems\"","extensions":{"code":"NOT_FOUND"}}]}"#;
-        let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
-            reqwest::StatusCode::OK,
-            coded,
+            &body,
         )
         .unwrap_err();
         assert!(!super::is_weaver_schema_error(
             &error,
-            super::WeaverSchemaFeature::QueueItems
+            super::WeaverSchemaFeature::HistoryItem
         ));
+        for code in ["NOT_FOUND", "CONFLICT", "FUTURE_RUNTIME_CODE"] {
+            let body = json!({
+                "errors": [{
+                    "message": "Cannot query field \"historyItem\" on type \"Query\".",
+                    "extensions": {"code": code}
+                }]
+            })
+            .to_string();
+            let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
+                reqwest::StatusCode::OK,
+                &body,
+            )
+            .unwrap_err();
+            assert!(
+                !super::is_weaver_schema_error(&error, super::WeaverSchemaFeature::HistoryItem),
+                "{code}"
+            );
+        }
     }
 
     #[test]

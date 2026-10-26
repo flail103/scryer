@@ -2039,7 +2039,7 @@ fn read_encrypted_chunk_len(reader: &mut impl Read) -> AppResult<Option<usize>> 
 }
 
 fn app_error_to_io_error(error: AppError) -> io::Error {
-    io::Error::other(error.to_string())
+    io::Error::other(error)
 }
 
 #[cfg(feature = "runtime-backups")]
@@ -2052,7 +2052,16 @@ where
         if let Some(app_error) = source.downcast_ref::<AppError>() {
             return app_error.clone();
         }
-        current = source.source();
+        // io::Error::source skips its immediate custom payload. Walk that
+        // payload explicitly so AEAD errors survive nested IO and tar wrappers.
+        current = if let Some(io_error) = source.downcast_ref::<io::Error>() {
+            io_error
+                .get_ref()
+                .map(|inner| inner as &(dyn std::error::Error + 'static))
+                .or_else(|| source.source())
+        } else {
+            source.source()
+        };
     }
     // Unknown streaming-library diagnostics are relayed without interpreting prose.
     AppError::Validation(format!("{fallback}: {error}"))
@@ -2670,6 +2679,37 @@ mod tests {
 
     #[cfg(feature = "runtime-backups")]
     #[test]
+    fn streaming_backup_errors_preserve_typed_reasons_through_nested_io() {
+        for reason in [
+            crate::error_reasons::security::FAILED_DECRYPT_BACKUP_BUNDLE,
+            crate::error_reasons::security::ENCRYPTED_BACKUP_PAYLOAD_TRUNCATED_INVALID,
+            crate::error_reasons::security::ENCRYPTED_BACKUP_PAYLOAD_LENGTH_INVALID,
+        ] {
+            let original = AppError::validation_refused(reason, "rewritten diagnostic");
+            let wrapped = io::Error::other(app_error_to_io_error(original.clone()));
+            let recovered = map_streaming_bundle_error(wrapped, "outer diagnostic");
+            assert_eq!(recovered.validation_reason(), Some(reason));
+            assert_eq!(recovered.to_string(), original.to_string());
+        }
+        let repository = AppError::repository_failure(
+            crate::RepositoryErrorKind::StartupWindowExhausted,
+            "rewritten repository diagnostic",
+        );
+        let recovered =
+            map_streaming_bundle_error(app_error_to_io_error(repository), "outer diagnostic");
+        assert_eq!(
+            recovered.repository_kind(),
+            Some(crate::RepositoryErrorKind::StartupWindowExhausted)
+        );
+
+        let untyped = io::Error::other("validation: untyped provider diagnostic");
+        let recovered = map_streaming_bundle_error(untyped, "outer diagnostic");
+        assert!(matches!(recovered, AppError::Validation(_)));
+        assert_eq!(recovered.reason(), None);
+    }
+
+    #[cfg(feature = "runtime-backups")]
+    #[test]
     fn encrypted_backup_rejects_wrong_passphrase() {
         let temp = tempfile::tempdir().expect("tempdir");
         let bundle_path = temp.path().join("wrong-pass.scryer-backup.enc");
@@ -2677,6 +2717,10 @@ mod tests {
 
         let error = inspect_backup_bundle(&bundle_path, Some("wrong"))
             .expect_err("wrong password should fail");
+        assert_eq!(
+            error.validation_reason(),
+            Some(crate::error_reasons::security::FAILED_DECRYPT_BACKUP_BUNDLE)
+        );
         assert!(
             error
                 .to_string()
@@ -2763,6 +2807,10 @@ mod tests {
 
         let error = inspect_backup_bundle(&bundle_path, Some("correct"))
             .expect_err("truncated chunk should fail");
+        assert_eq!(
+            error.validation_reason(),
+            Some(crate::error_reasons::security::ENCRYPTED_BACKUP_PAYLOAD_TRUNCATED_INVALID)
+        );
         assert!(
             error
                 .to_string()
@@ -2950,6 +2998,10 @@ mod tests {
 
         let error = inspect_backup_bundle(&bundle_path, Some("correct"))
             .expect_err("oversized chunk should fail");
+        assert_eq!(
+            error.validation_reason(),
+            Some(crate::error_reasons::security::ENCRYPTED_BACKUP_PAYLOAD_LENGTH_INVALID)
+        );
         assert!(error.to_string().contains("payload length is invalid"));
     }
 

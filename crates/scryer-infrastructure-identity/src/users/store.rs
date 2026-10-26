@@ -1853,8 +1853,8 @@ mod tests {
                 result.expect("cancel pending invite or unlink with a fallback");
             } else {
                 assert!(
-                    matches!(result, Err(AppError::Validation(ref message))
-                        if message == "cannot remove the last available sign-in method"),
+                    matches!(result, Err(AppError::ValidationRefused { reason, .. })
+                        if reason == crate::error_reasons::IDENTITY_LAST_SIGN_IN_METHOD_REQUIRED),
                     "{id}: {result:?}"
                 );
             }

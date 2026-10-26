@@ -1166,7 +1166,7 @@ fn history_queue_item_from_nzbget_entry(entry: &Value) -> Option<DownloadQueueIt
         .unwrap_or("");
     let status_upper = status.to_ascii_uppercase();
 
-    let (state, attention_reason) = map_history_state(&status_upper, entry)?;
+    let (state, attention_reason, password_failure) = map_history_state(&status_upper, entry)?;
     let history_ts = extract_i64_value(entry.get("HistoryTime").or_else(|| entry.get("time")));
     let title_name = entry
         .get("Name")
@@ -1181,7 +1181,7 @@ fn history_queue_item_from_nzbget_entry(entry: &Value) -> Option<DownloadQueueIt
     let scryer_parameters = extract_nzbget_parameters(entry);
 
     Some(DownloadQueueItem {
-        attention_reason_code: None,
+        attention_reason_code: password_failure.map(|failure| failure.reason_code().to_string()),
         id: nzb_id.to_string(),
         title_id: scryer_parameters.title_id,
         episode_id: None,
@@ -1741,7 +1741,7 @@ impl DownloadClient for NzbgetDownloadClient {
             .to_ascii_uppercase();
         // A recovered or stale cleanup claim must recheck the current state.
         // None is reserved for actual absence; a retained job must stop cleanup.
-        if !map_history_state(&status, entry).is_some_and(|(state, _)| {
+        if !map_history_state(&status, entry).is_some_and(|(state, _, _)| {
             matches!(
                 state,
                 DownloadQueueState::Completed | DownloadQueueState::Failed
@@ -1876,7 +1876,7 @@ fn completed_download_from_nzbget_history_entry(
     let status_upper = status.to_ascii_uppercase();
 
     if !map_history_state(&status_upper, entry)
-        .is_some_and(|(state, _)| state == DownloadQueueState::Completed)
+        .is_some_and(|(state, _, _)| state == DownloadQueueState::Completed)
     {
         return None;
     }
@@ -2301,12 +2301,16 @@ fn extract_remaining_seconds_from_entry(entry: &serde_json::Map<String, Value>) 
 fn map_history_state(
     status_upper: &str,
     entry: &serde_json::Map<String, Value>,
-) -> Option<(DownloadQueueState, Option<String>)> {
+) -> Option<(
+    DownloadQueueState,
+    Option<String>,
+    Option<scryer_domain::DownloadPasswordFailure>,
+)> {
     use DownloadQueueState::{Completed, Failed, Warning};
     // An unreadable state is retained for attention: never importable, never
     // cleanup-authorized, and never hidden as if the job were absent.
     if let Err(error) = validate_nzbget_history_state(entry) {
-        return Some((Warning, Some(nzbget_state_problem_message(error))));
+        return Some((Warning, Some(nzbget_state_problem_message(error)), None));
     }
     let field = |upper, lower| {
         history_field_str(entry, upper, lower)
@@ -2316,7 +2320,8 @@ fn map_history_state(
     let delete = field("DeleteStatus", "deleteStatus");
     let mark = field("MarkStatus", "markStatus");
     if delete == "MANUAL" {
-        return (mark == "BAD").then(|| (Failed, Some("marked bad and manually deleted".into())));
+        return (mark == "BAD")
+            .then(|| (Failed, Some("marked bad and manually deleted".into()), None));
     }
     let par = field("ParStatus", "parStatus");
     let unpack = field("UnpackStatus", "unpackStatus");
@@ -2331,6 +2336,7 @@ fn map_history_state(
                     .message()
                     .into(),
             ),
+            Some(scryer_domain::DownloadPasswordFailure::Required),
         ));
     }
     let mut decision = (Completed, None);
@@ -2360,6 +2366,7 @@ fn map_history_state(
         return Some((
             Failed,
             Some(format!("NZBGet terminal failure: {status_upper}")),
+            None,
         ));
     }
     if decision.0 == Completed {
@@ -2388,7 +2395,7 @@ fn map_history_state(
             _ => decision,
         };
     }
-    Some(decision)
+    Some((decision.0, decision.1, None))
 }
 
 /// Reject incomplete or unrecognized observations instead of treating an
