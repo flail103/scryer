@@ -1228,7 +1228,7 @@ fn classify_token(
             strong_anchor: false,
         });
     }
-    if parse_version(normalized).is_some() {
+    if matches!(split_episode_revision(normalized), Some(("", _))) {
         roles.push(RoleCandidate {
             role: TokenRole::VersionMarker,
             confidence: 92,
@@ -6469,6 +6469,9 @@ fn defused_episode_label(token: &str) -> Option<String> {
     None
 }
 
+/// The one splitter for a `vN` revision suffix: an episode token ("S01E02V2",
+/// "02V2"), or a standalone marker ("V2", empty episode part). The revision
+/// must be all digits and at least 1; "V0" is malformed everywhere.
 fn split_episode_revision(token: &str) -> Option<(&str, u32)> {
     let (episode, version) = token.rsplit_once('V')?;
     if version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -6559,7 +6562,10 @@ fn parse_season_keyword_episode_at(
     };
     let episode_token = tokens.get(episode_index)?;
     let episode = if episode_token.separator_before == SeparatorKind::Hyphen {
-        parse_numeric_token(episode_token.normalized.as_str())?
+        let normalized = episode_token.normalized.as_str();
+        parse_numeric_token(
+            split_episode_revision(normalized).map_or(normalized, |(episode, _)| episode),
+        )?
     } else {
         dot_split_episode_after_season(tokens, episode_index)?
     };
@@ -8336,7 +8342,9 @@ fn parse_anime_absolute_at(
             return Some((vec![number], None));
         }
     }
-    if let Some((number, version)) = parse_versioned_absolute(token) {
+    if let Some((number, version)) = split_episode_revision(token)
+        .and_then(|(number, version)| Some((parse_numeric_token(number)?, version)))
+    {
         return Some((vec![number], Some(version)));
     }
     None
@@ -8494,15 +8502,6 @@ fn parse_numeric_token(token: &str) -> Option<u32> {
     (!token.is_empty() && token.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| token.parse::<u32>().ok())
         .flatten()
-}
-
-fn parse_version(token: &str) -> Option<u32> {
-    token.strip_prefix('V')?.parse::<u32>().ok()
-}
-
-fn parse_versioned_absolute(token: &str) -> Option<(u32, u32)> {
-    let (number, version) = token.split_once('V')?;
-    Some((number.parse::<u32>().ok()?, version.parse::<u32>().ok()?))
 }
 
 fn is_checksum(token: &str) -> bool {
