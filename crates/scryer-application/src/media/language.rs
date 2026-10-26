@@ -246,7 +246,7 @@ pub fn normalize_search_languages(
     let mut normalized = Vec::new();
     for language in languages {
         let code = normalize_search_language_code(&language).ok_or_else(|| {
-            crate::AppError::Validation(format!(
+            crate::AppError::validation_refused(crate::error_reasons::media::SEARCH_LANGUAGE_CHOOSE_LANGUAGE_OFFERED_SEARCH_LANGUAGE_PICKER_UNKNOWN, format!(
                 "unknown search language {:?}; choose a language offered by the search language picker",
                 language.trim()
             ))
@@ -256,9 +256,10 @@ pub fn normalize_search_languages(
         }
     }
     if normalized.len() > MAX_SEARCH_LANGUAGES {
-        return Err(crate::AppError::Validation(format!(
-            "at most {MAX_SEARCH_LANGUAGES} search languages are allowed"
-        )));
+        return Err(crate::AppError::validation_refused(
+            crate::error_reasons::media::MOST_SEARCH_LANGUAGES_ALLOWED,
+            format!("at most {MAX_SEARCH_LANGUAGES} search languages are allowed"),
+        ));
     }
     Ok(normalized)
 }

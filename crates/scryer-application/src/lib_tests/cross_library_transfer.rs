@@ -1196,7 +1196,10 @@ async fn an_unmappable_episode_blocks_the_merge_before_anything_starts() {
     assert!(
         matches!(
             error,
-            AppError::LocationPlanRefused { .. } | AppError::Validation(_)
+            AppError::LocationPlanRefused { .. }
+                | AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
         ),
         "unexpected error: {error:?}"
     );

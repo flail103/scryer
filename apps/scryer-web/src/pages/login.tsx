@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useTheme } from "next-themes";
@@ -560,7 +561,7 @@ export default function LoginPage() {
       }
       setJellyfinMfaEnrollment(data.totpEnrollmentStart);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("auth.mfaSetupStartFailed"));
+      setError(userFacingGraphQlErrorMessage(err, t("auth.mfaSetupStartFailed"), t));
     } finally {
       setJellyfinMfaBusy(false);
     }
@@ -658,7 +659,7 @@ export default function LoginPage() {
       setJellyfinMfaEnrollmentCode("");
       adoptCompletedLogin(data.completeLoginMfaEnrollment.login);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("auth.mfaSetupCompleteFailed"));
+      setError(userFacingGraphQlErrorMessage(err, t("auth.mfaSetupCompleteFailed"), t));
     } finally {
       setJellyfinMfaBusy(false);
     }

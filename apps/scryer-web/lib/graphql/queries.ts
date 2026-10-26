@@ -512,6 +512,7 @@ const DOWNLOAD_QUEUE_ITEM_FIELDS = `
     lastUpdatedAt
     attentionRequired
     attentionReason
+    attentionReasonCode
     passwordFailureCode
     passwordRetryImportId
     heldImportSources {
@@ -778,6 +779,7 @@ const TITLE_EVENT_FIELDS = `
     clientId
     clientName
     failureReason
+    failureReasonCode
     blocklistReason
     dataJson
     occurredAt
@@ -4775,6 +4777,7 @@ export const titleHistoryQuery = `query TitleHistory($filter: TitleHistoryFilter
       skipReason
       retryRequiresPassword
       failureReason
+    failureReasonCode
       blocklistReason
       sourcePath
       destPath

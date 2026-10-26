@@ -81,13 +81,13 @@ impl ImportRepository for ImportStore {
                 let row = SqlRuntime::fetch_optional(SqlExec::Tx(tx),
                     "SELECT canonical_download_id, payload_json FROM imports WHERE id = {}",
                     &[SqlArg::Text(import_id.clone())]).await?
-                    .ok_or_else(|| AppError::NotFound("import not found".into()))?;
+                    .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::WORKFLOW_IMPORT_NOT_FOUND, "import not found"))?;
                 if let Some(download_id) = row.opt_text("canonical_download_id")? {
                     lock_retry_download(tx, &download_id).await?;
                     if pending && SqlRuntime::fetch_optional(SqlExec::Tx(tx),
                         "SELECT download_id FROM download_cleanup WHERE download_id = {} AND (lease_until IS NOT NULL OR payload_checkpoint IS NOT NULL OR (attempts > 0 AND (status <> 'completed' OR outcome IS NULL OR outcome NOT IN ('policy_retained', 'client_removed', 'client_unresolved', 'cleanup_abandoned', 'entry_absent_payload_unverified'))))",
                         &[SqlArg::Text(download_id)]).await?.is_some() {
-                        return Err(AppError::Validation("source cleanup already owns this download".into()));
+                        return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_SOURCE_CLEANUP_ALREADY_CLAIMED, "source cleanup already owns this download"));
                     }
                 }
                 let mut payload: serde_json::Value = serde_json::from_str(&import_payload_json(&row)?)
@@ -184,8 +184,7 @@ impl ImportRepository for ImportStore {
                 // either every hold or none of them. Without a canonical
                 // download there is no lock to take, so nothing is released.
                 let Some(download_id) = canonical_download_id.as_deref() else {
-                    return Err(AppError::Validation(
-                        "this download has no stable identity yet; its sources stay held".into()));
+                    return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_DOWNLOAD_IDENTITY_UNRESOLVED, "this download has no stable identity yet; its sources stay held"));
                 };
                 lock_retry_download(tx, download_id).await?;
                 let rows = SqlRuntime::fetch_all(SqlExec::Tx(tx),
@@ -200,27 +199,23 @@ impl ImportRepository for ImportStore {
                     let id = row.text("id")?;
                     let status = row.text("status")?;
                     if matches!(status.as_str(), "pending" | "running" | "processing" | "queued") {
-                        return Err(AppError::Validation(
-                            "this download is still being imported; release its sources once that finishes".into()));
+                        return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_IMPORT_RUNNING, "this download is still being imported; release its sources once that finishes"));
                     }
                     let listed = import_ids.contains(&id);
                     let held = archive_import_has_pending_sources(row)?;
                     if listed {
                         if status != "completed" {
-                            return Err(AppError::Validation(
-                                "the import changed while its release was requested; refresh the queue".into()));
+                            return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_IMPORT_RELEASE_STALE, "the import changed while its release was requested; refresh the queue"));
                         }
                         if held {
                             releasable.push(id);
                         }
                     } else if held {
-                        return Err(AppError::Validation(
-                            "another import of this download holds its sources; refresh the queue".into()));
+                        return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_IMPORT_SOURCES_HELD, "another import of this download holds its sources; refresh the queue"));
                     }
                 }
                 if import_ids.iter().any(|id| !rows.iter().any(|row| row.text("id").is_ok_and(|row_id| &row_id == id))) {
-                    return Err(AppError::Validation(
-                        "the import changed while its release was requested; refresh the queue".into()));
+                    return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_IMPORT_RELEASE_STALE, "the import changed while its release was requested; refresh the queue"));
                 }
                 for id in releasable {
                     let row = rows.iter().find(|row| row.text("id").is_ok_and(|row_id| row_id == id))

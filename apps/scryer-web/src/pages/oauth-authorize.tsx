@@ -1,3 +1,6 @@
+import { useSearchParams } from "react-router";
+import { useLanguage } from "@/lib/hooks/use-language";
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -100,6 +103,8 @@ function loginUrl() {
 }
 
 export default function OAuthAuthorizePage() {
+  const [searchParams] = useSearchParams();
+  const { t } = useLanguage(searchParams);
   const search = window.location.search;
   const request = useMemo(() => oauthAuthorizationRequestFromSearch(search), [search]);
   const [busy, setBusy] = useState(false);
@@ -177,7 +182,7 @@ export default function OAuthAuthorizePage() {
           setAuthorizationScope(null);
           setActorUsername(null);
           setRequestValidationError(
-            clientResult.error?.message ?? "This OAuth request has an invalid client or redirect URI.",
+            userFacingGraphQlErrorMessage(clientResult.error, t("error.fallback.thisOAuthRequestHasAnInvalidClientOrRedirectURI"), t),
           );
         }
         if (actorVerificationFailed) {
@@ -212,9 +217,7 @@ export default function OAuthAuthorizePage() {
           if (cancelled) return;
           setCompletingAuthorization(false);
           setError(
-            replayError instanceof Error
-              ? replayError.message
-              : "Unable to authorize this integration.",
+            userFacingGraphQlErrorMessage(replayError, t("error.fallback.unableToAuthorizeThisIntegration"), t),
           );
           return;
         }
@@ -229,7 +232,7 @@ export default function OAuthAuthorizePage() {
           setError("Your session is no longer fresh. Sign in again to continue.");
           return;
         }
-        setError(outcome.message);
+        setError(userFacingGraphQlErrorMessage(outcome, "", t));
       } catch {
         if (!cancelled) {
           setCompletingAuthorization(false);
@@ -247,7 +250,7 @@ export default function OAuthAuthorizePage() {
     return () => {
       cancelled = true;
     };
-  }, [actorValidationRetry, request, token]);
+  }, [actorValidationRetry, request, token, t]);
 
   const decide = async (approved: boolean) => {
     setBusy(true);
@@ -286,10 +289,10 @@ export default function OAuthAuthorizePage() {
         setError("Your session is no longer fresh. Sign in again to continue.");
         return;
       }
-      setError(outcome.message);
+      setError(userFacingGraphQlErrorMessage(outcome, "", t));
     } catch (err) {
       clearPendingOAuthDecision();
-      setError(err instanceof Error ? err.message : "Unable to authorize this integration.");
+      setError(userFacingGraphQlErrorMessage(err, t("error.fallback.unableToAuthorizeThisIntegration"), t));
     } finally {
       setBusy(false);
     }

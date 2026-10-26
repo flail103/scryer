@@ -38,8 +38,8 @@ const DEFAULT_SECURITY_SETTINGS: SecuritySettings = {
   envOverrideDescription: null,
 };
 
-function errorMessage(error: unknown, fallback: string) {
-  return userFacingGraphQlErrorMessage(error, fallback);
+function errorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]) {
+  return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
 function parsePasswordMinLengthDraft(value: string): number | null {
@@ -138,7 +138,7 @@ export function SettingsSecurityContainer() {
       } catch (error) {
         if (!cancelled) {
           setSettings(DEFAULT_SECURITY_SETTINGS);
-          toast.error(errorMessage(error, t("settings.securityLoadFailed")));
+          toast.error(errorMessage(error, t("settings.securityLoadFailed"), t));
         }
       } finally {
         if (!cancelled) {
@@ -232,7 +232,7 @@ export function SettingsSecurityContainer() {
       }
     } catch (error) {
       setPasswordMinLengthDraft(String(settingsRef.current.passwordMinLength));
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       passwordMinLengthSaveToastRequestedRef.current = false;
       setSaveBusy(false);
@@ -376,7 +376,7 @@ export function SettingsSecurityContainer() {
       setConfirmPassword("");
       setConfirmError(null);
     } catch (error) {
-      const saveErrorMessage = errorMessage(error, t("settings.securitySaveFailed"));
+      const saveErrorMessage = errorMessage(error, t("settings.securitySaveFailed"), t);
       if (saveErrorMessage === DEFAULT_ADMIN_PASSWORD_FORM_LOGIN_ERROR) {
         openSetPasswordDialog();
         return;
@@ -445,7 +445,7 @@ export function SettingsSecurityContainer() {
         .toPromise();
       if (result.error) throw result.error;
     } catch (error) {
-      setSetPasswordError(errorMessage(error, t("status.failedToUpdate")));
+      setSetPasswordError(errorMessage(error, t("status.failedToUpdate"), t));
       setConfirmBusy(false);
       return;
     }
@@ -506,7 +506,7 @@ export function SettingsSecurityContainer() {
       setDisableConfirmOpen(false);
     } catch (error) {
       setDisableConfirmOpen(true);
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setConfirmBusy(false);
     }
@@ -561,7 +561,7 @@ export function SettingsSecurityContainer() {
         window.location.reload();
       }
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -601,7 +601,7 @@ export function SettingsSecurityContainer() {
       setSettings(nextSettings);
       toast.success(t("settings.securityPreferenceSaved"));
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -644,7 +644,7 @@ export function SettingsSecurityContainer() {
       setSettings(nextSettings);
       toast.success(t("settings.securityPreferenceSaved"));
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -683,7 +683,7 @@ export function SettingsSecurityContainer() {
       setSettings(nextSettings);
       toast.success(t("settings.securityPreferenceSaved"));
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -720,7 +720,7 @@ export function SettingsSecurityContainer() {
       setSettings(nextSettings);
       toast.success(t("settings.securityPreferenceSaved"));
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -758,7 +758,7 @@ export function SettingsSecurityContainer() {
       setSettings(nextSettings);
       toast.success(t("settings.securityPreferenceSaved"));
     } catch (error) {
-      toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+      toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
     } finally {
       setSaveBusy(false);
     }
@@ -809,7 +809,7 @@ export function SettingsSecurityContainer() {
         toast.success(t("settings.securityPreferenceSaved"));
       } catch (error) {
         setSessionDurationDraft(String(settingsRef.current.sessionDurationDays));
-        toast.error(errorMessage(error, t("settings.securitySaveFailed")));
+        toast.error(errorMessage(error, t("settings.securitySaveFailed"), t));
       } finally {
         setSaveBusy(false);
       }

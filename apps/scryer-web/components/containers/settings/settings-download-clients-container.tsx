@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -157,8 +158,8 @@ export function SettingsDownloadClientsContainer({
   const providerCatalogVersionRef = useRef(providerCatalogVersion);
 
   const getDownloadClientErrorMessage = useCallback(
-    (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback),
-    [],
+    (error: unknown, fallback: string) => (userFacingGraphQlErrorMessage(error, fallback, t)),
+    [t],
   );
 
   const resetDownloadClientDraft = useCallback(() => {
@@ -191,7 +192,7 @@ export function SettingsDownloadClientsContainer({
       setSettingsDownloadClients(clients);
       setDownloadClientOrder(clients.map((c) => c.id));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -252,7 +253,7 @@ export function SettingsDownloadClientsContainer({
         setDownloadClientRoutingLoaded(true);
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -347,7 +348,7 @@ export function SettingsDownloadClientsContainer({
           [scope]: previousOrder,
         }));
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -391,7 +392,7 @@ export function SettingsDownloadClientsContainer({
         setProxyConfigs(data?.proxyConfigs || []);
       } catch (error) {
         setDownloadClientTypeOptions(buildDownloadClientTypeOptions([]));
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       }
     };
     void load();
@@ -407,7 +408,7 @@ export function SettingsDownloadClientsContainer({
 
     providerCatalogVersionRef.current = providerCatalogVersion;
     void refreshProviderTypes().catch((error: unknown) => {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     });
   }, [providerCatalogVersion, refreshProviderTypes, setGlobalStatus, t]);
 
@@ -699,7 +700,7 @@ export function SettingsDownloadClientsContainer({
       await refreshDownloadClients();
     } catch (error) {
       setDownloadClientOrder(currentOrder);
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setIsSavingOrder(false);
     }
@@ -786,7 +787,7 @@ export function SettingsDownloadClientsContainer({
       void onDownloadClientsChanged?.();
       await refreshDownloadClients();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingDownloadClientId(null);
     }
@@ -825,7 +826,7 @@ export function SettingsDownloadClientsContainer({
         setAwaitingBaselineSync(true);
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingDownloadClientId(null);
       setPendingDeleteDownloadClient(null);

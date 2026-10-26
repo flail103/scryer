@@ -93,8 +93,7 @@ export function TitleHistoryModal({
           setError(
             userFacingGraphQlErrorMessage(
               result.error,
-              t("history.loadError"),
-            ),
+              t("history.loadError"), t),
           );
           return;
         }
@@ -112,8 +111,7 @@ export function TitleHistoryModal({
         setError(
           userFacingGraphQlErrorMessage(
             requestError,
-            t("history.loadError"),
-          ),
+            t("history.loadError"), t),
         );
       } finally {
         if (sequence === requestSequence.current) setLoading(false);

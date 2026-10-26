@@ -1307,53 +1307,6 @@ export function orderedCheckpoints(
   );
 }
 
-const STALE_PLAN_MARKERS = [
-  "no longer matches",
-  "fresh preview",
-  "stale_plan",
-];
-
-/**
- * Whether a failed `startLocationOperation` means "the plan moved under you".
- * Prefer {@link recognizeStartRefusal}: this reads the prose, which is the
- * fallback for a server (or a transport) that did not carry the refusal code.
- */
-export function isStalePlanMessage(message: string | null | undefined): boolean {
-  if (!message) {
-    return false;
-  }
-  const normalized = message.toLowerCase();
-  return STALE_PLAN_MARKERS.some((marker) => normalized.includes(marker));
-}
-
-/** Whether a failed start means blocked titles are still selected (FR-086). */
-export function isBlockedSelectionMessage(
-  message: string | null | undefined,
-): boolean {
-  if (!message) {
-    return false;
-  }
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("blocked_items") ||
-    normalized.includes("still need a decision")
-  );
-}
-
-/** Whether a failed start means the destination measured too small (FR-080). */
-export function isInsufficientSpaceMessage(
-  message: string | null | undefined,
-): boolean {
-  if (!message) {
-    return false;
-  }
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("insufficient_space") ||
-    normalized.includes("enough free space")
-  );
-}
-
 /**
  * Why the server refused to start a confirmed plan. These are the application's
  * own refusal codes, carried on the GraphQL error as
@@ -1397,30 +1350,9 @@ export function startRefusalCodeFromError(
   return null;
 }
 
-/**
- * Why a start was refused: the server's code when it sent one, and the message
- * prose otherwise. The prose path exists because a refusal that loses its
- * extensions is still a refusal the dialog must answer with a fresh preview
- * rather than a raw sentence about fingerprints.
- */
-export function recognizeStartRefusal(
-  error: unknown,
-  message?: string | null,
-): LocationRefusalCode | null {
-  const code = startRefusalCodeFromError(error);
-  if (code) {
-    return code;
-  }
-  if (isStalePlanMessage(message)) {
-    return "stale_plan";
-  }
-  if (isBlockedSelectionMessage(message)) {
-    return "blocked_items";
-  }
-  if (isInsufficientSpaceMessage(message)) {
-    return "insufficient_space";
-  }
-  return null;
+/** The stable refusal carried by the public boundary, independent of wording. */
+export function recognizeStartRefusal(error: unknown, _message?: string | null): LocationRefusalCode | null {
+  return startRefusalCodeFromError(error);
 }
 
 /**

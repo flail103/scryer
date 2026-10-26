@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 
 import * as React from "react";
 import { ManualDiscSelectionControl } from "./manual-disc-selection";
@@ -244,8 +245,8 @@ export function ManualImportDialog({
     }
 
     setArchivePluginRequired(false);
-    setError(err instanceof Error ? err.message : fallback);
-  }, []);
+    setError(userFacingGraphQlErrorMessage(err, fallback, t));
+  }, [t]);
 
   const openArchivePluginSettings = React.useCallback(() => {
     onOpenChange(false);

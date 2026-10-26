@@ -1,3 +1,5 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
+import { isLostWarmupSessionError } from "@/lib/graphql/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Client } from "urql";
 
@@ -180,21 +182,8 @@ function arrKindOf(kind: ImportInstanceKind): ImportArrKind | null {
   return kind === "SONARR" || kind === "RADARR" ? kind : null;
 }
 
-function gqlError(error: unknown): string {
-  if (!error) return "Unknown error";
-  if (error instanceof Error) return error.message;
-  const message = (error as { message?: unknown }).message;
-  return typeof message === "string" ? message : String(error);
-}
-
-/**
- * A warmup session the client still references no longer exists on the server
- * (the orchestrator is in-memory, so a restart or the terminal TTL drops it).
- * This is unrecoverable in place — the only fix is to mint a fresh session by
- * re-verifying the connection, so the wizard routes the user back to Connect.
- */
-function isLostWarmupSessionError(message: string | null | undefined): boolean {
-  return typeof message === "string" && /no warmup session/i.test(message);
+function gqlError(error: unknown, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string {
+  return userFacingGraphQlErrorMessage(error, "", translate);
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────
@@ -267,9 +256,10 @@ function clearPersistedImportWizardState(): void {
 
 interface UseExternalImportSetupArgs {
   client: Client;
+  t: NonNullable<Parameters<typeof userFacingGraphQlErrorMessage>[2]>;
 }
 
-export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
+export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs) {
   // Snapshot of any persisted state, read once on mount to hydrate the wizard.
   const initial = useMemo(loadPersistedImportWizardState, []);
 
@@ -420,7 +410,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
         patchInstance(id, {
           status: "error",
           version: null,
-          error: gqlError(error) || "Connection failed",
+          error: gqlError(error, t) || t("error.fallback.connectionFailed"),
         });
         return;
       }
@@ -461,8 +451,8 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
         patchInstance(id, {
           status: "error",
           error:
-            gqlError(warmupError) ||
-            "Connection succeeded, but Prowlarr discovery could not start",
+            gqlError(warmupError, t) ||
+            t("error.fallback.connectionSucceededButProwlarrDiscoveryCouldNotStart"),
         });
         return;
       }
@@ -496,7 +486,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           if (toCancel) cancelInstanceWarmup(toCancel);
         }
     },
-    [client, instances, patchInstance, cancelInstanceWarmup],
+    [client, instances, patchInstance, cancelInstanceWarmup, t],
   );
 
   const connectedArrSessionIds = useMemo(
@@ -562,14 +552,14 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       .toPromise();
     setPreviewing(false);
     if (error || !data?.previewExternalImport) {
-      const message = gqlError(error) || "Failed to load preview";
+      const message = gqlError(error, t) || t("error.fallback.failedToLoadPreview");
       setPreviewError(message);
-      if (isLostWarmupSessionError(message)) setWarmupSessionLost(true);
+      if (isLostWarmupSessionError(error)) setWarmupSessionLost(true);
       return;
     }
     setPreview(data.previewExternalImport as ExternalImportPreview);
     setWarmupSessionLost(false);
-  }, [client, connectedArrSessionIds, prowlarrWarmupSessionId]);
+  }, [client, connectedArrSessionIds, prowlarrWarmupSessionId, t]);
 
   useEffect(() => {
     if (!prowlarrWarmupSessionId) {
@@ -594,9 +584,9 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
         .toPromise();
       if (stopped) return;
       if (error || !data?.externalImportWarmupStatus) {
-        const message = gqlError(error) || "Failed to load Prowlarr discovery status";
+        const message = gqlError(error, t) || t("error.fallback.failedToLoadProwlarrDiscoveryStatus");
         setPreviewError(message);
-        if (isLostWarmupSessionError(message)) {
+        if (isLostWarmupSessionError(error)) {
           setWarmupSessionLost(true);
         } else {
           timer = setTimeout(poll, errorPollMs);
@@ -621,7 +611,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       stopped = true;
       if (timer) clearTimeout(timer);
     };
-  }, [client, loadPreview, prowlarrWarmupSessionId]);
+  }, [client, loadPreview, prowlarrWarmupSessionId, t]);
 
   const retryProwlarrWarmup = useCallback(async () => {
     if (!prowlarrConnectionInput || !prowlarrInstance) return;
@@ -636,7 +626,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       | string
       | undefined;
     if (error || !sessionId) {
-      setPreviewError(gqlError(error) || "Failed to restart Prowlarr discovery");
+      setPreviewError(gqlError(error, t) || t("error.fallback.failedToRestartProwlarrDiscovery"));
       return;
     }
     setInstances((prev) =>
@@ -646,7 +636,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           : instance,
       ),
     );
-  }, [client, prowlarrConnectionInput, prowlarrInstance]);
+  }, [client, prowlarrConnectionInput, prowlarrInstance, t]);
 
   // ── Mapping board: roots + manual roots + remaps + assign ──────────────────
   const [manualRoots, setManualRoots] = useState<ImportRoot[]>(
@@ -1220,7 +1210,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       .toPromise();
     setExecuting(false);
     if (error || !data?.executeExternalImport) {
-      const message = gqlError(error) || "Import failed";
+      const message = gqlError(error, t) || t("error.fallback.importFailed");
       setExecuteError(message);
       return { ok: false, error: message };
     }
@@ -1237,7 +1227,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
     idxApiKeyOverrides,
     executeResult,
     prowlarrWarmupReady,
-    prowlarrWarmupProgress,
+    prowlarrWarmupProgress, t,
   ]);
 
   // ── Aggregate warmup progress (gates Summary) ──────────────────────────────
@@ -1277,11 +1267,11 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       setAggregateProgressError(null);
       setWarmupSessionLost(false);
     } else if (error) {
-      const message = gqlError(error) || "Failed to load warmup progress";
+      const message = gqlError(error, t) || t("error.fallback.failedToLoadWarmupProgress");
       setAggregateProgressError(message);
-      if (isLostWarmupSessionError(message)) setWarmupSessionLost(true);
+      if (isLostWarmupSessionError(error)) setWarmupSessionLost(true);
     }
-  }, [client, connectedArrSessionIds]);
+  }, [client, connectedArrSessionIds, t]);
 
   const warmupComplete = aggregateProgress?.status === "COMPLETED";
   // The warmup failed (backend reported failed/canceled, or the progress query
@@ -1431,7 +1421,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
       .mutation(completeSetupMutation, {})
       .toPromise();
     if (completeErr || !completeData?.completeSetup?.completed) {
-      setFinalizeError(gqlError(completeErr) || "Failed to complete setup");
+      setFinalizeError(gqlError(completeErr, t) || t("error.fallback.failedToCompleteSetup"));
       setFinalizing(false);
       return;
     }
@@ -1448,7 +1438,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           },
         })
         .toPromise();
-      if (scanErr) scanErrors.push(gqlError(scanErr));
+      if (scanErr) scanErrors.push(gqlError(scanErr, t));
     }
 
     // Setup is complete — drop both the local draft and the server secret draft.
@@ -1459,7 +1449,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
     setFinalizing(false);
     setFinalizeSessionId(null);
     setFinalizeComplete({ scanErrors });
-  }, [client]);
+  }, [client, t]);
 
   // Poll the background apply until it settles. A refresh mid-apply rehydrates
   // `finalizeSessionId` from sessionStorage, so this resumes rather than
@@ -1484,7 +1474,8 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           if (!status) {
             return {
               sample: null,
-              error: gqlError(queryError) || "Failed to load import progress",
+              error: gqlError(queryError, t) || t("error.fallback.failedToLoadImportProgress"),
+              sessionGone: isLostWarmupSessionError(queryError),
             };
           }
           return {
@@ -1518,7 +1509,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
     return () => {
       stopped = true;
     };
-  }, [client, finalizeSessionId, completeFinalizedImport]);
+  }, [client, finalizeSessionId, completeFinalizedImport, t]);
 
   /**
    * Creates the mapped libraries and starts the background apply. Resolves as
@@ -1606,7 +1597,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           const created = data?.createLibrary;
           if (error || !created?.id) {
             return fail(
-              `${gqlError(error) || "Failed to create library"}: ${draft.name}`,
+              `${gqlError(error, t) || t("error.fallback.failedToCreateLibrary")}: ${draft.name}`,
             );
           }
           resolvedId = created.id as string;
@@ -1660,7 +1651,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
           }
         | undefined;
       if (finalizeErr || !finalized?.finalizeSessionId) {
-        return fail(gqlError(finalizeErr) || "Failed to finalize import");
+        return fail(gqlError(finalizeErr, t) || t("error.fallback.failedToFinalizeImport"));
       }
       if (finalized.progress) {
         setFinalizeProgress({
@@ -1682,7 +1673,7 @@ export function useExternalImportSetup({ client }: UseExternalImportSetupArgs) {
     detectedRoots,
     assign,
     libraries,
-    connectedArrSessionIds,
+    connectedArrSessionIds, t,
   ]);
 
   const finalizeImport = useCallback(

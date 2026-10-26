@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useState } from "react";
 import { useClient } from "urql";
 import { useMaintenanceRuleState } from "@/components/containers/settings/use-maintenance-rule-state";
@@ -73,7 +74,7 @@ export function ExpiredRequestLeasesControl() {
       setGlobalStatus(t("settings.maintenanceRuleUpdated"), { level: "SUCCESS" });
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {

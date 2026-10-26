@@ -610,7 +610,7 @@ async fn recycle_bin_settings_reject_invalid_path_and_retention_without_writing(
                 ctx.app
                     .update_recycle_bin_settings(&config_actor, bin_settings(None, retention_days))
                     .await,
-                Err(AppError::Validation(_))
+                Err(AppError::Validation(_) | AppError::ValidationRefused { .. })
             ),
             "retention {retention_days} should be rejected"
         );
@@ -762,7 +762,7 @@ async fn recycle_bin_retention_saves_with_an_invalid_stored_path_sent_back() {
             ctx.app
                 .update_recycle_bin_settings(&config_actor, bin_settings(Some(&inside_nested), 21))
                 .await,
-            Err(AppError::Validation(_))
+            Err(AppError::Validation(_) | AppError::ValidationRefused { .. })
         ),
         "a changed path is still validated"
     );

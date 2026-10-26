@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import * as React from "react";
 import {
   Download,
@@ -150,11 +151,8 @@ const BACKUPS_INSET_CLASS =
   "rounded-[12px] border border-[var(--scry-line2)] bg-[var(--scry-card2)]";
 const BACKUPS_MUTED_TEXT_CLASS = "text-[var(--scry-muted3)]";
 
-function mutationErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return fallback;
+function mutationErrorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string {
+  return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
 function nonWhitespaceCharacterCount(value: string): number {
@@ -375,7 +373,7 @@ export function SettingsBackupsContainer() {
       }
       setBackups(sortBackups(data?.backups ?? []));
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setLoading(false);
     }
@@ -397,7 +395,7 @@ export function SettingsBackupsContainer() {
       setSavedAutoBackupSettings(nextSettings);
       setAutoBackupSettings(nextSettings);
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setAutoBackupLoading(false);
     }
@@ -419,7 +417,7 @@ export function SettingsBackupsContainer() {
       setSavedBackupSettings(nextSettings);
       setBackupPathDraft(nextSettings.customBackupPath ?? "");
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setBackupSettingsLoading(false);
     }
@@ -510,7 +508,7 @@ export function SettingsBackupsContainer() {
       setCreateDialogOpen(false);
       setGlobalStatus(t("settings.backupsQueued"));
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setCreatingRequest(false);
     }
@@ -557,7 +555,7 @@ export function SettingsBackupsContainer() {
           deletedFilenames.add(filename);
         } catch (error) {
           failedFilenames.add(filename);
-          firstFailureMessage ??= mutationErrorMessage(error, t("status.failedToDelete"));
+          firstFailureMessage ??= mutationErrorMessage(error, t("status.failedToDelete"), t);
         }
       }
 
@@ -619,7 +617,7 @@ export function SettingsBackupsContainer() {
 
       await saveDownloadResponse(response, backup.filename);
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setDownloadingFilename(null);
     }
@@ -656,7 +654,7 @@ export function SettingsBackupsContainer() {
       setShowAutoBackupKey(false);
       setGlobalStatus(t("settings.autoBackupsSaved"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setAutoBackupSaving(false);
     }
@@ -690,7 +688,7 @@ export function SettingsBackupsContainer() {
       await fetchBackups();
       setGlobalStatus(t("settings.backupLocationSaved"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate")), { level: "ERROR" });
+      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setBackupSettingsSaving(false);
     }

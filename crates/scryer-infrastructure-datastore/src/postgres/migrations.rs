@@ -90,10 +90,13 @@ pub async fn run_migrations_with_hook_context(
     }
 
     if matches!(mode, MigrationMode::ValidateOnly) {
-        return Err(AppError::Validation(format!(
-            "database migration check failed; pending PostgreSQL migrations: {}",
-            pending.join(", ")
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_DATABASE_MIGRATION_CHECK_FAILED,
+            format!(
+                "database migration check failed; pending PostgreSQL migrations: {}",
+                pending.join(", ")
+            ),
+        ));
     }
 
     let install_kind = detect_install_kind(pool, &applied).await?;

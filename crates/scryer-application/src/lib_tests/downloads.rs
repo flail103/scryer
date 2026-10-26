@@ -884,6 +884,7 @@ async fn list_download_queue_reads_cached_observed_items_without_client_calls() 
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "observed-stub".to_string(),
         download_id: None,
@@ -970,6 +971,7 @@ async fn list_download_queue_uses_live_queue_only_for_all_activity() {
         queued_at: None,
         last_updated_at: Some("100".to_string()),
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "history-1".to_string(),
         download_id: None,
@@ -1082,6 +1084,7 @@ async fn list_download_queue_for_title_filters_the_shared_cache() {
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "job-1".to_string(),
         download_id: None,
@@ -2635,7 +2638,7 @@ async fn tracked_title_assignment_fixture() -> TrackedTitleAssignmentFixture {
         completed_source: None,
         state: TrackedDownloadState::ImportBlocked,
         status: scryer_domain::TrackedDownloadStatus::Warning,
-        status_messages: vec!["title required".to_string()],
+        status_messages: vec!["title required".to_string().into()],
         title_id: None,
         facet: None,
         source_title: Some("Observed.Download".to_string()),
@@ -2913,7 +2916,12 @@ async fn assign_tracked_download_title_busy_rejection_persists_nothing() {
     .await
     .expect_err("busy assignment should fail");
 
-    assert!(matches!(error, AppError::Validation(_)));
+    assert!(matches!(
+        error,
+        AppError::Validation(_)
+            | AppError::ValidationRefused { .. }
+            | AppError::ValidationRefusedWithCount { .. }
+    ));
     assert!(fixture.submissions.store.lock().await.is_empty());
     assert!(
         fixture
@@ -2942,7 +2950,10 @@ async fn assign_tracked_download_title_missing_rejection_persists_nothing() {
     .await
     .expect_err("missing assignment should fail");
 
-    assert!(matches!(error, AppError::NotFound(_)));
+    assert!(matches!(
+        error,
+        AppError::NotFound(_) | AppError::NotFoundReason { .. }
+    ));
     assert!(fixture.submissions.store.lock().await.is_empty());
 }
 
@@ -2966,7 +2977,12 @@ async fn assign_tracked_download_title_persistence_failure_keeps_runtime_unchang
     .await
     .expect_err("persistence failure should fail assignment");
 
-    assert!(matches!(error, AppError::Repository(_)));
+    assert!(matches!(
+        error,
+        AppError::Repository(_)
+            | AppError::RepositoryFailure { .. }
+            | AppError::RepositoryFailed { .. }
+    ));
     assert!(fixture.submissions.store.lock().await.is_empty());
     let tracked = fixture
         .tracker
@@ -3075,7 +3091,7 @@ async fn list_download_import_page_uses_runtime_tracked_snapshot_cache() {
                 source_title: Some("Cached Release".to_string()),
                 state: TrackedDownloadState::ImportBlocked,
                 status: scryer_domain::TrackedDownloadStatus::Warning,
-                status_messages: vec!["moving files to nas".to_string()],
+                status_messages: vec!["moving files to nas".to_string().into()],
                 match_type: scryer_domain::TitleMatchType::Submission,
                 import_hold: None,
             },
@@ -3221,7 +3237,7 @@ async fn download_import_page_renders_importing_state_from_runtime_snapshot() {
                 source_title: Some("Fixture blocked-worker-1".to_string()),
                 state: TrackedDownloadState::Importing,
                 status: scryer_domain::TrackedDownloadStatus::Ok,
-                status_messages: vec!["Moving files to library.".to_string()],
+                status_messages: vec!["Moving files to library.".to_string().into()],
                 match_type: scryer_domain::TitleMatchType::Submission,
                 import_hold: None,
             },
@@ -6590,7 +6606,7 @@ async fn shared_native_probe_rejects_source_changes_in_both_production_paths() {
         },
     );
     assert!(
-        matches!(catalog, Err(AppError::Validation(message)) if message.contains("source changed"))
+        matches!(catalog, Err(AppError::Validation(message) | AppError::ValidationRefused { message, .. } | AppError::ValidationRefusedWithCount { message, .. }) if message.contains("source changed"))
     );
     let crate::post_download_gate::ImportedFileGateDecision::Rejected(rejection) = imported else {
         panic!("a changed source must not become an accepted metadata failure");
@@ -8988,7 +9004,10 @@ async fn automatic_import_parks_obfuscated_multi_file_episode_download_for_manua
         tracked.status,
         scryer_domain::TrackedDownloadStatus::Warning
     );
-    assert_eq!(tracked.status_messages, vec![expected_message.to_string()]);
+    assert_eq!(
+        crate::tracked_downloads::status_texts(&tracked.status_messages),
+        vec![expected_message.to_string()]
+    );
 
     // The import itself ended skipped as unparseable — not rejected, so the
     // release is not burned and the operator can map the files.
@@ -12388,6 +12407,7 @@ async fn download_queue_subscription_bootstraps_from_runtime_cache_without_clien
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "queue-1".to_string(),
         download_id: None,
@@ -14293,10 +14313,9 @@ score_entry["operator_refuses_this_file"] := -10000 if {
     );
     assert_eq!(tracked.state, TrackedDownloadState::ImportBlocked);
     assert!(
-        tracked
-            .status_messages
-            .iter()
-            .any(|message| message.starts_with("held for manual import because the file failed")),
+        tracked.status_messages.iter().any(|message| message
+            .text
+            .starts_with("held for manual import because the file failed")),
         "{tracked:?}"
     );
     assert!(
@@ -14538,7 +14557,11 @@ async fn manual_blocklist_missing_key_holds_sources_without_automatic_retry() {
         assert!(tracked.blocklist_confirmation_failed);
         assert!(!tracked.manual_failure_cleanup);
         assert!(tracked.import_attempted);
-        assert!(tracked.status_messages[0].contains("Automatic retries stopped"));
+        assert!(
+            tracked.status_messages[0]
+                .text
+                .contains("Automatic retries stopped")
+        );
         crate::failed_download_handler::check(&mut tracked);
         crate::failed_download_handler::process_failed(&fixture.app, &mut tracked).await;
         assert_eq!(tracked.state, TrackedDownloadState::ImportBlocked);
@@ -18969,6 +18992,7 @@ fn foreign_client_history_item(item_id: &str) -> DownloadQueueItem {
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: item_id.to_string(),
         download_id: None,
@@ -19752,7 +19776,13 @@ mod held_sources {
             .await
             .expect_err("view is not enough");
 
-        assert!(matches!(error, AppError::Unauthorized(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.holds_sources().await);
         assert!(
             held.record()
@@ -19791,7 +19821,15 @@ mod held_sources {
         let error = release(&held, &held.fixture.user)
             .await
             .expect_err("an import that holds nothing has nothing to release");
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
 
         held.fixture
             .import_repo
@@ -19806,7 +19844,15 @@ mod held_sources {
         let error = release(&held, &held.fixture.user)
             .await
             .expect_err("only a completed import may release its sources");
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.holds_sources().await);
         assert!(held.video_source().exists());
     }
@@ -19828,7 +19874,15 @@ mod held_sources {
             .await
             .expect_err("an unfinished import of the same download blocks release");
 
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.holds_sources().await);
     }
 
@@ -19879,7 +19933,15 @@ mod held_sources {
         let error = release(&held, &held.fixture.user)
             .await
             .expect_err("a released import holds nothing more");
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
     }
 
     #[tokio::test]
@@ -19962,7 +20024,13 @@ mod held_sources {
             .await
             .expect_err("every released title must be resolvable by the actor");
 
-        assert!(matches!(error, AppError::Unauthorized(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.import_holds(&held.import_id).await);
         assert!(held.import_holds("held-import-other-library").await);
         assert!(held.offer(&actor).await.is_none());
@@ -20042,7 +20110,15 @@ mod held_sources {
             .await
             .expect_err("the hold release failed");
 
-        assert!(matches!(error, AppError::Repository(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Repository(_)
+                    | AppError::RepositoryFailure { .. }
+                    | AppError::RepositoryFailed { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.import_holds(&held.import_id).await);
         assert!(held.import_holds("held-import-second").await);
         assert!(
@@ -20117,7 +20193,15 @@ mod held_sources {
             .await
             .expect_err("nothing serializes the release against the cleanup");
 
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
         assert!(held.holds_sources().await);
         assert!(
             held.record()

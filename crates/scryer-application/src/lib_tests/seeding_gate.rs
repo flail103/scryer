@@ -3318,7 +3318,9 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     before_restart.client_item.download_id =
         Some("scryer-download:torrent-burned-restart-1".to_string());
     before_restart.status = scryer_domain::TrackedDownloadStatus::Error;
-    before_restart.status_messages = vec![message.to_string()];
+    before_restart.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+        message.to_string(),
+    )];
     let id = crate::tracked_downloads::tracked_download_id_for_item(&before_restart.client_item);
     let identity =
         crate::tracked_downloads::observed_queue_item_identity(&before_restart.client_item);
@@ -3347,7 +3349,10 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     assert_eq!(restored.state, TrackedDownloadState::Failed);
     assert!(restored.burned_by_import_gate);
     assert_eq!(restored.status, scryer_domain::TrackedDownloadStatus::Error);
-    assert_eq!(restored.status_messages, vec![message.to_string()]);
+    assert_eq!(
+        crate::tracked_downloads::status_texts(&restored.status_messages),
+        vec![message.to_string()]
+    );
 
     crate::app_usecase_integration::finalize_tracked_terminal_state(
         &app,
@@ -3371,8 +3376,7 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     assert_eq!(held.state, TrackedDownloadState::Failed);
     assert!(held.burned_by_import_gate);
     assert_eq!(held.status, scryer_domain::TrackedDownloadStatus::Error);
-    assert_eq!(
-        held.status_messages,
+    assert_eq!(crate::tracked_downloads::status_texts(&held.status_messages),
         vec![
             message.to_string(),
             "Kept in the download client until its seeding goal is met; the entry and its data are removed then."
@@ -6597,7 +6601,7 @@ async fn nzbget_recoverable_warnings_fail_only_after_the_warning_timeout() {
             failed
                 .status_messages
                 .iter()
-                .any(|message| message.contains(reason)),
+                .any(|message| message.text.contains(reason)),
             "{reason}: timeout message carries the attention reason"
         );
         // Promotion alone touches nothing on the client or disk.

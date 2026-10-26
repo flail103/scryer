@@ -644,7 +644,7 @@ impl AppUseCase {
         }
 
         let download_id = intent.request.download_id.ok_or_else(|| {
-            AppError::Validation("canonical download submission requires a download id".to_string())
+            AppError::validation_refused(crate::error_reasons::acquisition::CANONICAL_DOWNLOAD_SUBMISSION_REQUIRES_DOWNLOAD_ID, "canonical download submission requires a download id".to_string())
         })?;
         let source_kind = intent.request.source_kind;
         let source_hint = normalize_release_attempt_hint(intent.request.source_hint.as_deref());

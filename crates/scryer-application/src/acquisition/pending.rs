@@ -807,7 +807,12 @@ impl AppUseCase {
                 .titles
                 .get_by_id(&release.title_id)
                 .await?
-                .ok_or_else(|| AppError::NotFound(format!("title {}", release.title_id)))?;
+                .ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                        format!("title {}", release.title_id),
+                    )
+                })?;
             self.require_library_permission(
                 actor,
                 &title.library_id,
@@ -828,7 +833,12 @@ impl AppUseCase {
             .acquisition_scope_states
             .get_acquisition_scope_state_by_id(wanted_item_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("wanted item {wanted_item_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::acquisition::WANTED_ITEM_NOT_FOUND,
+                    format!("wanted item {wanted_item_id}"),
+                )
+            })?;
         let library_id = if let Some(library_id) = wanted.library_id.as_deref() {
             library_id.to_string()
         } else {
@@ -838,7 +848,12 @@ impl AppUseCase {
                 .get_by_id(&wanted.title_id)
                 .await?
                 .map(|title| title.library_id)
-                .ok_or_else(|| AppError::NotFound(format!("title {}", wanted.title_id)))?
+                .ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                        format!("title {}", wanted.title_id),
+                    )
+                })?
         };
         self.require_library_permission(actor, &library_id, scryer_domain::LibraryPermission::View)
             .await
@@ -908,7 +923,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&pr.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", pr.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", pr.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -962,7 +982,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&pr.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", pr.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", pr.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,

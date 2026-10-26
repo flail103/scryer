@@ -1070,7 +1070,7 @@ export function SettingsMaintenanceRulesSection({
                             regoSource: value,
                           }))
                         }
-                        diagnostics={regoDiagnostics(ruleSetDraft.regoSource, validationResult)}
+                        diagnostics={regoDiagnostics(ruleSetDraft.regoSource, validationResult, t)}
                         feedback={<EditorValidationStatus id="settings-maintenance-rule-validation" checking={validating} result={validationResult} />}
                         minLines={12}
                         maxLines={35}

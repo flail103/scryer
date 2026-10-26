@@ -18,7 +18,83 @@ use scryer_application::{
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES: u64 = 50 * 1024 * 1024;
 const PLUGIN_HTTP_WORKER_RESPONSE_GRACE: Duration = Duration::from_secs(1);
 const PINNED_REQUEST_CLIENT_TTL: Duration = Duration::from_secs(5 * 60);
-type HostResult<T> = Result<T, String>;
+type HostResult<T> = Result<T, HostHttpError>;
+
+/// Host-owned transport facts remain typed until the guest interface mapping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HostHttpErrorKind {
+    ForbiddenOrigin,
+    InvalidRequest,
+    Timeout,
+    ResponseTooLarge,
+    Transport,
+}
+
+#[derive(Debug)]
+pub(crate) struct HostHttpError {
+    pub(crate) kind: HostHttpErrorKind,
+    message: String,
+    solver_service_failure: bool,
+}
+
+impl HostHttpError {
+    pub(crate) fn new(kind: HostHttpErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            solver_service_failure: false,
+        }
+    }
+    fn solver(kind: HostHttpErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            solver_service_failure: true,
+        }
+    }
+}
+
+impl From<String> for HostHttpError {
+    fn from(message: String) -> Self {
+        Self::new(HostHttpErrorKind::Transport, message)
+    }
+}
+
+impl From<scryer_outbound_http::OutboundDestinationError> for HostHttpError {
+    fn from(error: scryer_outbound_http::OutboundDestinationError) -> Self {
+        use scryer_outbound_http::OutboundDestinationError;
+        let kind = match &error {
+            OutboundDestinationError::InvalidUrl { .. }
+            | OutboundDestinationError::UnsupportedScheme { .. }
+            | OutboundDestinationError::MissingHost { .. }
+            | OutboundDestinationError::EmbeddedCredentials { .. } => {
+                HostHttpErrorKind::InvalidRequest
+            }
+            OutboundDestinationError::ForbiddenAddress { .. }
+            | OutboundDestinationError::BlockedLinkLocalOrMetadata { .. } => {
+                HostHttpErrorKind::ForbiddenOrigin
+            }
+            OutboundDestinationError::ResolveFailed { .. }
+            | OutboundDestinationError::NoResolvedAddresses { .. }
+            | OutboundDestinationError::ClientBuild { .. }
+            | OutboundDestinationError::TrustBundle { .. } => HostHttpErrorKind::Transport,
+        };
+        Self::new(kind, error.to_string())
+    }
+}
+
+impl std::fmt::Display for HostHttpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::ops::Deref for HostHttpError {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.message
+    }
+}
 
 static SHARED_PLUGIN_HTTP_RUNTIME: LazyLock<PluginHttpRuntime> =
     LazyLock::new(PluginHttpRuntime::default);
@@ -224,6 +300,7 @@ impl PluginHttpRuntime {
             .lock()
             .map_err(|error| format!("plugin HTTP runtime lock poisoned: {error}"))
             .map(|state| state.extra_ca_bundle_pem.clone())
+            .map_err(Into::into)
     }
 }
 
@@ -262,7 +339,7 @@ impl PluginHttpWorkerRuntime {
             egress_policy,
         )
         .map(scryer_outbound_http::PinnedPluginBlockingHttpTarget::into_client)
-        .map_err(|error| error.to_string())?;
+        .map_err(HostHttpError::from)?;
         self.request_clients.insert(
             key,
             CachedPluginHttpClient {
@@ -319,16 +396,30 @@ impl PluginHttpWorkerRuntime {
 }
 
 fn plugin_http_request_client_key(request_url: &str) -> HostResult<PluginHttpRequestClientKey> {
-    let url = url::Url::parse(request_url).map_err(|error| format!("Invalid URL: {error:?}"))?;
+    let url = url::Url::parse(request_url).map_err(|error| {
+        HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            format!("Invalid URL: {error:?}"),
+        )
+    })?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(format!("Invalid URL scheme: {}", url.scheme()));
+        return Err(HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            format!("Invalid URL scheme: {}", url.scheme()),
+        ));
     }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "Invalid URL: missing host".to_string())?;
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| "Invalid URL: missing port".to_string())?;
+    let host = url.host_str().ok_or_else(|| {
+        HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            "Invalid URL: missing host",
+        )
+    })?;
+    let port = url.port_or_known_default().ok_or_else(|| {
+        HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            "Invalid URL: missing port",
+        )
+    })?;
     Ok(PluginHttpRequestClientKey {
         scheme: url.scheme().to_string(),
         host: host.to_ascii_lowercase(),
@@ -403,14 +494,17 @@ impl PluginHttpHost {
                 // sender mapping so later requests get a fresh worker instead
                 // of queueing behind that stalled resolution.
                 self.reset_worker(&worker_key);
-                Err(format!(
-                    "plugin HTTP worker timed out after {} ms",
-                    response_timeout.as_millis()
+                Err(HostHttpError::new(
+                    HostHttpErrorKind::Timeout,
+                    format!(
+                        "plugin HTTP worker timed out after {} ms",
+                        response_timeout.as_millis()
+                    ),
                 ))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 self.reset_worker(&worker_key);
-                Err("plugin HTTP worker stopped".to_string())
+                Err("plugin HTTP worker stopped".to_string().into())
             }
         }
     }
@@ -605,7 +699,10 @@ impl PluginHttpHost {
 
         let request_client = if let Some(policy) = transport_policy {
             if !policy.config.is_enabled {
-                return Err(format!("Proxy {} is disabled.", policy.config.name.trim()));
+                return Err(HostHttpError::new(
+                    HostHttpErrorKind::InvalidRequest,
+                    format!("Proxy {} is disabled.", policy.config.name.trim()),
+                ));
             }
             // The DNS-pinning guard cannot apply here: the socket is opened to
             // the proxy, and with `remote_dns` the destination name is resolved
@@ -613,7 +710,7 @@ impl PluginHttpHost {
             // above remains the primary boundary, and the operator has
             // explicitly routed this indexer through a proxy they configured.
             scryer_outbound_http::validate_operator_http_url(&request.url, "plugin HTTP")
-                .map_err(|error| error.to_string())?;
+                .map_err(HostHttpError::from)?;
             worker_runtime
                 .lock()
                 .map_err(|error| format!("plugin HTTP worker runtime lock poisoned: {error}"))?
@@ -703,8 +800,11 @@ impl PluginHttpHost {
         {
             let method = request.method.as_deref().unwrap_or("GET");
             if !method.eq_ignore_ascii_case("GET") {
-                return Err(format!(
-                    "proxy only supports GET challenge solving for plugin HTTP requests; got {method}"
+                return Err(HostHttpError::new(
+                    HostHttpErrorKind::InvalidRequest,
+                    format!(
+                        "proxy only supports GET challenge solving for plugin HTTP requests; got {method}"
+                    ),
                 ));
             }
             if !session_headers.is_empty() {
@@ -747,7 +847,7 @@ impl PluginHttpHost {
                     solved
                 }
                 Err(error) => {
-                    if solver::is_solver_service_error_message(&error) {
+                    if error.solver_service_failure {
                         solver::SolverHealthLedger::shared()
                             .record_failure(&policy.config.id, &error);
                     }
@@ -767,7 +867,7 @@ impl PluginHttpHost {
                 "plugin HTTP request completed through proxy"
             );
             if let Some(error) = solved.terminal_error {
-                return Err(error);
+                return Err(error.into());
             }
             return Ok(solved.body);
         }
@@ -1028,7 +1128,12 @@ pub(crate) fn enforce_allowed_hosts(
     allowed_hosts: Option<&[String]>,
     request_url: &str,
 ) -> HostResult<()> {
-    let url = url::Url::parse(request_url).map_err(|error| format!("Invalid URL: {error:?}"))?;
+    let url = url::Url::parse(request_url).map_err(|error| {
+        HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            format!("Invalid URL: {error:?}"),
+        )
+    })?;
     let host = url.host_str().unwrap_or_default();
     let matches = allowed_hosts.is_some_and(|patterns| {
         patterns.iter().any(|pattern| {
@@ -1046,9 +1151,12 @@ pub(crate) fn enforce_allowed_hosts(
     // Never interpolate the raw request URL here: for indexer requests it
     // carries `?apikey=`/`passkey=` credentials that would otherwise leak into
     // WARN logs and the user-facing error. Log the query-stripped URL instead.
-    Err(format!(
-        "HTTP request to {} is not allowed",
-        solver::sanitized_url_for_log(request_url)
+    Err(HostHttpError::new(
+        HostHttpErrorKind::ForbiddenOrigin,
+        format!(
+            "HTTP request to {} is not allowed",
+            solver::sanitized_url_for_log(request_url)
+        ),
     ))
 }
 
@@ -1113,7 +1221,12 @@ fn execute_request_with_extra_headers(
             .to_uppercase()
             .as_bytes(),
     )
-    .map_err(|error| format!("Invalid HTTP method: {error}"))?;
+    .map_err(|error| {
+        HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            format!("Invalid HTTP method: {error}"),
+        )
+    })?;
 
     let solved_cookie = extra_headers
         .iter()
@@ -1196,7 +1309,7 @@ fn execute_request_with_extra_headers(
 
     result.map_err(|error| match error {
         scryer_outbound_http::BlockingOutboundHttpError::Request(error) if error.is_timeout() => {
-            "timeout".to_string()
+            HostHttpError::new(HostHttpErrorKind::Timeout, "timeout")
         }
         scryer_outbound_http::BlockingOutboundHttpError::Request(error) => {
             match transport_proxy_config
@@ -1208,12 +1321,17 @@ fn execute_request_with_extra_headers(
                     if let Some(config) = transport_proxy_config {
                         transport_proxy::record_transport_proxy_failure(config, &message);
                     }
-                    message
+                    message.into()
                 }
-                None => scryer_outbound_http::BlockingOutboundHttpError::Request(error).to_string(),
+                None => scryer_outbound_http::BlockingOutboundHttpError::Request(error)
+                    .to_string()
+                    .into(),
             }
         }
-        other => other.to_string(),
+        scryer_outbound_http::BlockingOutboundHttpError::DeadlineExceeded => {
+            HostHttpError::new(HostHttpErrorKind::Timeout, "HTTP deadline exhausted")
+        }
+        other => other.to_string().into(),
     })
 }
 
@@ -1317,8 +1435,9 @@ fn read_response_body(
         .read_to_end(&mut body)
         .map_err(|error| error.to_string())?;
     if body.len() > max as usize {
-        return Err(format!(
-            "HTTP response exceeds the configured maximum number of bytes: {max}"
+        return Err(HostHttpError::new(
+            HostHttpErrorKind::ResponseTooLarge,
+            format!("HTTP response exceeds the configured maximum number of bytes: {max}"),
         ));
     }
     Ok(body)
@@ -1351,7 +1470,10 @@ fn execute_challenge_solver_request(
         tally,
     } = options;
     if !policy.config.is_enabled {
-        return Err(format!("Proxy {} is disabled.", policy.config.name.trim()));
+        return Err(HostHttpError::new(
+            HostHttpErrorKind::InvalidRequest,
+            format!("Proxy {} is disabled.", policy.config.name.trim()),
+        ));
     }
 
     let provider = policy.config.provider_type;
@@ -1408,20 +1530,29 @@ fn execute_challenge_solver_request(
     }
     let response = solve_result.map_err(|error| match error {
         scryer_outbound_http::BlockingOutboundHttpError::Request(error) if error.is_timeout() => {
-            solver::solver_error_message(provider, solver::SolverErrorKind::Timeout).to_string()
+            HostHttpError::solver(
+                HostHttpErrorKind::Timeout,
+                solver::solver_error_message(provider, solver::SolverErrorKind::Timeout),
+            )
         }
-        scryer_outbound_http::BlockingOutboundHttpError::Request(_) => {
-            solver::solver_error_message(provider, solver::SolverErrorKind::Unreachable).to_string()
-        }
+        scryer_outbound_http::BlockingOutboundHttpError::Request(_) => HostHttpError::solver(
+            HostHttpErrorKind::Transport,
+            solver::solver_error_message(provider, solver::SolverErrorKind::Unreachable),
+        ),
         scryer_outbound_http::BlockingOutboundHttpError::CooldownBudgetExceeded { .. } => {
-            solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable).to_string()
+            HostHttpError::solver(
+                HostHttpErrorKind::Transport,
+                solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable),
+            )
         }
-        scryer_outbound_http::BlockingOutboundHttpError::DeadlineExceeded => {
-            solver::solver_error_message(provider, solver::SolverErrorKind::Timeout).to_string()
-        }
-        scryer_outbound_http::BlockingOutboundHttpError::DispatchRejected => {
-            solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable).to_string()
-        }
+        scryer_outbound_http::BlockingOutboundHttpError::DeadlineExceeded => HostHttpError::solver(
+            HostHttpErrorKind::Timeout,
+            solver::solver_error_message(provider, solver::SolverErrorKind::Timeout),
+        ),
+        scryer_outbound_http::BlockingOutboundHttpError::DispatchRejected => HostHttpError::solver(
+            HostHttpErrorKind::Transport,
+            solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable),
+        ),
     })?;
 
     let solver_status = response.status();
@@ -1435,15 +1566,16 @@ fn execute_challenge_solver_request(
             status = solver_status.as_u16(),
             "challenge solver service unavailable for proxy request"
         );
-        return Err(
-            solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable)
-                .to_string(),
-        );
+        return Err(HostHttpError::solver(
+            HostHttpErrorKind::Transport,
+            solver::solver_error_message(provider, solver::SolverErrorKind::Unavailable),
+        ));
     }
 
     let response_body = read_response_body(response, max_http_response_bytes)?;
-    let solution = solver::parse_solver_solution(&response_body)
-        .map_err(|error| error.message(provider).to_string())?;
+    let solution = solver::parse_solver_solution(&response_body).map_err(|error| {
+        HostHttpError::solver(HostHttpErrorKind::Transport, error.message(provider))
+    })?;
 
     let solution_status = solution.status.unwrap_or_else(|| solver_status.as_u16());
     // The solver reports the indexer's own status, which is a truer `result`
@@ -2608,7 +2740,13 @@ mod tests {
         )
         .expect_err("disallowed host should fail");
 
-        assert!(error.to_string().contains("is not allowed"));
+        assert_eq!(error.kind, HostHttpErrorKind::ForbiddenOrigin);
+    }
+
+    #[test]
+    fn invalid_plugin_url_has_a_kind_without_parsing_its_diagnostic() {
+        let error = plugin_http_request_client_key("file:///private/path").unwrap_err();
+        assert_eq!(error.kind, HostHttpErrorKind::InvalidRequest);
     }
 
     #[test]
@@ -3000,6 +3138,8 @@ mod tests {
             Err(error) => error,
         };
 
-        assert_eq!(error, solver::TRAWL_UNAVAILABLE_MESSAGE);
+        assert_eq!(error.kind, HostHttpErrorKind::Transport);
+        assert!(error.solver_service_failure);
+        assert_eq!(error.to_string(), solver::TRAWL_UNAVAILABLE_MESSAGE);
     }
 }

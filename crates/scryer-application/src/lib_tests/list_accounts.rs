@@ -501,7 +501,7 @@ async fn private_account_poll_keeps_the_session_after_a_failed_provider_check() 
             .app
             .poll_list_account_link(&harness.manager, &session)
             .await,
-        Err(AppError::NotFound(_))
+        Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
     ));
     let view = harness
         .app
@@ -549,7 +549,7 @@ async fn private_account_poll_ends_on_a_definitive_provider_refusal() {
                 .app
                 .poll_list_account_link(&harness.user, &session)
                 .await,
-            Err(AppError::NotFound(_))
+            Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
         ));
         assert_eq!(auth.polls.load(Ordering::SeqCst), 1);
         assert!(
@@ -625,7 +625,7 @@ async fn private_account_poll_ends_when_the_approved_link_can_never_be_recorded(
             .app
             .poll_list_account_link(&harness.user, &session)
             .await,
-        Err(AppError::NotFound(_))
+        Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
     ));
     assert_eq!(auth.polls.load(Ordering::SeqCst), 1);
     assert!(
@@ -658,7 +658,10 @@ async fn private_account_linked_replays_are_bounded_per_member_and_do_not_block_
             .await;
         if index < sessions.len() - 4 {
             assert!(
-                matches!(replay, Err(AppError::NotFound(_))),
+                matches!(
+                    replay,
+                    Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
+                ),
                 "older linked record {index} is evicted"
             );
         } else {
@@ -1510,6 +1513,8 @@ fn every_auth_failure_code_names_its_own_reason() {
     assert!(matches!(
         auth_failure("not_a_code"),
         AppError::Validation(_)
+            | AppError::ValidationRefused { .. }
+            | AppError::ValidationRefusedWithCount { .. }
     ));
 
     // The rate-limited failure is not a validation refusal; its reason is
@@ -2483,7 +2488,7 @@ async fn private_account_simkl_issuer_is_required_before_single_use_exchange() {
                     Some("https://simkl.com")
                 )
                 .await,
-            Err(AppError::NotFound(_))
+            Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
         ));
         assert_eq!(auth.exchanges.load(Ordering::SeqCst), 0);
     }
@@ -2519,7 +2524,7 @@ async fn private_account_simkl_issuer_is_required_before_single_use_exchange() {
                 Some("https://simkl.com")
             )
             .await,
-        Err(AppError::NotFound(_))
+        Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
     ));
     assert_eq!(auth.exchanges.load(Ordering::SeqCst), 1);
 }

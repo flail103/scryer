@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Client } from "urql";
 
@@ -27,9 +28,10 @@ import type {
 
 interface UseDownloadClientSetupArgs {
   client: Client;
+  t: NonNullable<Parameters<typeof userFacingGraphQlErrorMessage>[2]>;
 }
 
-export function useDownloadClientSetup({ client }: UseDownloadClientSetupArgs) {
+export function useDownloadClientSetup({ client, t }: UseDownloadClientSetupArgs) {
   // ── Step 4 (fresh): Download Client ─────────────────────────────────
   const [dcDraft, setDcDraft] = useState<DownloadClientDraft>({
     ...DEFAULT_DOWNLOAD_CLIENT_DRAFT,
@@ -226,11 +228,11 @@ export function useDownloadClientSetup({ client }: UseDownloadClientSetupArgs) {
       if (updateError) throw updateError;
       setDcSaved(true);
     } catch (err) {
-      setDcError(err instanceof Error ? err.message : "Failed to save");
+      setDcError(userFacingGraphQlErrorMessage(err, t("error.fallback.failedToSave"), t));
     } finally {
       setDcSaving(false);
     }
-  }, [client, dcDraft, selectedDcConfigFields]);
+  }, [client, dcDraft, selectedDcConfigFields, t]);
 
   const handleDcTestAndSave = useCallback(async () => {
     setDcTesting(true);
@@ -263,10 +265,10 @@ export function useDownloadClientSetup({ client }: UseDownloadClientSetupArgs) {
       // the Next button simply never enabled and the only diagnosis available
       // was reading the server's container log.
       setDcTestResult("failed");
-      setDcError(err instanceof Error ? err.message : "Connection test failed");
+      setDcError(userFacingGraphQlErrorMessage(err, t("error.fallback.connectionTestFailed"), t));
       setDcTesting(false);
     }
-  }, [client, dcDraft, saveDownloadClient, selectedDcConfigFields]);
+  }, [client, dcDraft, saveDownloadClient, selectedDcConfigFields, t]);
 
   return {
     dcDraft,

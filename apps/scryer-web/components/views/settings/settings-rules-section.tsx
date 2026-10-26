@@ -936,8 +936,8 @@ export function SettingsRulesSection({
   const [isArrImportOpen, setIsArrImportOpen] = React.useState(false);
   const [isTestScoringOpen, setIsTestScoringOpen] = React.useState(false);
   const validationDiagnostics = React.useMemo(
-    () => regoDiagnostics(ruleSetDraft.regoSource, validationResult),
-    [ruleSetDraft.regoSource, validationResult],
+    () => regoDiagnostics(ruleSetDraft.regoSource, validationResult, t),
+    [ruleSetDraft.regoSource, validationResult, t],
   );
 
   return (

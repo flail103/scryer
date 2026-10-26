@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 import { calendarEpisodesQuery, librariesQuery } from "@/lib/graphql/queries";
@@ -67,7 +68,7 @@ export const CalendarContainer = memo(function CalendarContainer({
       })
       .catch((error) => {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : t("status.failedToLoad");
+          const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
           setGlobalStatus(message, { level: "ERROR" });
         }
       })
@@ -96,7 +97,7 @@ export const CalendarContainer = memo(function CalendarContainer({
         if (error) throw error;
         setCalendarEpisodes(data?.calendarEpisodes ?? []);
       } catch (error) {
-        const message = error instanceof Error ? error.message : t("status.failedToLoad");
+        const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
         setGlobalStatus(message, { level: "ERROR" });
       } finally {
         setCalendarLoading(false);

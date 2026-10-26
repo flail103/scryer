@@ -111,14 +111,18 @@ fn from_metadata_search_item(
 fn browse_path_read_dir(path: &str) -> Result<fs::ReadDir, AppError> {
     let target = Path::new(path);
     if !target.is_absolute() {
-        return Err(AppError::Validation("Path must be absolute.".to_string()));
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_BROWSE_PATH_NOT_ABSOLUTE,
+            "Path must be absolute.",
+        ));
     }
 
     let metadata = fs::metadata(target).map_err(|error| browse_path_io_error(path, error))?;
     if !metadata.is_dir() {
-        return Err(AppError::Validation(format!(
-            "Path is not a directory: {path}"
-        )));
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_BROWSE_PATH_NOT_DIRECTORY,
+            format!("Path is not a directory: {path}"),
+        ));
     }
 
     fs::read_dir(target).map_err(|error| browse_path_io_error(path, error))
@@ -130,7 +134,16 @@ fn browse_path_io_error(path: &str, error: io::Error) -> AppError {
         io::ErrorKind::PermissionDenied => format!("Directory is not readable: {path}"),
         _ => format!("Directory cannot be opened: {path}"),
     };
-    AppError::Validation(message)
+    let reason = match error.kind() {
+        io::ErrorKind::NotFound => {
+            scryer_interface_core::refusal::INTERFACE_BROWSE_DIRECTORY_MISSING
+        }
+        io::ErrorKind::PermissionDenied => {
+            scryer_interface_core::refusal::INTERFACE_BROWSE_DIRECTORY_UNREADABLE
+        }
+        _ => scryer_interface_core::refusal::INTERFACE_BROWSE_DIRECTORY_UNAVAILABLE,
+    };
+    AppError::validation_refused(reason, message)
 }
 
 async fn require_library_settings_permission(ctx: &Context<'_>) -> GqlResult<()> {
@@ -152,7 +165,12 @@ fn supported_title_history_values_message() -> String {
 fn parse_required_datetime(value: &str, field: &str) -> Result<DateTime<Utc>, AppError> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
-        .map_err(|error| AppError::Validation(format!("invalid {field} timestamp: {error}")))
+        .map_err(|error| {
+            AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_TIMESTAMP_INVALID,
+                format!("invalid {field} timestamp: {error}"),
+            )
+        })
 }
 
 fn from_tracked_rule_pack(
@@ -213,10 +231,13 @@ fn parse_supported_title_history_event_types(
     for value in event_types {
         let event_type = value.into_domain();
         if !is_supported_title_history_event_type(event_type) {
-            return Err(to_gql_error(AppError::Validation(format!(
-                "unsupported title history event type `{}`. Supported values: {supported_values}",
-                event_type.as_str()
-            ))));
+            return Err(to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_HISTORY_EVENT_TYPE_INVALID,
+                format!(
+                    "unsupported title history event type `{}`. Supported values: {supported_values}",
+                    event_type.as_str()
+                ),
+            )));
         }
         parsed.push(event_type);
     }
@@ -285,9 +306,10 @@ fn title_catalog_tag_filter_keys(
 ) -> Result<Vec<String>, AppError> {
     let keys = keys.unwrap_or_default();
     if keys.iter().any(|key| key.trim().is_empty()) {
-        return Err(AppError::Validation(format!(
-            "title catalog {field_name} entries must not be blank"
-        )));
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_CATALOG_FILTER_BLANK,
+            format!("title catalog {field_name} entries must not be blank"),
+        ));
     }
     Ok(keys)
 }
@@ -303,7 +325,10 @@ fn title_catalog_user_tags(tags: Option<Vec<String>>) -> Result<Vec<String>, App
         return Ok(Vec::new());
     }
     scryer_application::normalize_user_title_tags(&tags).map_err(|error| {
-        AppError::Validation(format!("title catalog tags entries are invalid: {error}"))
+        AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_CATALOG_TAG_FILTER_INVALID,
+            format!("title catalog tags entries are invalid: {error}"),
+        )
     })
 }
 
@@ -316,13 +341,15 @@ fn title_catalog_filter_from_input(
     if let (Some(minimum_year), Some(maximum_year)) = (filter.minimum_year, filter.maximum_year)
         && minimum_year > maximum_year
     {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_CATALOG_YEARS_INVALID,
             "title catalog minimumYear must not exceed maximumYear".to_owned(),
         ));
     }
     let minimum_rating = filter.minimum_rating;
     if minimum_rating.is_some_and(|rating| !rating.is_finite() || !(0.0..=10.0).contains(&rating)) {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_CATALOG_RATING_INVALID,
             "title catalog minimumRating must be a finite value between 0 and 10".to_owned(),
         ));
     }
@@ -493,7 +520,7 @@ fn from_acquisition_search_job_view(
     let started_at = chrono::DateTime::parse_from_rfc3339(&view.started_at)
         .map(|dt| dt.with_timezone(&chrono::Utc))
         .map_err(|error| {
-            scryer_application::AppError::Validation(format!(
+            scryer_application::AppError::Repository(format!(
                 "invalid acquisition search job started_at: {error}"
             ))
         })?;
@@ -963,8 +990,9 @@ impl IndexerErrorQueries {
         require_app_permission(ctx, AppPermission::ManageSystemSettings).await?;
         let first = first.unwrap_or(50);
         if !(1..=100).contains(&first) {
-            return Err(to_gql_error(AppError::Validation(
-                "indexerErrors.first must be between 1 and 100".to_string(),
+            return Err(to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_INDEXER_ERROR_LIMIT_INVALID,
+                "indexerErrors.first must be between 1 and 100",
             )));
         }
         let app = app_from_ctx(ctx)?;
@@ -2071,8 +2099,9 @@ impl CatalogQueries {
         // One-shot search is title-anchored only; a query subject is a job
         // (`startInteractiveReleaseSearch`), never a blocking resolver.
         let Some(title_id) = title_id else {
-            return Err(to_gql_error(AppError::Validation(
-                "searchReleases requires a title id".to_string(),
+            return Err(to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_RELEASE_SEARCH_TITLE_REQUIRED,
+                "searchReleases requires a title id",
             )));
         };
 
@@ -2111,13 +2140,15 @@ impl CatalogQueries {
                 .await
                 .map_err(to_gql_error)?,
             (None, Some(_), None) | (None, None, Some(_)) => {
-                return Err(to_gql_error(AppError::Validation(
-                    "episode searches require both season and episode".to_string(),
+                return Err(to_gql_error(AppError::validation_refused(
+                    scryer_interface_core::refusal::INTERFACE_RELEASE_SEARCH_EPISODE_INCOMPLETE,
+                    "episode searches require both season and episode",
                 )));
             }
             (Some(_), Some(_), _) | (Some(_), _, Some(_)) => {
-                return Err(to_gql_error(AppError::Validation(
-                    "series movie searches cannot include season or episode".to_string(),
+                return Err(to_gql_error(AppError::validation_refused(
+                    scryer_interface_core::refusal::INTERFACE_RELEASE_SEARCH_MOVIE_SCOPE_INVALID,
+                    "series movie searches cannot include season or episode",
                 )));
             }
         };
@@ -2688,11 +2719,13 @@ impl JobAndDownloadQueries {
                 app.list_custom_job_runs(&actor, custom_job_id.as_str(), limit)
                     .await
             }
-            (JobKeyValue::CustomJob, None) => Err(AppError::Validation(
-                "customJobId is required for CUSTOM_JOB".to_string(),
+            (JobKeyValue::CustomJob, None) => Err(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_CUSTOM_JOB_ID_REQUIRED,
+                "customJobId is required for CUSTOM_JOB",
             )),
-            (_, Some(_)) => Err(AppError::Validation(
-                "customJobId is only accepted with CUSTOM_JOB".to_string(),
+            (_, Some(_)) => Err(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_CUSTOM_JOB_ID_UNEXPECTED,
+                "customJobId is only accepted with CUSTOM_JOB",
             )),
             (job_key, None) => {
                 app.list_job_runs(&actor, job_key.into_application(), limit)
@@ -3198,7 +3231,11 @@ impl SystemQueries {
                     quality: r.quality,
                     size_bytes: r.size_bytes.map(Long::from),
                     occurred_at: DateTime::parse_from_rfc3339(&r.occurred_at)
-                        .map_err(|_| async_graphql::Error::new("Invalid import event timestamp"))?
+                        .map_err(|_| {
+                            to_gql_error(scryer_application::AppError::Repository(
+                                "Invalid import event timestamp".into(),
+                            ))
+                        })?
                         .with_timezone(&Utc),
                 })
             })
@@ -3390,7 +3427,7 @@ impl SystemQueries {
             .into_iter()
             .map(from_backup_info)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| to_gql_error(AppError::Validation(error)))
+            .map_err(|error| to_gql_error(AppError::Repository(error)))
     }
 
     /// List a bounded page of pending releases with optional title, wanted-item, and status filters.
@@ -4172,7 +4209,11 @@ impl AcquisitionQueries {
             .map_err(to_gql_error)?;
         async_graphql::Value::from_json(settings)
             .map(async_graphql::Json)
-            .map_err(|_| async_graphql::Error::new("unable to serialize plugin settings"))
+            .map_err(|_| {
+                to_gql_error(scryer_application::AppError::Repository(
+                    "unable to serialize plugin settings".into(),
+                ))
+            })
     }
 
     /// List available registry plugins visible to the caller.

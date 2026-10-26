@@ -448,10 +448,10 @@ pub trait FacetHandler: Send + Sync {
         language: &str,
     ) -> AppResult<HydrationResult> {
         let _ = (gateway, series_ref, language);
-        Err(crate::AppError::Validation(format!(
-            "{} titles have no series metadata",
-            self.facet_id()
-        )))
+        Err(crate::AppError::validation_refused(
+            crate::error_reasons::catalog::TITLES_NO_SERIES_METADATA,
+            format!("{} titles have no series metadata", self.facet_id()),
+        ))
     }
 }
 

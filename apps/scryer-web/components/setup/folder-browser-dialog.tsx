@@ -95,7 +95,7 @@ export function FolderBrowserDialog({
         setEntries([]);
         setBrowsedPath(null);
         setError(
-          userFacingGraphQlErrorMessage(gqlError, t("folderBrowser.error")),
+          userFacingGraphQlErrorMessage(gqlError, t("folderBrowser.error"), t),
         );
         return;
       }

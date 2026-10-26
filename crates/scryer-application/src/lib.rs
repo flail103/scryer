@@ -41,6 +41,7 @@ pub use download_identity::{
     accepted_download_submission_identity, download_id_from_info_hash,
     download_submission_identity_is_empty, normalize_torrent_info_hash, observed_download_identity,
 };
+pub mod error_reasons;
 pub mod escalation_backoff;
 mod events;
 pub mod external_import;
@@ -859,10 +860,34 @@ impl RefusalFact {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+/// Rule source facts retained by both validation and save refusals.
+pub use scryer_rules::validation::ValidationDiagnostic as RuleValidationDiagnostic;
+
+/// Driver-independent classification retained at the repository boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RepositoryErrorKind {
+    UniqueViolation,
+    TitleExternalIdConflict,
+    ForeignKeyViolation,
+    NotNullViolation,
+    CheckViolation,
+    Busy,
+    StartupWindowExhausted,
+    MissingTable,
+    Other,
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum AppError {
     #[error("unauthorized: {0}")]
     Unauthorized(String),
+
+    /// An authorization failure with a stable public condition.
+    #[error("unauthorized: {message}")]
+    UnauthorizedReason {
+        message: String,
+        reason: &'static str,
+    },
 
     #[error("validation: {0}")]
     Validation(String),
@@ -886,6 +911,15 @@ pub enum AppError {
         message: String,
         reason: &'static str,
         facts: Vec<RefusalFact>,
+        diagnostics: Vec<RuleValidationDiagnostic>,
+    },
+
+    /// A named refusal carrying the candidate count needed to confirm again.
+    #[error("validation: {message}")]
+    ValidationRefusedWithCount {
+        message: String,
+        reason: &'static str,
+        current_count: i64,
     },
 
     /// A title mutation is deferred until its location operation releases ownership.
@@ -943,6 +977,13 @@ pub enum AppError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    /// A missing resource with a stable public condition.
+    #[error("not found: {message}")]
+    NotFoundReason {
+        message: String,
+        reason: &'static str,
+    },
+
     #[error("{0}")]
     DownloadFeedbackTimeout(String),
 
@@ -999,6 +1040,7 @@ pub enum AppError {
     #[error("{message}")]
     TemporaryUnavailable {
         message: String,
+        reason: Option<&'static str>,
         retry_after: Option<std::time::Duration>,
         rate_limit_cooldown: RateLimitCooldownAction,
     },
@@ -1066,6 +1108,13 @@ pub enum AppError {
     #[error("repository: {0}")]
     Repository(String),
 
+    /// A repository failure with a driver-independent kind; its text stays internal.
+    #[error("repository: {message}")]
+    RepositoryFailure {
+        message: String,
+        kind: RepositoryErrorKind,
+    },
+
     /// A repository fault with a stable workflow reason. The diagnostic remains
     /// internal; API adapters mask it just like `Repository` while exposing the reason.
     #[error("repository: {message}")]
@@ -1076,6 +1125,46 @@ pub enum AppError {
 }
 
 impl AppError {
+    pub fn not_found_reason(reason: &'static str, message: impl Into<String>) -> Self {
+        Self::NotFoundReason {
+            message: message.into(),
+            reason,
+        }
+    }
+
+    pub fn unauthorized_reason(reason: &'static str, message: impl Into<String>) -> Self {
+        Self::UnauthorizedReason {
+            message: message.into(),
+            reason,
+        }
+    }
+
+    pub fn repository_failure(kind: RepositoryErrorKind, message: impl Into<String>) -> Self {
+        Self::RepositoryFailure {
+            message: message.into(),
+            kind,
+        }
+    }
+
+    pub fn repository_kind(&self) -> Option<RepositoryErrorKind> {
+        match self {
+            Self::RepositoryFailure { kind, .. } => Some(*kind),
+            _ => None,
+        }
+    }
+
+    pub fn validation_refused_with_count(
+        reason: &'static str,
+        message: impl Into<String>,
+        current_count: i64,
+    ) -> Self {
+        Self::ValidationRefusedWithCount {
+            message: message.into(),
+            reason,
+            current_count,
+        }
+    }
+
     pub fn canceled(message: impl Into<String>) -> Self {
         Self::Canceled(message.into())
     }
@@ -1087,6 +1176,7 @@ impl AppError {
             message: message.into(),
             reason,
             facts: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -1101,6 +1191,21 @@ impl AppError {
             message: message.into(),
             reason,
             facts,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    /// A source validation refusal retains diagnostics at the save boundary.
+    pub fn validation_refused_with_diagnostics(
+        reason: &'static str,
+        message: impl Into<String>,
+        diagnostics: Vec<RuleValidationDiagnostic>,
+    ) -> Self {
+        Self::ValidationRefused {
+            message: message.into(),
+            reason,
+            facts: Vec::new(),
+            diagnostics,
         }
     }
 
@@ -1115,7 +1220,8 @@ impl AppError {
     /// The stable reason a validation failure names, if it names one.
     pub fn validation_reason(&self) -> Option<&'static str> {
         match self {
-            Self::ValidationRefused { reason, .. } => Some(reason),
+            Self::ValidationRefused { reason, .. }
+            | Self::ValidationRefusedWithCount { reason, .. } => Some(reason),
             _ => None,
         }
     }
@@ -1123,7 +1229,10 @@ impl AppError {
     /// The stable condition named by a validation or repository failure.
     pub fn reason(&self) -> Option<&'static str> {
         match self {
-            Self::RepositoryFailed { reason, .. } => Some(reason),
+            Self::RepositoryFailed { reason, .. }
+            | Self::NotFoundReason { reason, .. }
+            | Self::UnauthorizedReason { reason, .. } => Some(reason),
+            Self::TemporaryUnavailable { reason, .. } => *reason,
             _ => self.validation_reason(),
         }
     }
@@ -1195,6 +1304,7 @@ impl AppError {
     ) -> Self {
         Self::TemporaryUnavailable {
             message: message.into(),
+            reason: None,
             retry_after,
             rate_limit_cooldown: RateLimitCooldownAction::None,
         }
@@ -1207,8 +1317,23 @@ impl AppError {
     ) -> Self {
         Self::TemporaryUnavailable {
             message: message.into(),
+            reason: None,
             retry_after,
             rate_limit_cooldown,
+        }
+    }
+
+    /// Retryable failure with a stable condition beside its retry policy.
+    pub fn temporary_unavailable_reason(
+        reason: &'static str,
+        message: impl Into<String>,
+        retry_after: Option<std::time::Duration>,
+    ) -> Self {
+        Self::TemporaryUnavailable {
+            message: message.into(),
+            reason: Some(reason),
+            retry_after,
+            rate_limit_cooldown: RateLimitCooldownAction::None,
         }
     }
 

@@ -199,9 +199,10 @@ fn resolve_mfa_route_requirement(
     if let (Some(generic), Some(legacy)) = (generic, legacy)
         && generic != legacy
     {
-        return Err(to_gql_error(AppError::Validation(format!(
-            "conflicting MFA requirements for {route} login"
-        ))));
+        return Err(to_gql_error(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_LOGIN_MFA_CONFLICT,
+            format!("conflicting MFA requirements for {route} login"),
+        )));
     }
     Ok(generic.or(legacy))
 }
@@ -245,8 +246,9 @@ fn ensure_media_server_login_allowed(
     effective_form_login_enabled: bool,
 ) -> Result<(), AppError> {
     if requested_login_enabled.unwrap_or(false) && !effective_form_login_enabled {
-        Err(AppError::Validation(
-            MEDIA_SERVER_LOGIN_REQUIRES_FORM_LOGIN.to_string(),
+        Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_LOGIN_FORM_REQUIRED,
+            MEDIA_SERVER_LOGIN_REQUIRES_FORM_LOGIN,
         ))
     } else {
         Ok(())
@@ -705,18 +707,21 @@ fn quality_profile_from_input(
     });
 
     if profile.id.is_empty() {
-        return Err(to_gql_error(AppError::Validation(
-            "quality profile id is required".to_string(),
+        return Err(to_gql_error(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_ID_REQUIRED,
+            "quality profile id is required",
         )));
     }
     if profile.name.is_empty() {
-        return Err(to_gql_error(AppError::Validation(
-            "quality profile name is required".to_string(),
+        return Err(to_gql_error(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_NAME_REQUIRED,
+            "quality profile name is required",
         )));
     }
     if profile.criteria.quality_tiers.is_empty() {
-        return Err(to_gql_error(AppError::Validation(
-            "quality profile must include at least one quality tier".to_string(),
+        return Err(to_gql_error(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_TIERS_REQUIRED,
+            "quality profile must include at least one quality tier",
         )));
     }
 
@@ -732,9 +737,10 @@ fn parse_video_codec_values(
         .map(|value| {
             let trimmed = value.trim().to_string();
             scryer_application::VideoCodec::parse(trimmed.as_str()).ok_or_else(|| {
-                to_gql_error(AppError::Validation(format!(
-                    "invalid value {trimmed:?} for {field}"
-                )))
+                to_gql_error(AppError::validation_refused(
+                    scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_VALUE_INVALID,
+                    format!("invalid value {trimmed:?} for {field}"),
+                ))
             })
         })
         .collect()
@@ -749,9 +755,10 @@ fn parse_source_values(
         .map(|value| {
             let trimmed = value.trim().to_string();
             scryer_application::ReleaseSource::parse(trimmed.as_str()).ok_or_else(|| {
-                to_gql_error(AppError::Validation(format!(
-                    "invalid value {trimmed:?} for {field}"
-                )))
+                to_gql_error(AppError::validation_refused(
+                    scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_VALUE_INVALID,
+                    format!("invalid value {trimmed:?} for {field}"),
+                ))
             })
         })
         .collect()
@@ -766,9 +773,10 @@ fn parse_audio_codec_values(
         .map(|value| {
             let trimmed = value.trim().to_string();
             scryer_application::AudioCodec::parse(trimmed.as_str()).ok_or_else(|| {
-                to_gql_error(AppError::Validation(format!(
-                    "invalid value {trimmed:?} for {field}"
-                )))
+                to_gql_error(AppError::validation_refused(
+                    scryer_interface_core::refusal::INTERFACE_QUALITY_PROFILE_VALUE_INVALID,
+                    format!("invalid value {trimmed:?} for {field}"),
+                ))
             })
         })
         .collect()
@@ -1133,8 +1141,9 @@ impl SettingsMutations {
             "Jellyfin",
         )?
         .ok_or_else(|| {
-            to_gql_error(AppError::Validation(
-                "an MFA requirement for Jellyfin login is required".into(),
+            to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_LOGIN_MFA_REQUIRED,
+                "an MFA requirement for Jellyfin login is required",
             ))
         })?;
         let emby_mfa_requirement = resolve_mfa_route_requirement(
@@ -1580,7 +1589,12 @@ impl SettingsMutations {
             .map_err(to_gql_error)?
             .into_iter()
             .find(|summary| summary.definition.id == id)
-            .ok_or_else(|| to_gql_error(AppError::NotFound(format!("title tag {id}"))))?;
+            .ok_or_else(|| {
+                to_gql_error(AppError::not_found_reason(
+                    scryer_interface_core::refusal::INTERFACE_TAG_NOT_FOUND,
+                    format!("title tag {id}"),
+                ))
+            })?;
         let counts = app
             .delete_title_tag_definition(&actor, &id)
             .await
@@ -2645,7 +2659,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            AppError::Validation(message) if message == MEDIA_SERVER_LOGIN_REQUIRES_FORM_LOGIN
+            AppError::ValidationRefused { message, .. } if message == MEDIA_SERVER_LOGIN_REQUIRES_FORM_LOGIN
         ));
     }
 

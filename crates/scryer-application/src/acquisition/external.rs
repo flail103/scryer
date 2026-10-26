@@ -105,34 +105,43 @@ impl ExternalReleaseInput {
         let source = self.source.trim();
         let download_url = self.download_url.trim();
         if download_url.len() > 16_384 || self.flags.len() > 32 {
-            return Err(AppError::Validation(
-                "release URL or flag list exceeds the input limit".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::RELEASE_URL_FLAG_LIST_EXCEEDS_INPUT_LIMIT,
+                "release URL or flag list exceeds the input limit",
             ));
         }
         if name.is_empty() || name.len() > 2048 || source.is_empty() || source.len() > 256 {
-            return Err(AppError::Validation(
-                "release name and source are required and must be bounded".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::RELEASE_NAME_SOURCE_REQUIRED_INVALID,
+                "release name and source are required and must be bounded",
             ));
         }
         if self.size_bytes.is_some_and(|size| size < 0) {
-            return Err(AppError::Validation(
-                "release size must not be negative".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::RELEASE_SIZE_OUT_OF_RANGE,
+                "release size must not be negative",
             ));
         }
         let magnet_hash = crate::extract_magnet_info_hash(download_url);
         let source_kind = if magnet_hash.is_some() {
             if self.protocol != ExternalReleaseProtocol::Torrent {
-                return Err(AppError::Validation(
-                    "a magnet requires the torrent protocol".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::acquisition::MAGNET_REQUIRES_TORRENT_PROTOCOL,
+                    "a magnet requires the torrent protocol",
                 ));
             }
             DownloadSourceKind::MagnetUri
         } else {
-            let url = url::Url::parse(download_url)
-                .map_err(|_| AppError::Validation("release download URL is invalid".into()))?;
+            let url = url::Url::parse(download_url).map_err(|_| {
+                AppError::validation_refused(
+                    crate::error_reasons::acquisition::RELEASE_DOWNLOAD_URL_INVALID,
+                    "release download URL is invalid",
+                )
+            })?;
             if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-                return Err(AppError::Validation(
-                    "release URL must use HTTP, HTTPS, or a valid magnet".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::acquisition::RELEASE_URL_INVALID,
+                    "release URL must use HTTP, HTTPS, or a valid magnet",
                 ));
             }
             match self.protocol {
@@ -168,9 +177,10 @@ impl ExternalReleaseInput {
                     | "golden"
                     | "approved"
             ) {
-                return Err(AppError::Validation(format!(
-                    "unsupported release flag: {flag}"
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::acquisition::RELEASE_FLAG_UNSUPPORTED,
+                    format!("unsupported release flag: {flag}"),
+                ));
             }
             extra.insert(flag, serde_json::Value::Bool(true));
         }
@@ -245,7 +255,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&matched.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound("matched title no longer exists".into()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::acquisition::MATCHED_TITLE_NO_LONGER_EXISTS_NOT_FOUND,
+                    "matched title no longer exists",
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,

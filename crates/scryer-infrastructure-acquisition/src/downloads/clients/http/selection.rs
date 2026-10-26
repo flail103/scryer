@@ -237,9 +237,10 @@ pub(crate) fn validate_output_basename(raw: &str) -> AppResult<&str> {
     if valid {
         Ok(basename)
     } else {
-        Err(AppError::Validation(format!(
-            "the output name {raw:?} is not a plain file name"
-        )))
+        Err(AppError::validation_refused(
+            crate::error_reasons::ACQUISITION_OUTPUT_FILENAME_INVALID,
+            format!("the output name {raw:?} is not a plain file name"),
+        ))
     }
 }
 

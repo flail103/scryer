@@ -34,6 +34,7 @@ impl Respond for Pages {
 
 fn config(provider: &str, base: &str) -> IndexerConfig {
     IndexerConfig {
+        last_error_code: None,
         id: "packaged-indexer".into(),
         name: "Packaged fixture".into(),
         provider_type: provider.into(),

@@ -48,16 +48,22 @@ pub(crate) fn verify_resolved_http_release(
     resolved: &PluginHttpRelease,
 ) -> AppResult<()> {
     if resolved.item_id != listed.item_id {
-        return Err(AppError::Validation(format!(
-            "the indexer resolved a different item ({} instead of {}); refusing to submit",
-            resolved.item_id, listed.item_id
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::INDEXER_RESOLVED_DIFFERENT_ITEM,
+            format!(
+                "the indexer resolved a different item ({} instead of {}); refusing to submit",
+                resolved.item_id, listed.item_id
+            ),
+        ));
     }
     if resolved.page_url != listed.page_url {
-        return Err(AppError::Validation(format!(
-            "the indexer resolved a different page ({} instead of {}); refusing to submit",
-            resolved.page_url, listed.page_url
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::INDEXER_RESOLVED_DIFFERENT_PAGE,
+            format!(
+                "the indexer resolved a different page ({} instead of {}); refusing to submit",
+                resolved.page_url, listed.page_url
+            ),
+        ));
     }
     Ok(())
 }
@@ -505,14 +511,30 @@ mod tests {
             ..listed.clone()
         };
         let error = verify_resolved_http_release(&listed, &other_item).unwrap_err();
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
 
         let other_page = PluginHttpRelease {
             page_url: "https://provider.invalid/watch/item-1?alt=1".into(),
             ..listed.clone()
         };
         let error = verify_resolved_http_release(&listed, &other_page).unwrap_err();
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
     }
 
     #[test]

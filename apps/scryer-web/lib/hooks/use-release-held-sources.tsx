@@ -115,7 +115,7 @@ export function useReleaseHeldSources(onReleased: (item: DownloadQueueItem) => P
         try {
           const result = await execute({ input: { importId: held.importId } });
           if (result.error) {
-            setStatus(userFacingGraphQlErrorMessage(result.error, t("queue.releaseHeldSourcesFailed")), { level: "ERROR" });
+            setStatus(userFacingGraphQlErrorMessage(result.error, t("queue.releaseHeldSourcesFailed"), t), { level: "ERROR" });
             return;
           }
           const released = result.data?.releaseHeldImportSources as HeldImportSourcesReleased | undefined;
@@ -129,7 +129,7 @@ export function useReleaseHeldSources(onReleased: (item: DownloadQueueItem) => P
           setTarget(null);
           await onReleased(target);
         } catch (error: unknown) {
-          setStatus(userFacingGraphQlErrorMessage(error, t("queue.releaseHeldSourcesFailed")), { level: "ERROR" });
+          setStatus(userFacingGraphQlErrorMessage(error, t("queue.releaseHeldSourcesFailed"), t), { level: "ERROR" });
         } finally {
           setBusy(false);
         }

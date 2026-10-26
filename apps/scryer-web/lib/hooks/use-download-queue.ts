@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 
@@ -152,7 +153,7 @@ export function useDownloadQueue({
         return;
       }
       const message =
-        error instanceof Error ? error.message : "Failed to load queue.";
+        userFacingGraphQlErrorMessage(error, "Failed to load queue.");
       setQueueError(message);
       if (lastReportedErrorRef.current !== message) {
         lastReportedErrorRef.current = message;

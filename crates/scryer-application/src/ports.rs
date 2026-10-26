@@ -2020,8 +2020,9 @@ pub trait TitleRepository: Send + Sync {
         match matches.as_slice() {
             [] => Ok(None),
             [title] => Ok(Some(title.clone())),
-            _ => Err(AppError::Validation(
-                "multiple titles found for slug lookup".into(),
+            _ => Err(AppError::validation_refused(
+                crate::error_reasons::ports::MULTIPLE_TITLES_FOUND_SLUG_LOOKUP,
+                "multiple titles found for slug lookup",
             )),
         }
     }
@@ -3100,8 +3101,9 @@ pub trait ImageProxyCacheControl: Send + Sync {
 pub trait TitleImageProcessor: Send + Sync {
     /// A separate fast preset for disposable proxy artwork, on the configured pool.
     async fn encode_cached_jpeg(&self, _bytes: Vec<u8>, _width: u32) -> AppResult<Vec<u8>> {
-        Err(AppError::Validation(
-            "cached JPEG encoding is unavailable".into(),
+        Err(AppError::validation_refused(
+            crate::error_reasons::ports::CACHED_JPEG_ENCODING_UNAVAILABLE,
+            "cached JPEG encoding is unavailable",
         ))
     }
 
@@ -4614,7 +4616,12 @@ pub trait IndexerConfigRepository: Send + Sync {
     async fn get_by_id(&self, id: &str) -> AppResult<Option<IndexerConfig>>;
     async fn create(&self, config: IndexerConfig) -> AppResult<IndexerConfig>;
     async fn touch_last_error(&self, id: &str) -> AppResult<()>;
-    async fn record_last_error(&self, id: &str, _message: Option<String>) -> AppResult<()> {
+    async fn record_last_error(
+        &self,
+        id: &str,
+        _message: Option<String>,
+        _code: Option<String>,
+    ) -> AppResult<()> {
         self.touch_last_error(id).await
     }
     async fn clear_last_error(&self, _id: &str) -> AppResult<()> {
@@ -4625,6 +4632,7 @@ pub trait IndexerConfigRepository: Send + Sync {
         &self,
         expected: &IndexerConfig,
         message: Option<String>,
+        code: Option<String>,
     ) -> AppResult<bool> {
         let Some(current) = self.get_by_id(&expected.id).await? else {
             return Ok(false);
@@ -4632,12 +4640,13 @@ pub trait IndexerConfigRepository: Send + Sync {
         if current.updated_at != expected.updated_at
             || current.last_error_at != expected.last_error_at
             || current.last_error_message != expected.last_error_message
+            || current.last_error_code != expected.last_error_code
             || current.last_health_status != expected.last_health_status
         {
             return Ok(false);
         }
         if message.is_some() {
-            self.record_last_error(&expected.id, message).await?;
+            self.record_last_error(&expected.id, message, code).await?;
         } else {
             self.clear_last_error(&expected.id).await?;
         }
@@ -4661,13 +4670,16 @@ pub trait IndexerConfigRepository: Send + Sync {
         update: IndexerConfigUpdate,
         expected_updated_at: chrono::DateTime<chrono::Utc>,
     ) -> AppResult<IndexerConfig> {
-        let current = self
-            .get_by_id(&update.id)
-            .await?
-            .ok_or_else(|| AppError::NotFound("indexer configuration".into()))?;
+        let current = self.get_by_id(&update.id).await?.ok_or_else(|| {
+            AppError::not_found_reason(
+                crate::error_reasons::ports::INDEXER_CONFIGURATION_NOT_FOUND,
+                "indexer configuration",
+            )
+        })?;
         if current.updated_at != expected_updated_at {
-            return Err(AppError::Validation(
-                "Indexer settings changed during validation; reload and try again".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ports::INDEXER_SETTINGS_CHANGED_DURING_VALIDATION,
+                "Indexer settings changed during validation; reload and try again",
             ));
         }
         self.update(update).await
@@ -7664,8 +7676,9 @@ pub trait MediaAnalyzer: Send + Sync {
         _path: PathBuf,
         _selection: scryer_media_types::DiscSelection,
     ) -> AppResult<scryer_media_types::StructuralDiagnostics> {
-        Err(crate::AppError::Validation(
-            "structural diagnostics are unsupported by this analyzer".into(),
+        Err(crate::AppError::validation_refused(
+            crate::error_reasons::ports::STRUCTURAL_DIAGNOSTICS_UNSUPPORTED_ANALYZER,
+            "structural diagnostics are unsupported by this analyzer",
         ))
     }
     async fn analyze_file(&self, path: PathBuf) -> AppResult<MediaAnalysisOutcome>;
@@ -7675,8 +7688,9 @@ pub trait MediaAnalyzer: Send + Sync {
         selection: scryer_media_types::DiscSelection,
     ) -> AppResult<MediaAnalysisOutcome> {
         if selection.title_id.is_some() || !selection.episode_mappings.is_empty() {
-            return Err(crate::AppError::Validation(
-                "disc title selection is unsupported by this analyzer".into(),
+            return Err(crate::AppError::validation_refused(
+                crate::error_reasons::ports::DISC_TITLE_SELECTION_UNSUPPORTED_ANALYZER,
+                "disc title selection is unsupported by this analyzer",
             ));
         }
         self.analyze_file(path).await
@@ -11129,15 +11143,19 @@ pub struct IndexerGrabSelection {
 impl IndexerGrabSelection {
     pub fn validate(&self) -> AppResult<()> {
         if self.client_id.trim().is_empty() {
-            return Err(AppError::Validation("select a download client".into()));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ports::SELECT_DOWNLOAD_CLIENT,
+                "select a download client",
+            ));
         }
         if self
             .category
             .as_ref()
             .is_some_and(|category| category.len() > 255 || category.chars().any(char::is_control))
         {
-            return Err(AppError::Validation(
-                "category must be at most 255 bytes without control characters".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ports::CATEGORY_OUT_OF_RANGE,
+                "category must be at most 255 bytes without control characters",
             ));
         }
         Ok(())
@@ -11152,8 +11170,9 @@ pub trait DownloadClient: Send + Sync {
         _indexer_id: Option<&str>,
         _source_kind: DownloadSourceKind,
     ) -> AppResult<Vec<IndexerGrabClient>> {
-        Err(AppError::Validation(
-            "client routing discovery is unsupported".into(),
+        Err(AppError::validation_refused(
+            crate::error_reasons::ports::CLIENT_ROUTING_DISCOVERY_UNSUPPORTED,
+            "client routing discovery is unsupported",
         ))
     }
 
@@ -11213,8 +11232,9 @@ pub trait DownloadClient: Send + Sync {
         &self,
         _request: &DownloadClientAddRequest,
     ) -> AppResult<ResolvedDownloadArtifact> {
-        Err(AppError::Validation(
-            "artifact download is not supported by this client".into(),
+        Err(AppError::validation_refused(
+            crate::error_reasons::ports::ARTIFACT_DOWNLOAD_UNSUPPORTED,
+            "artifact download is not supported by this client",
         ))
     }
 

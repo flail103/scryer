@@ -1,3 +1,5 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
+import { hasGraphQlErrorReason } from "@/lib/graphql/error-message";
 import * as React from "react";
 import { useClient } from "urql";
 import { ChevronDown, Tag, X } from "lucide-react";
@@ -108,7 +110,7 @@ export function TitleTagsPicker({
       let label: string | undefined = result.data?.createTitleTagDefinition?.definition?.label;
       let refreshedDefinitions: TitleTagDefinition[] | undefined;
       if (result.error) {
-        if (!result.error.message.toLowerCase().includes("already exists")) throw result.error;
+        if (!hasGraphQlErrorReason(result.error, "TAG_ALREADY_EXISTS", "VALIDATION_ERROR")) throw result.error;
         const refreshed = await client.query(titleTagDefinitionsQuery, {}, { requestPolicy: "network-only" }).toPromise();
         if (refreshed.error) throw refreshed.error;
         refreshedDefinitions = refreshed.data?.titleTagDefinitions;
@@ -119,7 +121,7 @@ export function TitleTagsPicker({
       refreshTitleTagConsumers(client, refreshedDefinitions);
       addLabel(label);
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : t("settings.titleTagSaveError"));
+      setCreateError(userFacingGraphQlErrorMessage(error, t("settings.titleTagSaveError"), t));
     } finally {
       busyRef.current = false;
       setCreating(false);
@@ -291,7 +293,7 @@ export function TitleTagsEditor({
         await onTitleChanged?.();
       } catch (error: unknown) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -386,7 +388,7 @@ export function SeriesMovieTagsEditor({
         await onLinkChanged?.();
       } catch (error: unknown) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {

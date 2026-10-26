@@ -1191,9 +1191,13 @@ impl MetadataGatewayClient {
 
                 // Check for PersistedQueryNotFound before caching
                 if let Some(ref errors) = parsed.errors {
-                    let is_not_found = errors
-                        .iter()
-                        .any(|e| e.message.contains("PersistedQueryNotFound"));
+                    let is_not_found = errors.iter().any(|e| {
+                        e.extensions
+                            .as_ref()
+                            .and_then(|extensions| extensions.get("code"))
+                            .and_then(serde_json::Value::as_str)
+                            == Some("PERSISTED_QUERY_NOT_FOUND")
+                    });
                     if is_not_found {
                         debug!(hash, "APQ cache miss, registering via POST");
                         return self
@@ -2975,7 +2979,7 @@ mod tests {
         json!({
             "errors": [
                 {
-                    "message": "PersistedQueryNotFound"
+                    "message": "wording is irrelevant", "extensions": {"code": "PERSISTED_QUERY_NOT_FOUND"}
                 }
             ]
         })
@@ -3964,7 +3968,7 @@ mod tests {
             .expect_err("an auth rejection must not fall back to an anonymous request");
         assert!(matches!(
             error,
-            AppError::Repository(message)
+            AppError::Repository(message) | AppError::RepositoryFailure { message, .. }
                 if message == "SMG instance auth enrollment failed: SMG enrollment persistence is not implemented for this datastore engine"
         ));
 
@@ -4003,7 +4007,7 @@ mod tests {
             .expect_err("public discovery must require configured instance auth");
         assert!(matches!(
             error,
-            AppError::Repository(message)
+            AppError::Repository(message) | AppError::RepositoryFailure { message, .. }
                 if message == "metadata gateway discovery requests require configured instance auth enrollment"
         ));
         assert!(
@@ -5648,6 +5652,8 @@ struct GraphqlResponse<T> {
 #[derive(Deserialize)]
 struct GraphqlError {
     message: String,
+    #[serde(default)]
+    extensions: Option<serde_json::Value>,
 }
 
 // --- Discovery types ---

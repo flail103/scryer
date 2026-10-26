@@ -22,6 +22,55 @@ const DEFAULT_TRACKED_DOWNLOAD_CACHE_MAX_ENTRIES: usize = 5_000;
 const PASSWORD_RETRY_RECONCILIATION_MESSAGE: &str =
     "Password retry is awaiting confirmation from the download client; sources are preserved.";
 
+/// Stable meaning of a runtime tracking status, separate from its display text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrackedStatusMessageKind {
+    #[default]
+    Informational,
+    IdOnlyConfirmation,
+    IdOnlyConflict,
+    WarningTimeout,
+    PasswordRetryReconciliation,
+    TitleUnmatched,
+    PathWaiting,
+    PathUnavailable,
+    PathUnsupported,
+    SceneSubtitlePending,
+    SeedingHold,
+    ManualReview,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackedStatusMessage {
+    pub kind: TrackedStatusMessageKind,
+    pub text: String,
+}
+impl TrackedStatusMessage {
+    pub fn new(kind: TrackedStatusMessageKind, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+        }
+    }
+}
+impl From<String> for TrackedStatusMessage {
+    fn from(text: String) -> Self {
+        Self::new(TrackedStatusMessageKind::Informational, text)
+    }
+}
+impl From<&str> for TrackedStatusMessage {
+    fn from(text: &str) -> Self {
+        Self::new(TrackedStatusMessageKind::Informational, text)
+    }
+}
+#[cfg(test)]
+pub(crate) fn status_texts(messages: &[TrackedStatusMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .map(|message| message.text.clone())
+        .collect()
+}
+
 // ── TrackedDownload ──────────────────────────────────────────────────────────
 
 /// A download being tracked through scryer's import workflow.
@@ -46,7 +95,7 @@ pub struct TrackedDownload {
     /// Health/warning overlay.
     pub status: TrackedDownloadStatus,
     /// Human-readable status messages.
-    pub status_messages: Vec<String>,
+    pub status_messages: Vec<TrackedStatusMessage>,
     /// Resolved scryer title.
     pub title_id: Option<String>,
     pub facet: Option<String>,
@@ -192,7 +241,11 @@ impl From<&TrackedDownload> for TrackedDownloadQueueMetadata {
             source_title: value.source_title.clone(),
             state: value.state,
             status: value.status,
-            status_messages: value.status_messages.clone(),
+            status_messages: value
+                .status_messages
+                .iter()
+                .map(|message| message.text.clone())
+                .collect(),
             match_type: value.match_type,
             import_hold: value.import_hold,
         }
@@ -206,7 +259,14 @@ impl TrackedDownload {
 
     pub fn warn(&mut self, message: impl Into<String>) {
         self.status = TrackedDownloadStatus::Warning;
-        self.status_messages.push(message.into());
+        self.status_messages
+            .push(TrackedStatusMessage::from(message.into()));
+    }
+
+    pub fn warn_kind(&mut self, kind: TrackedStatusMessageKind, text: impl Into<String>) {
+        self.status = TrackedDownloadStatus::Warning;
+        self.status_messages
+            .push(TrackedStatusMessage::new(kind, text));
     }
 
     pub fn clear_warnings(&mut self) {
@@ -290,7 +350,9 @@ impl TrackedDownload {
         self.state = TrackedDownloadState::ImportPending;
         self.waiting_for_completed_history = false;
         self.status = TrackedDownloadStatus::Warning;
-        self.status_messages = vec![message(attempts, next_retry_at)];
+        self.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            message(attempts, next_retry_at),
+        )];
         attempts
     }
 
@@ -313,7 +375,10 @@ impl TrackedDownload {
         self.state = TrackedDownloadState::ImportPending;
         self.waiting_for_completed_history = false;
         self.status = TrackedDownloadStatus::Warning;
-        self.status_messages = vec![message.into()];
+        self.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            TrackedStatusMessageKind::Informational,
+            message,
+        )];
     }
 
     pub(crate) fn block_no_video_import_after_retries(&mut self, message: impl Into<String>) {
@@ -321,7 +386,10 @@ impl TrackedDownload {
         self.state = TrackedDownloadState::ImportBlocked;
         self.waiting_for_completed_history = false;
         self.status = TrackedDownloadStatus::Warning;
-        self.status_messages = vec![message.into()];
+        self.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            TrackedStatusMessageKind::Informational,
+            message,
+        )];
     }
 
     pub(crate) fn clear_no_video_import_retry(&mut self) {
@@ -546,10 +614,9 @@ impl TrackedDownloadService {
                 }
                 if !observation.confirmed
                     || self.cache.get(&download_id).is_some_and(|tracked| {
-                        tracked
-                            .status_messages
-                            .iter()
-                            .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                        tracked.status_messages.iter().any(|message| {
+                            message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                        })
                     })
                 {
                     self.stop_tracking_download(download_id);
@@ -558,10 +625,9 @@ impl TrackedDownloadService {
             }
             Ok(None) => {
                 if self.cache.get(&download_id).is_some_and(|tracked| {
-                    tracked
-                        .status_messages
-                        .iter()
-                        .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                    tracked.status_messages.iter().any(|message| {
+                        message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                    })
                 }) {
                     // A definitive refusal may arrive after the pending poll.
                     self.stop_tracking_download(download_id);
@@ -656,7 +722,10 @@ impl TrackedDownloadService {
         tracked.state = TrackedDownloadState::ImportBlocked;
         tracked.import_attempted = true;
         tracked.status = TrackedDownloadStatus::Warning;
-        tracked.status_messages = vec![PASSWORD_RETRY_RECONCILIATION_MESSAGE.into()];
+        tracked.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            crate::tracked_downloads::TrackedStatusMessageKind::PasswordRetryReconciliation,
+            PASSWORD_RETRY_RECONCILIATION_MESSAGE,
+        )];
         self.current_download_for_id.insert(id, download_id);
         self.last_seen_at.insert(download_id, Utc::now());
     }
@@ -666,10 +735,9 @@ impl TrackedDownloadService {
             .cache
             .iter()
             .filter(|(_, tracked)| {
-                tracked
-                    .status_messages
-                    .iter()
-                    .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                tracked.status_messages.iter().any(|message| {
+                    message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                })
             })
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
@@ -971,11 +1039,14 @@ impl TrackedDownloadService {
         if !tracked
             .status_messages
             .iter()
-            .any(|message| message.starts_with(WARNING_TIMEOUT_STATUS_MESSAGE_PREFIX))
+            .any(|message| message.kind == TrackedStatusMessageKind::WarningTimeout)
         {
-            tracked.status_messages.push(format!(
-                "{WARNING_TIMEOUT_STATUS_MESSAGE_PREFIX} {attention_reason}"
-            ));
+            tracked
+                .status_messages
+                .push(crate::tracked_downloads::TrackedStatusMessage::new(
+                    crate::tracked_downloads::TrackedStatusMessageKind::WarningTimeout,
+                    format!("{WARNING_TIMEOUT_STATUS_MESSAGE_PREFIX} {attention_reason}"),
+                ));
         }
         // A completed torrent may still owe seeding. Reuse the burned-import
         // cleanup rail so only this path reaches its terminal removal gate.
@@ -1010,7 +1081,7 @@ impl TrackedDownloadService {
         if td
             .status_messages
             .iter()
-            .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+            .any(|message| message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation)
         {
             return true;
         }
@@ -1362,7 +1433,7 @@ impl TrackedDownloadService {
             let warning_timeout = td
                 .status_messages
                 .iter()
-                .find(|message| message.starts_with(WARNING_TIMEOUT_STATUS_MESSAGE_PREFIX));
+                .find(|message| message.kind == TrackedStatusMessageKind::WarningTimeout);
             (
                 Some(if warning_timeout.is_some() {
                     WARNING_TIMEOUT_TRACKED_STATE_REASON
@@ -1370,8 +1441,12 @@ impl TrackedDownloadService {
                     IMPORT_GATE_REJECTED_TRACKED_STATE_REASON
                 }),
                 warning_timeout
-                    .map(String::as_str)
-                    .or_else(|| td.status_messages.first().map(String::as_str)),
+                    .map(|message| message.text.as_str())
+                    .or_else(|| {
+                        td.status_messages
+                            .first()
+                            .map(|message| message.text.as_str())
+                    }),
             )
         } else {
             (None, None)
@@ -1614,9 +1689,21 @@ impl TrackedDownloadService {
                     .ok()
                     .flatten();
                 td.status = TrackedDownloadStatus::Error;
-                td.status_messages = detail.into_iter().collect();
+                let kind = if terminal_failure_reason.as_deref()
+                    == Some(WARNING_TIMEOUT_TRACKED_STATE_REASON)
+                {
+                    TrackedStatusMessageKind::WarningTimeout
+                } else {
+                    TrackedStatusMessageKind::Informational
+                };
+                td.status_messages = detail
+                    .into_iter()
+                    .map(|text| TrackedStatusMessage::new(kind, text))
+                    .collect();
             } else if state == TrackedDownloadState::Importing {
-                td.status_messages = vec!["Import retry is awaiting recovery".into()];
+                td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+                    "Import retry is awaiting recovery",
+                )];
             } else if state == TrackedDownloadState::ImportBlocked {
                 let detail = app
                     .services
@@ -1898,7 +1985,10 @@ fn set_import_blocked_status(td: &mut TrackedDownload, detail: Option<String>) {
         })
         .unwrap_or_else(|| import_blocked_fallback_message(td));
     td.status = TrackedDownloadStatus::Warning;
-    td.status_messages = vec![message];
+    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+        TrackedStatusMessageKind::Informational,
+        message,
+    )];
 }
 
 pub(crate) async fn assign_title_to_tracked_download(
@@ -1922,7 +2012,9 @@ pub(crate) async fn assign_title_to_tracked_download(
             app,
             td,
             ImportBlockedReason::ManualMappingRequired,
-            td.status_messages.first().map(String::as_str),
+            td.status_messages
+                .first()
+                .map(|message| message.text.as_str()),
         )
         .await;
         return;
@@ -4253,6 +4345,7 @@ mod tests {
             queued_at: None,
             last_updated_at: None,
             attention_required: false,
+            attention_reason_code: None,
             attention_reason: None,
             download_client_item_id: "dl-1".to_string(),
             download_id: None,
@@ -4332,6 +4425,53 @@ mod tests {
     }
 
     #[test]
+    fn status_kinds_survive_rewording_and_project_only_the_sentence() {
+        let mut tracked = build_tracked_download("typed-status");
+        tracked.warn_kind(
+            TrackedStatusMessageKind::IdOnlyConflict,
+            "translated identity conflict",
+        );
+        assert!(crate::completed_download_handler::has_id_only_conflict(
+            &tracked
+        ));
+        let projection = TrackedDownloadQueueMetadata::from(&tracked);
+        assert_eq!(
+            projection.status_messages,
+            vec!["translated identity conflict"]
+        );
+        tracked.status_messages[0].text = "other wording".to_string();
+        assert!(crate::completed_download_handler::has_id_only_conflict(
+            &tracked
+        ));
+        tracked.status_messages[0].kind = TrackedStatusMessageKind::Informational;
+        assert!(!crate::completed_download_handler::has_id_only_conflict(
+            &tracked
+        ));
+        tracked.status_messages[0].text = "Download was matched by ID only".to_string();
+        assert!(!crate::completed_download_handler::has_id_only_conflict(
+            &tracked
+        ));
+        tracked.clear_warnings();
+        assert!(!crate::completed_download_handler::has_id_only_conflict(
+            &tracked
+        ));
+    }
+
+    #[test]
+    fn queue_password_reason_requires_a_failed_download() {
+        let mut item = build_client_item();
+        item.attention_reason_code = Some("ARCHIVE_PASSWORD_REQUIRED".into());
+        item.attention_reason = Some("translated password failure".into());
+        item.state = DownloadQueueState::Failed;
+        assert_eq!(
+            item.password_failure(),
+            Some(scryer_domain::DownloadPasswordFailure::Required)
+        );
+        item.state = DownloadQueueState::Downloading;
+        assert_eq!(item.password_failure(), None);
+    }
+
+    #[test]
     fn merge_background_work_state_preserves_no_video_retry_state() {
         let mut tracked = build_tracked_download("dl-1");
         let mut finished = build_tracked_download("dl-1");
@@ -4339,7 +4479,9 @@ mod tests {
 
         finished.state = TrackedDownloadState::ImportPending;
         finished.status = TrackedDownloadStatus::Warning;
-        finished.status_messages = vec!["retry later".to_string()];
+        finished.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            "retry later".to_string(),
+        )];
         finished.title_id = Some("title-1".to_string());
         finished.match_type = TitleMatchType::Submission;
         finished.import_attempted = true;
@@ -4355,7 +4497,10 @@ mod tests {
 
         assert_eq!(tracked.state, TrackedDownloadState::ImportPending);
         assert_eq!(tracked.status, TrackedDownloadStatus::Warning);
-        assert_eq!(tracked.status_messages, vec!["retry later"]);
+        assert_eq!(
+            crate::tracked_downloads::status_texts(&tracked.status_messages),
+            vec!["retry later"]
+        );
         assert_eq!(tracked.title_id.as_deref(), Some("title-1"));
         assert_eq!(tracked.match_type, TitleMatchType::Submission);
         assert!(tracked.import_attempted);
@@ -4369,7 +4514,9 @@ mod tests {
         let mut tracked = build_tracked_download("dl-1");
         tracked.state = TrackedDownloadState::ImportBlocked;
         tracked.status = TrackedDownloadStatus::Warning;
-        tracked.status_messages = vec!["blocked".to_string()];
+        tracked.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            "blocked".to_string(),
+        )];
         tracked.import_attempted = true;
         tracked.path_missing_since = Some(Utc::now());
         tracked.no_video_import_retry =
@@ -4408,7 +4555,11 @@ mod tests {
         assert_eq!(tracked.state, TrackedDownloadState::ImportPending);
         assert_eq!(tracked.status, TrackedDownloadStatus::Warning);
         assert!(!tracked.waiting_for_completed_history);
-        assert!(tracked.status_messages[0].starts_with("boom (attempt 1) at "));
+        assert!(
+            tracked.status_messages[0]
+                .text
+                .starts_with("boom (attempt 1) at ")
+        );
         let first = tracked
             .import_execution_retry
             .clone()
@@ -4496,7 +4647,9 @@ mod tests {
                 .unwrap()
                 .status_messages
                 .iter()
-                .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                .any(
+                    |message| message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                )
         );
         assert!(
             tracker.update_trackable(&HashSet::new()).is_empty(),
@@ -4511,7 +4664,9 @@ mod tests {
                 .unwrap()
                 .status_messages
                 .iter()
-                .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                .any(
+                    |message| message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                )
         );
         queue_items.lock().await.clear();
         assert!(tracker.track(&app, item).await.is_none());
@@ -4533,7 +4688,9 @@ mod tests {
                 .unwrap()
                 .status_messages
                 .iter()
-                .any(|message| message == PASSWORD_RETRY_RECONCILIATION_MESSAGE)
+                .any(
+                    |message| message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation
+                )
         );
         let unavailable = tracker.update_trackable(&HashSet::new());
         assert_eq!(
@@ -4827,7 +4984,7 @@ mod tests {
         assert_eq!(tracked.state, TrackedDownloadState::Failed);
         assert_eq!(tracked.status, TrackedDownloadStatus::Error);
         assert_eq!(
-            tracked.status_messages,
+            crate::tracked_downloads::status_texts(&tracked.status_messages),
             vec!["persisted import gate detail"]
         );
     }
@@ -5924,7 +6081,9 @@ mod tests {
         let tracked = tracker.find_mut(&tracked_id).expect("tracked download");
         let download_id = tracked.download_id;
         tracked.burned_by_import_gate = true;
-        tracked.status_messages = vec!["release language does not match the title".to_string()];
+        tracked.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            "release language does not match the title".to_string(),
+        )];
 
         assert!(
             tracker
@@ -6410,8 +6569,7 @@ mod tests {
         assert_eq!(tracked.title_id.as_deref(), Some(title.id.as_str()));
         assert_eq!(tracked.match_type, TitleMatchType::Submission);
         assert!(!tracked.import_attempted);
-        assert_eq!(
-            tracked.status_messages,
+        assert_eq!(crate::tracked_downloads::status_texts(&tracked.status_messages),
             vec![
                 "Automatic import needs operator review. Open Manual Import and confirm the file mapping to continue."
                     .to_string()
@@ -6430,8 +6588,7 @@ mod tests {
 
         set_import_blocked_status(&mut tracked, None);
 
-        assert_eq!(
-            tracked.status_messages,
+        assert_eq!(crate::tracked_downloads::status_texts(&tracked.status_messages),
             vec![
                 "Automatic import could not determine a unique season and episode mapping. Open Manual Import and assign the correct season and episode."
                     .to_string()
@@ -7164,7 +7321,9 @@ mod tests {
         let mut failed = build_tracked_download("failed-actionable");
         failed.state = TrackedDownloadState::FailedPending;
         failed.status = TrackedDownloadStatus::Error;
-        failed.status_messages = vec!["failure needs processing".to_string()];
+        failed.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            "failure needs processing".to_string(),
+        )];
         let low_value = build_tracked_download("low-value");
         let actionable_download_id = actionable.download_id;
         let failed_download_id = failed.download_id;
@@ -7308,7 +7467,7 @@ mod tests {
         assert_eq!(tracked.state, TrackedDownloadState::FailedPending);
         assert_eq!(tracked.status, TrackedDownloadStatus::Error);
         assert_eq!(
-            tracked.status_messages,
+            crate::tracked_downloads::status_texts(&tracked.status_messages),
             vec!["download client warning persisted for 24h: files are missing"]
         );
     }
@@ -7492,7 +7651,7 @@ mod tests {
             tracked
                 .status_messages
                 .iter()
-                .any(|message| message.contains("wasn't grabbed by Scryer"))
+                .any(|message| message.text.contains("wasn't grabbed by Scryer"))
         );
     }
 

@@ -135,7 +135,8 @@ test("a lost apply session is terminal, not retried", async () => {
   const outcome = await pollExternalImportFinalize("apply-session", {
     fetchStatus: async () => ({
       sample: null,
-      error: "[GraphQL] no warmup session 'apply-session'",
+      error: "The server used different words",
+      sessionGone: true,
     }),
     onSample: () => {},
     wait: async () => {
@@ -144,7 +145,7 @@ test("a lost apply session is terminal, not retried", async () => {
   });
 
   assert.equal(outcome.ok, false);
-  assert.match(outcome.error ?? "", /no warmup session/);
+  assert.equal(outcome.error, "The server used different words");
 });
 
 test("isFinalizeSettled only accepts terminal statuses", () => {

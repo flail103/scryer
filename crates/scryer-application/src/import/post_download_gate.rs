@@ -108,6 +108,10 @@ impl ImportedFileRejection {
 pub(crate) fn review_hold_skip_reason_for_code(code: &str) -> ImportSkipReason {
     if code == POST_DOWNLOAD_RULE_ERROR_CODE {
         ImportSkipReason::PostDownloadRuleBlocked
+    } else if code == SOURCE_CHANGED_AFTER_PROBE_CODE {
+        ImportSkipReason::SourceChanged
+    } else if code == SOURCE_SNAPSHOT_UNAVAILABLE_CODE {
+        ImportSkipReason::SourceUnavailable
     } else {
         ImportSkipReason::PolicyMismatch
     }
@@ -132,7 +136,7 @@ fn import_source_changed_rejection(
             path.display()
         ),
         recycle_reason: "import_source_changed_after_probe",
-        skip_reason: Some(ImportSkipReason::PolicyMismatch),
+        skip_reason: Some(ImportSkipReason::SourceChanged),
         blocking_rule_codes: vec![SOURCE_CHANGED_AFTER_PROBE_CODE.to_string()],
     }
 }
@@ -147,7 +151,7 @@ fn import_source_snapshot_unavailable_rejection(
             path.display()
         ),
         recycle_reason: SOURCE_SNAPSHOT_UNAVAILABLE_CODE,
-        skip_reason: Some(ImportSkipReason::PolicyMismatch),
+        skip_reason: Some(ImportSkipReason::SourceUnavailable),
         blocking_rule_codes: vec![SOURCE_SNAPSHOT_UNAVAILABLE_CODE.to_string()],
     }
 }
@@ -580,8 +584,7 @@ pub(crate) fn replace_runtime_band_block(
 
     let band_min_seconds = incumbent_seconds.saturating_mul(RUNTIME_BAND_MIN_PERCENT) / 100;
     let band_max_seconds = incumbent_seconds.saturating_mul(RUNTIME_BAND_MAX_PERCENT) / 100;
-    // Wording deliberately avoids the "blocked"/"locked" vocabulary that
-    // `completed_import_error_message_is_retryable` treats as transient.
+    // A runtime mismatch is a policy hold, independent of its wording.
     if actual_seconds < band_min_seconds {
         return Some(format!(
             "imported file runtime is too short to replace the existing file: existing file is about {} minutes, probed file is {}; held for manual resolution",
@@ -926,7 +929,11 @@ pub(crate) async fn probe_and_validate_with_disc_selection(
     .await
     {
         Ok(probe) => probe,
-        Err(error @ crate::AppError::Validation(_)) => {
+        Err(
+            error @ (crate::AppError::Validation(_)
+            | crate::AppError::ValidationRefused { .. }
+            | crate::AppError::ValidationRefusedWithCount { .. }),
+        ) => {
             return ImportedFileGateDecision::Rejected(import_source_changed_rejection(
                 path, error,
             ));
@@ -2134,24 +2141,20 @@ pub(crate) async fn persist_media_analysis_result(
                 let current = media_files
                     .get_media_file_by_id(file_id)
                     .await?
-                    .ok_or_else(|| crate::AppError::NotFound(format!("media file {file_id}")))?;
+                    .ok_or_else(|| crate::AppError::not_found_reason(crate::error_reasons::import::MEDIA_FILE_NOT_FOUND, format!("media file {file_id}")))?;
                 if current.analysis_details.revision > 0
                     && current.analysis_details.disc.as_ref().is_some_and(|disc| {
                         Some(&disc.selection)
                             != analysis.details.disc.as_ref().map(|next| &next.selection)
                     })
                 {
-                    return Err(crate::AppError::Validation(
-                        "saved disc selection changed before import metadata was published".into(),
-                    ));
+                    return Err(crate::AppError::validation_refused(crate::error_reasons::import::SAVED_DISC_SELECTION_CHANGED_BEFORE_IMPORT_METADATA_PUBLISHED, "saved disc selection changed before import metadata was published"));
                 }
                 if !media_files
                     .update_media_file_analysis_if_unchanged(&current, analysis.clone())
                     .await?
                 {
-                    return Err(crate::AppError::Validation(
-                        "media file changed before import metadata was published".into(),
-                    ));
+                    return Err(crate::AppError::validation_refused(crate::error_reasons::import::MEDIA_FILE_CHANGED_BEFORE_IMPORT_METADATA_PUBLISHED, "media file changed before import metadata was published"));
                 }
                 Ok(())
             }

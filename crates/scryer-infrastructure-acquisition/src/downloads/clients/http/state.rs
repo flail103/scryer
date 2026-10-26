@@ -438,10 +438,13 @@ impl HttpStateStore {
     pub(crate) async fn initialize(&self) -> AppResult<()> {
         let parent = self.state_dir()?;
         tokio::fs::create_dir_all(parent).await.map_err(|error| {
-            AppError::Validation(format!(
-                "the download directory is not writable ({}): {error}",
-                parent.display()
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_DOWNLOAD_DIRECTORY_NOT_WRITABLE,
+                format!(
+                    "the download directory is not writable ({}): {error}",
+                    parent.display()
+                ),
+            )
         })?;
         match tokio::fs::metadata(&self.path).await {
             Ok(_) => {
@@ -453,10 +456,13 @@ impl HttpStateStore {
                     .await
                     .map(|_| ())
                     .map_err(|error| {
-                        AppError::Validation(format!(
-                            "the HTTP downloader's queue at {} is not writable: {error}",
-                            self.path.display()
-                        ))
+                        AppError::validation_refused(
+                            crate::error_reasons::ACQUISITION_HTTP_QUEUE_NOT_WRITABLE,
+                            format!(
+                                "the HTTP downloader's queue at {} is not writable: {error}",
+                                self.path.display()
+                            ),
+                        )
                     })
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -466,10 +472,13 @@ impl HttpStateStore {
                 })
                 .await
             }
-            Err(error) => Err(AppError::Validation(format!(
-                "the HTTP downloader's queue at {} cannot be inspected: {error}",
-                self.path.display()
-            ))),
+            Err(error) => Err(AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_HTTP_QUEUE_UNREADABLE,
+                format!(
+                    "the HTTP downloader's queue at {} cannot be inspected: {error}",
+                    self.path.display()
+                ),
+            )),
         }
     }
 

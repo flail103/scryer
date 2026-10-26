@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import {
   ArrowUpRight,
@@ -443,9 +444,7 @@ export function LibraryScanToast({
     } catch (error) {
       setCancelPending(false);
       toast.error(
-        error instanceof Error
-          ? error.message
-          : t("settings.libraryScanCancelFailed"),
+        userFacingGraphQlErrorMessage(error, t("settings.libraryScanCancelFailed"), t),
       );
     }
   }, [cancelPending, client, session.sessionId, t]);

@@ -131,7 +131,10 @@ struct PluginSearchCallResponse {
 }
 
 fn endpoint_resolution_error() -> AppError {
-    AppError::Validation("network_endpoint_resolution_failed: Cannot resolve this indexer's configured endpoints. Check the selected definition and its endpoint settings; authorities must be HTTP(S) origins available from configuration.".into())
+    AppError::validation_refused(
+        crate::error_reasons::PLUGIN_NETWORK_ENDPOINT_RESOLUTION_FAILED,
+        "network_endpoint_resolution_failed: Cannot resolve this indexer's configured endpoints. Check the selected definition and its endpoint settings; authorities must be HTTP(S) origins available from configuration.",
+    )
 }
 
 const MAX_NETWORK_ENDPOINTS_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -4197,6 +4200,7 @@ mod tests {
         managed_parent_config_id: Option<&str>,
     ) -> IndexerConfig {
         IndexerConfig {
+            last_error_code: None,
             id: "cfg".to_string(),
             name: "Test".to_string(),
             provider_type: provider_type.to_string(),

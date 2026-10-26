@@ -216,7 +216,8 @@ impl AppUseCase {
         self.require_script_trigger_permission(actor, stored.trigger)
             .await?;
         if script.trigger != stored.trigger {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::import::SCRIPT_S_TRIGGER_CANNOT_CHANGED_AFTER_CREATED,
                 "a script's trigger cannot be changed after it is created".to_string(),
             ));
         }
@@ -305,7 +306,12 @@ impl AppUseCase {
             .pp_scripts
             .get_script(id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("script {id} not found")))
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::import::SCRIPT_NOT_FOUND,
+                    format!("script {id} not found"),
+                )
+            })
     }
 }
 
@@ -319,7 +325,10 @@ fn normalize_script_trigger(
     match script.trigger {
         ScriptTrigger::Schedule => {
             let schedule = script.schedule.as_mut().ok_or_else(|| {
-                AppError::Validation("scheduled scripts require a schedule".to_string())
+                AppError::validation_refused(
+                    crate::error_reasons::import::SCHEDULED_SCRIPTS_REQUIRE_SCHEDULE,
+                    "scheduled scripts require a schedule".to_string(),
+                )
             })?;
             if let ScriptSchedule::Weekly { days, .. } = schedule {
                 days.sort();

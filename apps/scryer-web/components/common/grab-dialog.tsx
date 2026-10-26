@@ -172,7 +172,7 @@ export function GrabDialog({
           }
           setCandidates([]);
           setErrorMessage(
-            userFacingGraphQlErrorMessage(error, t("status.failedToLoad")),
+            userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
           );
         } finally {
           if (!cancelled) {
@@ -205,10 +205,10 @@ export function GrabDialog({
           return data?.indexerGrabClients ?? [];
         };
         try { row.plain = await load(null); }
-        catch (error) { row.plainError = userFacingGraphQlErrorMessage(error, t("status.failedToLoad")); }
+        catch (error) { row.plainError = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t); }
         if (selectedTitle) {
           try { row.assigned = await load(selectedTitle.id); }
-          catch (error) { row.assignedError = userFacingGraphQlErrorMessage(error, t("status.failedToLoad")); }
+          catch (error) { row.assignedError = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t); }
         }
         if (cancelled) return;
         rows.push(row);

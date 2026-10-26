@@ -1326,7 +1326,7 @@ async fn import_gate_rejection_blocklists_under_its_own_reason_and_reopens_the_s
         completed_source: None,
         state: scryer_domain::TrackedDownloadState::FailedPending,
         status: scryer_domain::TrackedDownloadStatus::Error,
-        status_messages: vec![verdict.to_string()],
+        status_messages: vec![verdict.to_string().into()],
         title_id: Some(title.id.clone()),
         facet: Some("movie".to_string()),
         source_title: Some("Fixture.Release.2020.1080p-GROUP".to_string()),
@@ -2679,7 +2679,7 @@ async fn parse_matched_observed_failed_download_does_not_blocklist_or_requeue() 
         tracked_download
             .status_messages
             .iter()
-            .any(|message| message.contains("wasn't grabbed by Scryer"))
+            .any(|message| message.text.contains("wasn't grabbed by Scryer"))
     );
 
     let updated = wanted_items
@@ -3771,6 +3771,7 @@ async fn acquisition_cycle_episode_submission_blocks_only_matching_episode() {
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "episode-one-active".to_string(),
         download_id: None,
@@ -4008,6 +4009,7 @@ async fn acquisition_cycle_collection_submission_blocks_same_season_only() {
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "season-one-pack".to_string(),
         download_id: None,
@@ -9624,6 +9626,7 @@ async fn acquisition_cycle_title_submission_still_blocks_movie_search() {
         queued_at: None,
         last_updated_at: None,
         attention_required: false,
+        attention_reason_code: None,
         attention_reason: None,
         download_client_item_id: "movie-active".to_string(),
         download_id: None,
@@ -14282,7 +14285,9 @@ async fn automatic_search_preserves_pauses_and_single_job_admission() {
     let result = app
         .resolve_acquisition_search_scopes(&actor, &request)
         .await;
-    assert!(matches!(result, Err(AppError::Validation(message)) if message.contains("paused")));
+    assert!(
+        matches!(result, Err(AppError::Validation(message) | AppError::ValidationRefused { message, .. } | AppError::ValidationRefusedWithCount { message, .. }) if message.contains("paused"))
+    );
     assert!(
         app.start_acquisition_search_job(
             &actor,
@@ -14346,7 +14351,9 @@ async fn automatic_search_rechecks_pauses_after_waiting_for_the_title() {
     }
     drop(held);
     let result = walk.await.unwrap();
-    assert!(matches!(result, Err(AppError::Validation(message)) if message.contains("paused")));
+    assert!(
+        matches!(result, Err(AppError::Validation(message) | AppError::ValidationRefused { message, .. } | AppError::ValidationRefusedWithCount { message, .. }) if message.contains("paused"))
+    );
     assert!(
         indexer.searches.lock().await.is_empty(),
         "a paused wait must not dispatch searches"

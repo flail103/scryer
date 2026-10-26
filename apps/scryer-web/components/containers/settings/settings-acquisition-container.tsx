@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useState } from "react";
 import { useClient } from "urql";
 import {
@@ -45,7 +46,7 @@ export function SettingsAcquisitionContainer() {
       if (error) throw error;
       setSettings(data?.acquisitionSettings ?? null);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setLoading(false);
     }
@@ -69,7 +70,7 @@ export function SettingsAcquisitionContainer() {
         setSettings(data?.updateAcquisitionSettings ?? next);
         setGlobalStatus(t("settings.acquisitionSaved"), { level: "SUCCESS" });
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setSaving(false);
       }

@@ -182,6 +182,7 @@ export type MaintenanceRuleSetDraft = {
 export type MaintenanceValidationResult = {
   valid: boolean;
   errors: string[];
+  diagnostics?: import("../utils/rego-diagnostics").RuleValidationDiagnostic[];
 };
 
 export type MaintenanceTestSubject = { titleId: string; subjectId: string };

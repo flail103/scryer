@@ -272,8 +272,9 @@ pub(crate) async fn settle_released_import_hold(
     verification: crate::tracked_downloads::HeldImportVerification,
 ) -> AppResult<ReleasedHoldVerdict> {
     let Some(completed) = td.completed_source.clone() else {
-        return Err(crate::AppError::Validation(
-            "the completed download has not been observed yet; release again once it has".into(),
+        return Err(crate::AppError::validation_refused(
+            crate::error_reasons::import::COMPLETED_DOWNLOAD_NOT_OBSERVED_YET,
+            "the completed download has not been observed yet; release again once it has",
         ));
     };
     let (completed, release_evidence) =
@@ -286,10 +287,10 @@ pub(crate) async fn settle_released_import_hold(
             } => (*completed, Some(release_evidence)),
             ResolvedCompletedDownloadOriginForImport::NoScryerOrigin => {
                 if td.client_item.is_scryer_origin {
-                    return Err(crate::AppError::Validation(
+                    return Err(crate::AppError::validation_refused(
+                        crate::error_reasons::import::GRAB_DOWNLOAD_CAME_COULD_NOT_RESOLVED,
                         "the grab this download came from could not be resolved; release again \
-                         once it can"
-                            .into(),
+                         once it can",
                     ));
                 }
                 (completed, None)
@@ -378,7 +379,9 @@ fn block_unproven_release(td: &mut TrackedDownload) {
     td.clear_import_execution_retry();
     td.state = TrackedDownloadState::ImportBlocked;
     td.status = TrackedDownloadStatus::Warning;
-    td.status_messages = vec![RELEASED_HOLD_UNPROVEN_WARNING.to_string()];
+    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+        RELEASED_HOLD_UNPROVEN_WARNING.to_string(),
+    )];
 }
 
 #[cfg(test)]
@@ -400,12 +403,18 @@ pub(crate) async fn apply_import_result_with_completed(
     release_evidence: Option<&crate::import_workflow::ReleaseEvidence>,
 ) -> bool {
     if result.decision == ImportDecision::Imported
-        && result.error_message.as_deref()
-            == Some(crate::import_workflow::SCENE_SUBTITLE_PENDING_WARNING)
+        && crate::import_workflow::scene_subtitle_hold_from_fields(
+            None,
+            result.skip_reason.as_ref().map(ImportSkipReason::as_str),
+            result.error_message.as_deref(),
+        )
     {
         td.state = TrackedDownloadState::ImportBlocked;
         td.status = TrackedDownloadStatus::Warning;
-        td.status_messages = vec![crate::import_workflow::SCENE_SUBTITLE_PENDING_WARNING.into()];
+        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            crate::tracked_downloads::TrackedStatusMessageKind::SceneSubtitlePending,
+            crate::import_workflow::SCENE_SUBTITLE_PENDING_WARNING,
+        )];
         return false;
     }
     let already_imported = result.decision == ImportDecision::Skipped
@@ -556,7 +565,9 @@ pub(crate) async fn apply_import_result_with_completed(
 
         td.state = TrackedDownloadState::Failed;
         td.status = TrackedDownloadStatus::Error;
-        td.status_messages = vec![import_result_message(&result, ImportStatus::Failed)];
+        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+            import_result_message(&result, ImportStatus::Failed),
+        )];
         td.burned_by_import_gate = true;
         return false;
     }
@@ -582,7 +593,10 @@ pub(crate) async fn apply_import_result_with_completed(
             td.state = TrackedDownloadState::FailedPending;
             td.status = TrackedDownloadStatus::Error;
             td.client_item.attention_reason = Some(message.clone());
-            td.status_messages = vec![message];
+            td.client_item.attention_reason_code = None;
+            td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+                message,
+            )];
             td.burned_by_import_gate = true;
             return false;
         }
@@ -680,13 +694,17 @@ pub(crate) async fn apply_import_result_with_completed(
         ImportDecision::Failed => {
             td.state = TrackedDownloadState::ImportBlocked;
             td.status = TrackedDownloadStatus::Error;
-            td.status_messages = vec![import_result_message(&result, ImportStatus::Failed)];
+            td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+                import_result_message(&result, ImportStatus::Failed),
+            )];
             false
         }
         _ => {
             td.state = TrackedDownloadState::ImportBlocked;
             td.status = TrackedDownloadStatus::Warning;
-            td.status_messages = vec![import_result_message(&result, ImportStatus::Skipped)];
+            td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+                import_result_message(&result, ImportStatus::Skipped),
+            )];
             false
         }
     }

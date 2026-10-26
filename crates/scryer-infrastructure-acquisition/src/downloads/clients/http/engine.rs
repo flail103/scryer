@@ -386,8 +386,9 @@ impl HttpEngine {
             if inner.document.jobs.iter().any(|existing| {
                 existing.download_id.is_some() && existing.download_id == job.download_id
             }) {
-                return Err(AppError::Validation(
-                    "this download was already submitted to the HTTP downloader".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_HTTP_DOWNLOAD_ALREADY_SUBMITTED,
+                    "this download was already submitted to the HTTP downloader",
                 ));
             }
             inner.document.jobs.push(job);
@@ -449,10 +450,10 @@ impl HttpEngine {
                 }
                 HttpJobState::Paused => return Ok(()),
                 state => {
-                    return Err(AppError::Validation(format!(
-                        "a {} download cannot be paused",
-                        state_label(state)
-                    )));
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::ACQUISITION_DOWNLOAD_NOT_PAUSABLE,
+                        format!("a {} download cannot be paused", state_label(state)),
+                    ));
                 }
             }
             if let Some(running) = inner.running.get(id) {
@@ -474,10 +475,10 @@ impl HttpEngine {
                 }
                 HttpJobState::Queued | HttpJobState::Downloading => return Ok(()),
                 state => {
-                    return Err(AppError::Validation(format!(
-                        "a {} download cannot be resumed",
-                        state_label(state)
-                    )));
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::ACQUISITION_DOWNLOAD_NOT_RESUMABLE,
+                        format!("a {} download cannot be resumed", state_label(state)),
+                    ));
                 }
             }
         }
@@ -500,9 +501,10 @@ impl HttpEngine {
             before != inner.document.jobs.len()
         };
         if !removed {
-            return Err(AppError::NotFound(format!(
-                "the HTTP downloader has no download {id}"
-            )));
+            return Err(AppError::not_found_reason(
+                crate::error_reasons::ACQUISITION_HTTP_DOWNLOAD_NOT_FOUND,
+                format!("the HTTP downloader has no download {id}"),
+            ));
         }
         if remove_data {
             warn!(
@@ -978,7 +980,12 @@ fn find_job_mut<'a>(document: &'a mut HttpQueueDocument, id: &str) -> AppResult<
         .jobs
         .iter_mut()
         .find(|job| job.id == id)
-        .ok_or_else(|| AppError::NotFound(format!("the HTTP downloader has no download {id}")))
+        .ok_or_else(|| {
+            AppError::not_found_reason(
+                crate::error_reasons::ACQUISITION_HTTP_DOWNLOAD_NOT_FOUND,
+                format!("the HTTP downloader has no download {id}"),
+            )
+        })
 }
 
 /// Keep the newest finished jobs within the retention bound. Dropping a job

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Subtitles } from "lucide-react";
@@ -340,7 +341,7 @@ export function SettingsSubtitlesContainer({
           return;
         }
         const message =
-          error instanceof Error ? error.message : t("settings.sub.syncPluginLoadFailed");
+          userFacingGraphQlErrorMessage(error, t("settings.sub.syncPluginLoadFailed"), t);
         setPlugins([]);
         setSyncPluginInstallError(message);
       })
@@ -456,7 +457,7 @@ export function SettingsSubtitlesContainer({
     providerCatalogVersionRef.current = providerCatalogVersion;
     void refreshProviderTypes().catch((error: unknown) => {
       const message =
-        error instanceof Error ? error.message : t("status.failedToLoad");
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setGlobalStatus(message, { level: "ERROR" });
     });
   }, [providerCatalogVersion, refreshProviderTypes, setGlobalStatus, t]);
@@ -534,7 +535,7 @@ export function SettingsSubtitlesContainer({
                     setGlobalStatus(message, { level: "ERROR" });
                   }
                 } catch (error: unknown) {
-                  const detail = error instanceof Error ? error.message : String(error);
+                  const detail = userFacingGraphQlErrorMessage(error, String(error), t);
                   const message = t("settings.sub.syncPluginInstallFailed", {
                     plugin: plugin.name,
                     error: detail,
@@ -560,7 +561,7 @@ export function SettingsSubtitlesContainer({
             stopSyncPluginProgressSubscription();
             setInstallingSyncPlugin(false);
             setSyncPluginProgress(null);
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail = userFacingGraphQlErrorMessage(error, String(error), t);
             const message = t("settings.sub.syncPluginInstallFailed", {
               plugin: plugin.name,
               error: detail,
@@ -630,7 +631,7 @@ export function SettingsSubtitlesContainer({
       }
       beginSyncPluginProgress(syncPlugin, snapshot);
     } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = userFacingGraphQlErrorMessage(error, String(error), t);
       const message = t("settings.sub.syncPluginInstallFailed", {
         plugin: syncPluginName,
         error: detail,
@@ -682,13 +683,13 @@ export function SettingsSubtitlesContainer({
       .toPromise()
       .then(({ error }) => {
         if (error) {
-          const message = error.message || t("status.failedToUpdate");
+          const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
           setGlobalStatus(message, { level: "ERROR" });
         }
       })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : t("status.failedToUpdate");
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
         setGlobalStatus(message, { level: "ERROR" });
       })
       .finally(() => setSaving(false));
@@ -822,7 +823,7 @@ export function SettingsSubtitlesContainer({
       } catch (error) {
         if (!isReportedConnectionFeedbackError(error)) {
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.failedToUpdate"),
+            userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
             { level: "ERROR" },
           );
         }
@@ -976,7 +977,7 @@ export function SettingsSubtitlesContainer({
         await refreshProviderConfigs();
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -1023,7 +1024,7 @@ export function SettingsSubtitlesContainer({
       }
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToDelete"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
         { level: "ERROR" },
       );
     } finally {

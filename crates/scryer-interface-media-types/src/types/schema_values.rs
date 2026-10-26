@@ -1069,6 +1069,8 @@ pub enum ImportErrorCodeValue {
     IoFailed,
     /// Permission denied.
     PermissionDenied,
+    /// Scene subtitles are still being prepared.
+    SceneSubtitlePending,
     /// Storage is full.
     DiskFull,
     /// Failure has no more specific code.
@@ -1085,6 +1087,7 @@ impl ImportErrorCodeValue {
             ImportErrorCode::PolicyMismatch => Self::PolicyMismatch,
             ImportErrorCode::IoFailed => Self::IoFailed,
             ImportErrorCode::PermissionDenied => Self::PermissionDenied,
+            ImportErrorCode::SceneSubtitlePending => Self::SceneSubtitlePending,
             ImportErrorCode::DiskFull => Self::DiskFull,
             ImportErrorCode::Unknown => Self::Unknown,
         }
@@ -1190,6 +1193,12 @@ pub enum ImportSkipReasonValue {
     UnwantedExecutables,
     /// The download client is still writing or unpacking the source file.
     DownloadInProgress,
+    /// The source changed after it was inspected.
+    SourceChanged,
+    /// The source snapshot is temporarily unavailable.
+    SourceUnavailable,
+    /// Scene subtitles are still being prepared.
+    SceneSubtitlePending,
     /// Storage is full.
     DiskFull,
     /// Permission was denied.
@@ -1214,6 +1223,9 @@ impl ImportSkipReasonValue {
             ImportSkipReason::NoVideoFiles => Self::NoVideoFiles,
             ImportSkipReason::UnwantedExecutables => Self::UnwantedExecutables,
             ImportSkipReason::DownloadInProgress => Self::DownloadInProgress,
+            ImportSkipReason::SourceChanged => Self::SourceChanged,
+            ImportSkipReason::SourceUnavailable => Self::SourceUnavailable,
+            ImportSkipReason::SceneSubtitlePending => Self::SceneSubtitlePending,
             ImportSkipReason::DiskFull => Self::DiskFull,
             ImportSkipReason::PermissionDenied => Self::PermissionDenied,
             ImportSkipReason::PasswordRequired => Self::PasswordRequired,

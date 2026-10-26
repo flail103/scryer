@@ -93,7 +93,7 @@ export function SetupImportWizard({
   goToStep,
   onExit,
 }: SetupImportWizardProps) {
-  const wizard = useExternalImportSetup({ client });
+  const wizard = useExternalImportSetup({ client, t });
   const {
     loadPreview,
     pollAggregateProgress,

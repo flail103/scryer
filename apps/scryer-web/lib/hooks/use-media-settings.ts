@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { SettingsSaveGuard } from "@/lib/utils/settings-save-guard";
 import { useClient } from "urql";
@@ -388,11 +389,11 @@ export function useMediaSettings({
         .toPromise()
         .then(({ error }) => {
           if (error) {
-            setGlobalStatus(error.message, { level: "ERROR" });
+            setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
           }
         });
     },
-    [activeQualityScopeId, client, setGlobalStatus],
+    [activeQualityScopeId, client, setGlobalStatus, t],
   );
 
   const [generalSaveGuard] = React.useState(() => new SettingsSaveGuard());
@@ -526,7 +527,7 @@ export function useMediaSettings({
         })
         .catch((error: unknown) => {
           restore(previousValue);
-          setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
         })
         .finally(() => {
           generalSaveGuard.end();
@@ -832,7 +833,7 @@ export function useMediaSettings({
       );
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -924,7 +925,7 @@ export function useMediaSettings({
           [activeQualityScopeId]: previousProfile,
         }));
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -991,7 +992,7 @@ export function useMediaSettings({
           [activeQualityScopeId]: previousSelection,
         }));
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
         throw error;
@@ -1048,7 +1049,7 @@ export function useMediaSettings({
           [activeQualityScopeId]: previousLanguages,
         }));
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
         throw error;
@@ -1167,7 +1168,7 @@ export function useMediaSettings({
         setGlobalStatus(successMessage, { level: "SUCCESS" });
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {

@@ -171,7 +171,15 @@ async fn an_unparseable_publish_time_is_rejected() {
         .test_rule_set(&user, request)
         .await
         .expect_err("publish time must be RFC 3339");
-    assert!(matches!(error, AppError::Validation(_)), "{error}");
+    assert!(
+        matches!(
+            error,
+            AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
+        "{error}"
+    );
 }
 
 async fn seed_stored_file(
@@ -260,6 +268,7 @@ async fn a_stored_file_scores_from_its_frozen_snapshot_exactly_as_its_bar() {
             priority: 0,
             evaluation_phase: Default::default(),
             exclusive_group: None,
+            disabled_reason_code: None,
             disabled_reason: None,
             applied_facets: vec![MediaFacet::Movie],
             created_at: now,
@@ -325,7 +334,13 @@ async fn a_stored_file_of_another_title_is_not_found() {
         .test_rule_set(&user, stored_file_request(&title.id, &file_id))
         .await
         .expect_err("another title's file is not reachable through this title");
-    assert!(matches!(error, AppError::NotFound(_)), "{error}");
+    assert!(
+        matches!(
+            error,
+            AppError::NotFound(_) | AppError::NotFoundReason { .. }
+        ),
+        "{error}"
+    );
 }
 
 #[tokio::test]
@@ -365,7 +380,15 @@ async fn a_preview_needs_exactly_one_of_a_release_name_and_a_stored_file() {
         ("stored with size", stored_with_size),
     ] {
         let error = app.test_rule_set(&user, request).await.expect_err(case);
-        assert!(matches!(error, AppError::Validation(_)), "{case}: {error}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{case}: {error}"
+        );
     }
 }
 
@@ -399,7 +422,15 @@ async fn negative_votes_are_rejected() {
             .test_rule_set(&user, request)
             .await
             .expect_err("votes cannot be negative");
-        assert!(matches!(error, AppError::Validation(_)), "{error}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error}"
+        );
     }
 }
 

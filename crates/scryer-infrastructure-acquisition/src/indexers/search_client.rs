@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use scryer_application::{
     AppError, AppResult, BackgroundIndexerSearchStrategyState, DownloadSourceKind, EstimatedCost,
-    ExpectedValueHint, HashDomain, INDEXER_CAPS_REFRESH_ERROR_PREFIX, IndexerClient,
-    IndexerConfigRepository, IndexerErrorClassification, IndexerErrorOperation,
-    IndexerErrorRepository, IndexerPluginProvider, IndexerQueryOutcome, IndexerResponseAttributes,
-    IndexerRoutingPlan, IndexerRssCatchUp, IndexerSearchCandidateWrite, IndexerSearchCompletion,
+    ExpectedValueHint, HashDomain, IndexerClient, IndexerConfigRepository,
+    IndexerErrorClassification, IndexerErrorOperation, IndexerErrorRepository,
+    IndexerPluginProvider, IndexerQueryOutcome, IndexerResponseAttributes, IndexerRoutingPlan,
+    IndexerRssCatchUp, IndexerSearchCandidateWrite, IndexerSearchCompletion,
     IndexerSearchEligibility, IndexerSearchIncompleteReason, IndexerSearchLearningContext,
     IndexerSearchLearningKey, IndexerSearchLearningRecord, IndexerSearchLearningRepository,
     IndexerSearchNumberingContext, IndexerSearchOutcome, IndexerSearchPageSink,
@@ -4409,10 +4409,16 @@ impl MultiIndexerSearchClient {
                 .get(proxy_config_id)
                 .cloned()
                 .flatten()
-                .ok_or_else(|| AppError::Validation("Proxy configuration was not found.".into()))?;
+                .ok_or_else(|| {
+                    AppError::validation_refused(
+                        crate::error_reasons::ACQUISITION_INDEXER_PROXY_NOT_FOUND,
+                        "Proxy configuration was not found.",
+                    )
+                })?;
             if !proxy_config.is_enabled {
-                return Err(AppError::Validation(
-                    "Proxy is disabled for this indexer.".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_INDEXER_PROXY_DISABLED,
+                    "Proxy is disabled for this indexer.",
                 ));
             }
             if proxy_config.is_challenge_solver()
@@ -4438,9 +4444,10 @@ impl MultiIndexerSearchClient {
             return Ok((client, proxy_cache_key, search_timeout));
         }
 
-        Err(AppError::Validation(format!(
-            "unsupported indexer provider: '{provider}'"
-        )))
+        Err(AppError::validation_refused(
+            crate::error_reasons::ACQUISITION_INDEXER_PROVIDER_UNSUPPORTED,
+            format!("unsupported indexer provider: '{provider}'"),
+        ))
     }
 
     async fn record_indexer_last_error(
@@ -4449,7 +4456,10 @@ impl MultiIndexerSearchClient {
         indexer_name: &str,
         message: Option<String>,
     ) {
-        if let Err(error) = indexer_configs.record_last_error(indexer_id, message).await {
+        if let Err(error) = indexer_configs
+            .record_last_error(indexer_id, message, None)
+            .await
+        {
             warn!(
                 indexer = indexer_name,
                 error = %error,
@@ -4524,11 +4534,7 @@ impl MultiIndexerSearchClient {
         if !config.enable_auto_search {
             return false;
         }
-        if config
-            .last_error_message
-            .as_deref()
-            .is_some_and(|message| message.starts_with(INDEXER_CAPS_REFRESH_ERROR_PREFIX))
-        {
+        if config.last_error_code.as_deref() == Some("INDEXER_CAPS_REFRESH_FAILED") {
             return false;
         }
 
@@ -5667,14 +5673,18 @@ impl IndexerClient for MultiIndexerSearchClient {
         {
             Some("movie") | Some("series") | Some("anime") => facet.unwrap(),
             Some(other) => {
-                return Err(AppError::Validation(format!(
-                    "unsupported search facet: {other}"
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_SEARCH_FACET_UNSUPPORTED,
+                    format!("unsupported search facet: {other}"),
+                ));
             }
             None if is_rss_request => "series".to_string(),
             None if !query.trim().is_empty() => "movie".to_string(),
             None => {
-                return Err(AppError::Validation("search facet is required".to_string()));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_SEARCH_FACET_REQUIRED,
+                    "search facet is required".to_string(),
+                ));
             }
         };
         let id_search_facet = match id_search_facet
@@ -5684,9 +5694,10 @@ impl IndexerClient for MultiIndexerSearchClient {
         {
             Some(value @ ("movie" | "series" | "anime")) => value.to_string(),
             Some(other) => {
-                return Err(AppError::Validation(format!(
-                    "unsupported ID search facet: {other}"
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_ID_SEARCH_FACET_UNSUPPORTED,
+                    format!("unsupported ID search facet: {other}"),
+                ));
             }
             None => facet.clone(),
         };
@@ -7693,6 +7704,7 @@ response.next_cursor.is_some(),
                         scheduler_lease_for_task.clone(),
                         Err(if batch_had_rate_limit {
                             AppError::TemporaryUnavailable {
+                                reason: None,
                                 // Carry the upstream rate-limit text (status and
                                 // Retry-After) with the aggregate: the interactive
                                 // per-indexer status, the logs, and text-based
@@ -8002,6 +8014,7 @@ response.next_cursor.is_some(),
                 first_failure.unwrap_or_else(|| "all indexer search attempts failed".to_string());
             if let Some((retry_after, cooldown_action)) = first_rate_limit {
                 return Err(AppError::TemporaryUnavailable {
+                    reason: None,
                     message: format!("repository: {failure}"),
                     retry_after,
                     rate_limit_cooldown: cooldown_action,
@@ -9233,6 +9246,7 @@ mod tests {
     fn strategy_batch_health_prefers_the_exact_rate_limit_error() {
         let generic = AppError::Repository("upstream status 503".to_string());
         let rate_limit = AppError::TemporaryUnavailable {
+            reason: None,
             message: "HTTP 429: User configurable Indexer Query Limit reached; retry after 60s"
                 .to_string(),
             retry_after: Some(std::time::Duration::from_secs(60)),
@@ -9450,7 +9464,12 @@ mod tests {
             Ok(())
         }
 
-        async fn record_last_error(&self, id: &str, message: Option<String>) -> AppResult<()> {
+        async fn record_last_error(
+            &self,
+            id: &str,
+            message: Option<String>,
+            _code: Option<String>,
+        ) -> AppResult<()> {
             self.touch_last_error(id).await?;
             self.recorded_messages
                 .lock()
@@ -9825,6 +9844,7 @@ mod tests {
 
     fn mock_indexer_config() -> IndexerConfig {
         IndexerConfig {
+            last_error_code: None,
             id: "idx-1".into(),
             name: "Mock Indexer".into(),
             provider_type: "mock".into(),
@@ -10593,6 +10613,7 @@ mod tests {
     async fn the_due_check_follows_each_indexers_slot() {
         let configs = (0..3)
             .map(|index| IndexerConfig {
+                last_error_code: None,
                 id: format!("synthetic-slot-{index}"),
                 name: format!("Synthetic slot {index}"),
                 base_url: format!("https://slot-{index}.example.test"),
@@ -10688,6 +10709,7 @@ mod tests {
     async fn an_rss_poll_fans_out_to_the_tick_limit_and_holds_the_rest_due() {
         let configs = (0..12)
             .map(|index| IndexerConfig {
+                last_error_code: None,
                 id: format!("synthetic-fanout-{index:02}"),
                 name: format!("Synthetic fan-out {index:02}"),
                 base_url: format!("https://fanout-{index:02}.example.test"),
@@ -11892,7 +11914,10 @@ mod tests {
                 .await
                 .unwrap_err();
             if fail {
-                assert!(matches!(error, AppError::Repository(_)));
+                assert!(matches!(
+                    error,
+                    AppError::Repository(_) | AppError::RepositoryFailure { .. }
+                ));
             } else {
                 assert!(error.is_canceled());
             }
@@ -13239,7 +13264,8 @@ mod tests {
     async fn automatic_search_skips_caps_failed_indexers_until_health_recovers() {
         let calls = Arc::new(AtomicUsize::new(0));
         let mut unhealthy = mock_indexer_config();
-        unhealthy.last_error_message = Some("caps refresh failed: synthetic failure".into());
+        unhealthy.last_error_message = Some("diagnostic wording may change".into());
+        unhealthy.last_error_code = Some("INDEXER_CAPS_REFRESH_FAILED".into());
         let client = MultiIndexerSearchClient::new(
             Arc::new(MockIndexerConfigRepository {
                 configs: vec![unhealthy],
@@ -15954,6 +15980,7 @@ mod tests {
         let retry_after = std::time::Duration::from_secs(42);
         let (client, _calls) = scripted_search_client(movie_caps(), move |_call| {
             Err(AppError::TemporaryUnavailable {
+                reason: None,
                 message: "upstream returned 429".to_string(),
                 retry_after: Some(retry_after),
                 rate_limit_cooldown: RateLimitCooldownAction::AlreadyRecorded,
@@ -16162,6 +16189,7 @@ mod tests {
             calls: calls.clone(),
             responder: StdArc::new(|_call| {
                 Err(AppError::TemporaryUnavailable {
+                    reason: None,
                     message: "HTTP 429: slow down; retry after 120s".to_string(),
                     retry_after: Some(std::time::Duration::from_secs(120)),
                     rate_limit_cooldown: RateLimitCooldownAction::AlreadyRecorded,

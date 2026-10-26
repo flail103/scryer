@@ -708,7 +708,7 @@ async fn hold_release_without_a_canonical_download_is_refused_and_changes_nothin
         .await
         .expect_err("nothing serializes the release against the cleanup claim");
 
-    assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+    assert!(matches!(error, AppError::Validation(_) | AppError::ValidationRefused { .. }), "{error:?}");
     let payload = payload_of(&store, &claim.import_id).await;
     assert_eq!(payload["archive_processing_pending"], true);
     assert_eq!(

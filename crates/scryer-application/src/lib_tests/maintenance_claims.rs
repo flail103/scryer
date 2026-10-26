@@ -790,7 +790,14 @@ async fn the_shipped_rule_keeps_its_matcher_and_name_but_not_its_grace_or_scope(
             storage_root_id: None,
         }
     };
-    let refused = |result: AppResult<_>| matches!(result, Err(AppError::Validation(_)));
+    let refused = |result: AppResult<_>| {
+        matches!(
+            result,
+            Err(AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. })
+        )
+    };
 
     assert!(refused(
         fixture

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useClient, useMutation } from "urql";
@@ -249,7 +250,7 @@ export const ActivityContainer = memo(function ActivityContainer({
           })),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -375,7 +376,7 @@ export const ActivityContainer = memo(function ActivityContainer({
         },
       });
       if (result.error) {
-        const message = result.error.message ?? t("queue.assignTitleFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.assignTitleFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -395,7 +396,7 @@ export const ActivityContainer = memo(function ActivityContainer({
         },
       });
       if (result.error) {
-        const message = result.error.message ?? t("queue.ignoreFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.ignoreFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -416,7 +417,7 @@ export const ActivityContainer = memo(function ActivityContainer({
         },
       });
       if (result.error) {
-        const message = result.error.message ?? t("queue.markFailedFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.markFailedFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -486,7 +487,7 @@ export const ActivityContainer = memo(function ActivityContainer({
           const { [itemKey]: _removed, ...next } = current;
           return next;
         });
-        const message = result.error.message ?? t("queue.pauseFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.pauseFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -519,7 +520,7 @@ export const ActivityContainer = memo(function ActivityContainer({
           const { [itemKey]: _removed, ...next } = current;
           return next;
         });
-        const message = result.error.message ?? t("queue.resumeFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.resumeFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -540,7 +541,7 @@ export const ActivityContainer = memo(function ActivityContainer({
         },
       });
       if (result.error) {
-        const message = result.error.message ?? t("queue.deleteFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("queue.deleteFailed"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
@@ -636,13 +637,13 @@ export const ActivityContainer = memo(function ActivityContainer({
     async (stream: ActiveImportStream) => {
       const result = await executeCancelActiveImport({ streamId: stream.id });
       if (result.error) {
-        const message = result.error.message ?? "Unable to cancel import.";
+        const message = userFacingGraphQlErrorMessage(result.error, t("error.fallback.unableToCancelImport"), t);
         setGlobalStatus(message, { level: "ERROR" });
         throw result.error;
       }
       setGlobalStatus("Import cancellation requested.");
     },
-    [executeCancelActiveImport, setGlobalStatus],
+    [executeCancelActiveImport, setGlobalStatus, t],
   );
 
   return (

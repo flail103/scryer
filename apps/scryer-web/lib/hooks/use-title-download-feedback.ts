@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -152,7 +153,7 @@ export function useTitleDownloadFeedback({
       if (!stillCurrent()) {
         return;
       }
-      setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       setState((previous) =>
         previous?.titleId === requestedTitleId
           ? { ...previous, settled: true }

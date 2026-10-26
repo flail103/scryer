@@ -52,6 +52,7 @@ test("expiry clears results and dialog, blocks late snapshots, and permits a new
     "react-dom": { createPortal: () => "portal" },
     "react-router": { useSearchParams: () => [new URLSearchParams()] },
     urql: { useClient: () => ({ query: () => ({ toPromise: () => new Promise(() => {}) }) }) },
+    "@/lib/graphql/error-message": { userFacingGraphQlErrorMessage: () => "failure" },
     "@/lib/context/translate-context": { useTranslate: () => (key: string) => key },
     "@/lib/context/global-status-context": { useGlobalStatus: () => () => {} },
     "@/lib/graphql/queries": { indexersQuery: "indexers" },

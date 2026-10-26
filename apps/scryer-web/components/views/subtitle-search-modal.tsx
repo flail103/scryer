@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 import { Search, ArrowDownToLine, Hash, CircleAlert } from "lucide-react";
@@ -150,7 +151,7 @@ export function SubtitleSearchModal({
         setStatus((current) => current ?? "READY");
         setLanguage((current) => current || availableLanguagesRef.current[0] || "eng");
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -176,7 +177,7 @@ export function SubtitleSearchModal({
     void loadBlocklistEntries().catch((error: unknown) => {
       if (!cancelled) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       }
@@ -217,7 +218,7 @@ export function SubtitleSearchModal({
         await onChanged();
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       } finally {

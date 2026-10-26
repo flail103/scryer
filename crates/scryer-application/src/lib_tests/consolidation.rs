@@ -1366,7 +1366,7 @@ async fn a_destination_root_that_is_not_configured_here_is_not_found() {
         .await
         .expect_err("a destination that is not a root of this library does not exist");
     assert!(
-        matches!(&error, AppError::NotFound(message)
+        matches!(&error, AppError::NotFound(message) | AppError::NotFoundReason { message, .. }
             if message.contains("not-a-root-of-this-library")),
         "got {error:?}"
     );

@@ -12,5 +12,5 @@ export function deleteErrorMessage(error: unknown, t: Translate, fallback: strin
   const reason = graphQlErrorExtension(error, "VALIDATION_ERROR", "reason");
   const key = reason && Object.hasOwn(DELETE_REFUSAL_KEYS, reason)
     ? DELETE_REFUSAL_KEYS[reason] : null;
-  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback);
+  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

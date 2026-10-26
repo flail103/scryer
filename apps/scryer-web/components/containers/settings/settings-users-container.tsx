@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import type * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -128,7 +129,7 @@ export function SettingsUsersContainer() {
         Object.fromEntries(users.map((user: UserRecord) => [user.id, grantsToDrafts(user.libraryPermissions)])),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -140,7 +141,7 @@ export function SettingsUsersContainer() {
       if (error) throw error;
       setLibraries((data?.libraries ?? []) as LibraryRecord[]);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -156,7 +157,7 @@ export function SettingsUsersContainer() {
       const minLength = result.data?.securitySettings?.passwordMinLength;
       return typeof minLength === "number" && minLength > 0 ? minLength : null;
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       return null;
     }
   }, [client, setGlobalStatus, t]);
@@ -193,7 +194,7 @@ export function SettingsUsersContainer() {
       await refreshUsers();
       notifyExternalAccountInviteSourcesChanged();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToCreate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToCreate"), t), { level: "ERROR" });
     }
   };
 
@@ -229,7 +230,7 @@ export function SettingsUsersContainer() {
       await refreshUsers();
       return true;
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       return false;
     } finally {
       setMutatingUserId(null);
@@ -260,7 +261,7 @@ export function SettingsUsersContainer() {
         const { [userId]: _rejected, ...rest } = previous;
         return rest;
       });
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingUserId(null);
     }
@@ -304,7 +305,7 @@ export function SettingsUsersContainer() {
         const { [userId]: _rejected, ...rest } = previous;
         return rest;
       });
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingUserId(null);
     }
@@ -324,7 +325,7 @@ export function SettingsUsersContainer() {
       );
       await refreshUsers();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingUserId(null);
     }
@@ -381,7 +382,7 @@ export function SettingsUsersContainer() {
         return next;
       });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingUserId(null);
       setPendingDeleteUser(null);
@@ -402,7 +403,7 @@ export function SettingsUsersContainer() {
       setGlobalStatus(t("user.mfaReset", { name: user.username }));
       await refreshUsers();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingUserId(null);
       setPendingResetMfaUser(null);

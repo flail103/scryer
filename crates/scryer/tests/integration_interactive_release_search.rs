@@ -102,6 +102,7 @@ fn indexer_config(
     now: chrono::DateTime<chrono::Utc>,
 ) -> IndexerConfig {
     IndexerConfig {
+        last_error_code: None,
         id: id.into(),
         name: id.into(),
         provider_type: "newznab".into(),

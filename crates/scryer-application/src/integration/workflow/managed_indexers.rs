@@ -6,13 +6,13 @@ fn normalize_managed_child_routing_scopes(
     for scope in scopes {
         let scope_id = scope.scope_id.trim().to_ascii_lowercase();
         if !MANAGED_INDEXER_SCOPE_IDS.contains(&scope_id.as_str()) {
-            return Err(AppError::Validation(format!(
+            return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_ROUTING_SCOPE_UNSUPPORTED, format!(
                 "managed child routing scope '{}' is not supported",
                 scope.scope_id
             )));
         }
         if routing_by_scope.contains_key(&scope_id) {
-            return Err(AppError::Validation(format!(
+            return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_ROUTING_CONTAINS_DUPLICATE_SCOPE, format!(
                 "managed child routing contains duplicate scope '{}'",
                 scope_id
             )));
@@ -116,7 +116,7 @@ impl AppUseCase {
         let parent = indexer_configs
             .get_by_id(config_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("indexer config '{config_id}' not found")))?;
+            .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::integration::INDEXER_CONFIG_NOT_FOUND, format!("indexer config '{config_id}' not found")))?;
         let existing_by_key = indexer_configs
             .list(None)
             .await?
@@ -176,7 +176,7 @@ impl AppUseCase {
         let client = provider
             .management_client_for_provider(&parent)
             .ok_or_else(|| {
-                AppError::Validation(format!(
+                AppError::validation_refused(crate::error_reasons::integration::NO_INDEXER_MANAGEMENT_CLIENT_AVAILABLE_PROVIDER_TYPE, format!(
                     "no indexer management client available for provider type '{}'",
                     parent.provider_type
                 ))
@@ -277,12 +277,10 @@ impl AppUseCase {
         for child in plan.children {
             let child_key = child.child_key.trim().to_string();
             if child_key.is_empty() {
-                return Err(AppError::Validation(
-                    "managed child plan entries require child_key".into(),
-                ));
+                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_PLAN_ENTRIES_REQUIRE_CHILD_KEY, "managed child plan entries require child_key"));
             }
             if !seen_child_keys.insert(child_key.clone()) {
-                return Err(AppError::Validation(format!(
+                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_PLAN_CONTAINS_DUPLICATE_CHILD_KEY, format!(
                     "managed child plan contains duplicate child_key '{}'",
                     child_key
                 )));
@@ -290,7 +288,7 @@ impl AppUseCase {
 
             let name = child.name.trim().to_string();
             if name.is_empty() {
-                return Err(AppError::Validation(format!(
+                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_NAME, format!(
                     "managed child '{}' requires a name",
                     child_key
                 )));
@@ -298,7 +296,7 @@ impl AppUseCase {
 
             let provider_type = child.provider_type.trim().to_ascii_lowercase();
             if provider_type.is_empty() {
-                return Err(AppError::Validation(format!(
+                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_PROVIDER_TYPE, format!(
                     "managed child '{}' requires provider_type",
                     child_key
                 )));

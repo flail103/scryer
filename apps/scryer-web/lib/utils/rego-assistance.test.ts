@@ -7,7 +7,7 @@ import { EditorState, type Transaction } from "@codemirror/state";
 import { snippet, nextSnippetField } from "@codemirror/autocomplete";
 import type { EditorView } from "@codemirror/view";
 import { regoCatalog, regoContracts, regoFields, regoFieldCompletions, regoCompletionContext, normalizeRegoPath, REGO_INDEX_SOURCE, type RegoFamily } from "./rego-assistance.ts";
-import { regoDiagnostics, regoSourceLine } from "./rego-diagnostics.ts";
+import { graphQlRuleValidationResult, regoDiagnostics, regoSourceLine } from "./rego-diagnostics.ts";
 
 // The test runs from the source tree in CI and from a compiled copy locally, so
 // the repository root is found by walking up rather than by a fixed depth.
@@ -103,7 +103,7 @@ test("diagnostics account for inserted package and import lines", () => {
   assert.equal(regoSourceLine("import rego.v1\nmatch if { true }", 3), 2);
   assert.equal(regoSourceLine("package example\nmatch if { true }", 3), 2);
   assert.equal(regoSourceLine("package example\nimport rego.v1\nmatch if { true }", 3), 3);
-  const result = { valid: false, errors: ["compile: user/test.rego:3:4 error"] };
+  const result = { valid: false, errors: ["new compiler words"], diagnostics: [{ code: "RULE_COMPILATION_ERROR", message: "new compiler words", line: 3, column: 4 }] };
   assert.equal(regoDiagnostics("match :=", result)[0]?.line, 1);
   assert.deepEqual(regoDiagnostics("match :=", { ...result, unavailable: true }), []);
   assert.deepEqual(regoDiagnostics("match :=", { valid: false, errors: ["no reliable position"] }), []);
@@ -130,5 +130,28 @@ test("native snippets insert their defaults and select editable placeholders", (
       if (i + 1 < placeholders.length) assert.equal(nextSnippetField(view), true);
     }
     assert.equal(nextSnippetField(view), false, "Tab falls through after snippet fields");
+  }
+});
+
+
+test("owned input path diagnostics use structured facts after rewording", () => {
+  const source = "match if { input.subject.unknown }";
+  const result = { valid: false, errors: ["arbitrary prose with no location"], diagnostics: [{ code: "RULE_UNKNOWN_INPUT_PATH", message: "arbitrary prose", path: "input.subject.unknown" }] };
+  assert.deepEqual(regoDiagnostics(source, result), [{ line: 1, column: 12, message: "arbitrary prose" }]);
+  assert.deepEqual(regoDiagnostics(`${source}\n${source}`, result), []);
+});
+
+
+test("save refusal diagnostics retain editor placement after sentence changes", () => {
+  const result = graphQlRuleValidationResult({ graphQLErrors: [{ message: "new save wording", extensions: { code: "VALIDATION_ERROR", reason: "RULE_VALIDATION_FAILED", diagnostics: [{ code: "RULE_COMPILATION_ERROR", message: "new compiler wording", line: 3, column: 4, path: null }] } }] }, "Save refused");
+  assert.deepEqual(regoDiagnostics("match :=", result), [{ line: 1, column: 4, message: "new compiler wording" }]);
+});
+
+
+test("a diagnostics-shaped extension on another error family cannot paint rule markers", () => {
+  for (const code of ["PLUGIN_FAILED", "NOT_FOUND", "UNAUTHORIZED", "UNKNOWN_FAMILY"]) {
+    const result = graphQlRuleValidationResult({ graphQLErrors: [{ message: "unrelated failure", extensions: { code, reason: "RULE_VALIDATION_FAILED", diagnostics: [{ code: "RULE_COMPILATION_ERROR", message: "spoofed diagnostic", line: 3, column: 4 }] } }] }, "Failed");
+    assert.deepEqual(result.diagnostics, []);
+    assert.deepEqual(regoDiagnostics("match :=", result), []);
   }
 });

@@ -5046,6 +5046,7 @@ mod indexer_search_identity_tests {
                 .to_string(),
             ),
             last_health_status: None,
+            last_error_code: None,
             last_error_message: None,
             last_error_at: None,
             config_json: Some(serde_json::json!({"api_path": "/api"}).to_string()),

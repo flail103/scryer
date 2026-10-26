@@ -83,8 +83,9 @@ impl AppUseCase {
             if columns.iter().any(|column| {
                 column.device_class != update.device_class || column.facet != update.facet
             }) {
-                return Err(AppError::Validation(
-                    "catalog view columns must match the saved device class and facet".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::settings::CATALOG_VIEW_COLUMNS_INVALID,
+                    "catalog view columns must match the saved device class and facet",
                 ));
             }
             validate_table_columns(columns)?;
@@ -128,9 +129,12 @@ fn normalize_optional_language(value: Option<String>) -> AppResult<Option<String
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
     {
-        return Err(AppError::Validation(format!(
-            "language must be a language code of at most {MAX_LANGUAGE_CODE_LEN} letters, digits or hyphens"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::settings::LANGUAGE_OUT_OF_RANGE,
+            format!(
+                "language must be a language code of at most {MAX_LANGUAGE_CODE_LEN} letters, digits or hyphens"
+            ),
+        ));
     }
     Ok(Some(value.to_string()))
 }
@@ -150,9 +154,10 @@ fn normalize_optional_hex_color(
         || !value.starts_with('#')
         || !value[1..].chars().all(|ch| ch.is_ascii_hexdigit())
     {
-        return Err(AppError::Validation(format!(
-            "{field_name} must be a #RRGGBB hex color"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::settings::MUST_RRGGBB_HEX_COLOR,
+            format!("{field_name} must be a #RRGGBB hex color"),
+        ));
     }
     Ok(Some(value.to_ascii_lowercase()))
 }
@@ -168,17 +173,21 @@ fn validate_table_columns(columns: &mut [UiTableColumnSetting]) -> AppResult<()>
             column.column_id.as_str(),
         );
         if !seen.insert(key) {
-            return Err(AppError::Validation(format!(
-                "duplicate UI table column setting for {} {} {} column {}",
-                column.device_class.as_str(),
-                column.facet.as_str(),
-                column.table_view_mode.as_str(),
-                column.column_id
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::settings::UI_TABLE_COLUMN_SETTING_COLUMN_DUPLICATED,
+                format!(
+                    "duplicate UI table column setting for {} {} {} column {}",
+                    column.device_class.as_str(),
+                    column.facet.as_str(),
+                    column.table_view_mode.as_str(),
+                    column.column_id
+                ),
+            ));
         }
         if column.column_order < 0 {
-            return Err(AppError::Validation(
-                "table column order must be greater than or equal to 0".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::settings::TABLE_COLUMN_ORDER_OUT_OF_RANGE,
+                "table column order must be greater than or equal to 0",
             ));
         }
     }
@@ -211,15 +220,19 @@ fn is_known_table_column(column: &UiTableColumnSetting) -> bool {
 
 fn validate_table_column(column: &UiTableColumnSetting) -> AppResult<()> {
     if !is_known_table_column(column) {
-        return Err(AppError::Validation(format!(
-            "unsupported {} table column {:?}",
-            column.table_view_mode.as_str(),
-            column.column_id
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::settings::TABLE_COLUMN_UNSUPPORTED,
+            format!(
+                "unsupported {} table column {:?}",
+                column.table_view_mode.as_str(),
+                column.column_id
+            ),
+        ));
     }
     if column.facet == UiSettingsFacet::Movies && column.column_id == "episodes" {
-        return Err(AppError::Validation(
-            "movies table settings cannot include the episodes column".into(),
+        return Err(AppError::validation_refused(
+            crate::error_reasons::settings::MOVIES_TABLE_SETTINGS_CANNOT_INCLUDE_EPISODES_COLUMN,
+            "movies table settings cannot include the episodes column",
         ));
     }
     Ok(())

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -99,7 +100,7 @@ export function useTitleTagsManager() {
               })
               .toPromise();
         if (result.error) {
-          showStatus(result.error.message || t("settings.titleTagSaveError"), { level: "ERROR" });
+          showStatus(userFacingGraphQlErrorMessage(result.error, t("settings.titleTagSaveError"), t), { level: "ERROR" });
           return false;
         }
         const payload =
@@ -140,7 +141,7 @@ export function useTitleTagsManager() {
           .mutation(deleteTitleTagDefinitionMutation, { id: definitionId })
           .toPromise();
         if (result.error) {
-          showStatus(result.error.message || t("settings.titleTagDeleteError"), { level: "ERROR" });
+          showStatus(userFacingGraphQlErrorMessage(result.error, t("settings.titleTagDeleteError"), t), { level: "ERROR" });
           return false;
         }
         const payload = result.data?.deleteTitleTagDefinition;

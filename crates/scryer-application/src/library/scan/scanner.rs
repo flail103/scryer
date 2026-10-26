@@ -1236,8 +1236,9 @@ impl LibraryScanner for NullLibraryScanner {
         batch_size: usize,
     ) -> AppResult<LibraryFileBatchReceiver> {
         if batch_size == 0 {
-            return Err(AppError::Validation(
-                "batch size must be greater than 0".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::library::BATCH_SIZE_OUT_OF_RANGE,
+                "batch size must be greater than 0",
             ));
         }
 
@@ -1252,8 +1253,9 @@ impl LibraryScanner for NullLibraryScanner {
         batch_size: usize,
     ) -> AppResult<LibraryFileBatchReceiver> {
         if batch_size == 0 {
-            return Err(AppError::Validation(
-                "batch size must be greater than 0".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::library::BATCH_SIZE_OUT_OF_RANGE,
+                "batch size must be greater than 0",
             ));
         }
 

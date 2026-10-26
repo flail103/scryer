@@ -157,7 +157,7 @@ impl AppUseCase {
             .libraries
             .get_by_id(library_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("library {library_id}")))?;
+            .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::catalog::LIBRARY_NOT_FOUND, format!("library {library_id}")))?;
         let root = match root_folder_id
             .map(str::trim)
             .filter(|root_folder_id| !root_folder_id.is_empty())
@@ -167,9 +167,7 @@ impl AppUseCase {
                 .iter()
                 .find(|root| root.id == root_folder_id)
                 .ok_or_else(|| {
-                    AppError::Validation(
-                        "rootFolderId must reference a root on the title library".to_string(),
-                    )
+                    AppError::validation_refused(crate::error_reasons::catalog::ROOTFOLDERID_MUST_REFERENCE_ROOT_TITLE_LIBRARY, "rootFolderId must reference a root on the title library".to_string())
                 })?,
             None => library
                 .roots
@@ -177,9 +175,7 @@ impl AppUseCase {
                 .find(|root| root.is_default)
                 .or_else(|| library.roots.first())
                 .ok_or_else(|| {
-                    AppError::Validation(
-                        "title library must have at least one root folder".to_string(),
-                    )
+                    AppError::validation_refused(crate::error_reasons::catalog::ROOT_REQUIRED, "title library must have at least one root folder".to_string())
                 })?,
         };
         Ok(root.id.clone())
@@ -364,7 +360,7 @@ impl AppUseCase {
             .libraries
             .get_by_id(library_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("library {library_id}")))?;
+            .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::catalog::LIBRARY_NOT_FOUND, format!("library {library_id}")))?;
         if library.facet != *facet {
             return Err(AppError::Repository(format!(
                 "title root folder library {library_id} does not match title facet {}",

@@ -3230,3 +3230,26 @@ async fn http_interrupted_extension_checkpoint_keeps_actual_partial_path() {
     .await
     .expect("checkpoint recovery finishes");
 }
+
+#[tokio::test]
+async fn native_http_auth_ref_refusal_has_a_stable_reason_and_redacts_credentials() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path(), serde_json::json!({}));
+    let client = client(&config);
+    let mut media = muxed("https://synthetic.invalid/media.mp4", 1080);
+    media.auth_ref = Some("private-provider-credential-reference".to_string());
+    let error = client
+        .submit_download(&request(source(vec![media])))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.validation_reason(),
+        Some(scryer_application::http_release_refusal::UNSUPPORTED_AUTH)
+    );
+    assert!(
+        !error
+            .to_string()
+            .contains("private-provider-credential-reference")
+    );
+    assert!(client.list_queue().await.unwrap().is_empty());
+}

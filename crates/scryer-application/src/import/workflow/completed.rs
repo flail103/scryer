@@ -954,7 +954,7 @@ pub(crate) async fn run_claimed_download_cleanup(
                 TerminalDownloadCleanup::bare(TerminalDownloadCleanupOutcome::NotConfigured))));
         }
         let Some(state) = TrackedDownloadState::from_str_opt(&record.tracked_state) else {
-            return Err(AppError::Validation(CLEANUP_INVALID_STATE.into()));
+            return Err(AppError::validation_refused(crate::error_reasons::import::CLEANUP_STATE_INVALID, CLEANUP_INVALID_STATE));
         };
         let title = match record.title_id.as_deref() {
             Some(id) => app.services.catalog.titles.get_by_id(id).await?,
@@ -973,7 +973,7 @@ pub(crate) async fn run_claimed_download_cleanup(
         let remove = if state == TrackedDownloadState::Ignored || manual_cleanup {
             true
         } else {
-            let facet = facet.as_ref().ok_or_else(|| AppError::Validation(CLEANUP_UNATTRIBUTED.into()))?;
+            let facet = facet.as_ref().ok_or_else(|| AppError::validation_refused(crate::error_reasons::import::CLEANUP_ATTRIBUTION_MISSING, CLEANUP_UNATTRIBUTED))?;
             let policy = app.read_download_client_routing_entry(
                 library_id, facet, &record.client_id,
             ).await?.unwrap_or_else(crate::catalog_helpers::default_download_client_routing_entry);
@@ -1126,7 +1126,7 @@ pub(crate) async fn run_claimed_download_cleanup(
                                 || (record.client_type == "sabnzbd"
                                     && cleanup_sab_job_names_match(name, &item.title_name))))))
         {
-            return Err(AppError::Validation("cleanup locator is reused or identity is ambiguous".into()));
+            return Err(AppError::validation_refused(crate::error_reasons::import::CLEANUP_LOCATOR_REUSED_IDENTITY_AMBIGUOUS, "cleanup locator is reused or identity is ambiguous"));
         }
         // Derived with the poller's own function, from the poller's own input.
         // A rebuilt entry that lands in an empty cache after a restart is the
@@ -1183,7 +1183,7 @@ pub(crate) async fn run_claimed_download_cleanup(
             // abandoned and the scope is released; the client entry stays.
             let permanent = cleanup_error_is_permanent(&error);
             let abandon = permanent
-                || (matches!(error, AppError::Validation(_))
+                || (matches!(error, AppError::Validation(_) | AppError::ValidationRefused { .. } | AppError::ValidationRefusedWithCount { .. })
                     && record.attempts >= HOST_PAYLOAD_CLEANUP_ATTEMPTS_BEFORE_ENTRY_REMOVAL);
             if abandon {
                 // A row that can never be attributed is a legacy artefact, not
@@ -1293,8 +1293,7 @@ pub(crate) const CLEANUP_UNATTRIBUTED: &str = "cleanup has no valid routing attr
 pub(crate) const CLEANUP_INVALID_STATE: &str = "invalid durable cleanup state";
 
 fn cleanup_error_is_permanent(error: &AppError) -> bool {
-    matches!(error, AppError::Validation(message)
-        if message == CLEANUP_UNATTRIBUTED || message == CLEANUP_INVALID_STATE)
+    matches!(error.validation_reason(), Some(crate::error_reasons::import::CLEANUP_STATE_INVALID | crate::error_reasons::import::CLEANUP_ATTRIBUTION_MISSING))
 }
 
 async fn finish_cleanup_attempt(
@@ -1327,40 +1326,6 @@ async fn finish_cleanup_attempt(
         }
     }
 }
-/// Scryer's own transient markers on a *non-`Failed`* import result.
-///
-/// Execution-phase failures never come through here: they arrive as
-/// `ImportDecision::Failed` and are retried by the phase rule in
-/// `completed_import_result_is_retryable` regardless of the message (Sonarr's
-/// model — no error-string catalogue). This list only recognises the transient
-/// conditions Scryer itself reports as a `Skipped`/`Rejected` result after an
-/// execution race. Import-check outcomes such as a source still unpacking are
-/// represented by `ImportSkipReason`, never their message text.
-fn completed_import_error_message_is_retryable(message: &str) -> bool {
-    let normalized = message.to_ascii_lowercase();
-    const SCRYER_TRANSIENT_PHRASES: &[&str] =
-        &["source changed", "temporarily", "not found or inaccessible"];
-    SCRYER_TRANSIENT_PHRASES
-        .iter()
-        .any(|needle| normalized.contains(needle))
-        || contains_word(&normalized, "locked")
-}
-
-fn contains_word(haystack: &str, word: &str) -> bool {
-    haystack.match_indices(word).any(|(start, _)| {
-        let end = start + word.len();
-        let before_is_word = haystack[..start]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_alphanumeric);
-        let after_is_word = haystack[end..]
-            .chars()
-            .next()
-            .is_some_and(char::is_alphanumeric);
-        !before_is_word && !after_is_word
-    })
-}
-
 async fn resolve_import_quality_profile(
     app: &AppUseCase,
     title: &scryer_domain::Title,
@@ -1375,8 +1340,8 @@ async fn resolve_import_quality_profile(
     // profile silently applies the wrong quality rules, which is the failure
     // mode the strict resolver exists to prevent. A validation failure (e.g. a
     // dangling profile reference) needs operator action and surfaces as a
-    // blocked import; any other failure is treated as transient and worded so
-    // `completed_import_error_message_is_retryable` re-attempts it.
+    // blocked import; any other failure remains an execution-phase failure
+    // and is retried by the phase policy.
     app.resolve_quality_profile(crate::app_usecase_discovery::QualityProfileLookup {
         title_tags: &title.tags,
         library_id: Some(title.library_id.as_str()),
@@ -1386,7 +1351,7 @@ async fn resolve_import_quality_profile(
     })
     .await
     .map_err(|error| match error {
-        crate::AppError::Validation(_) => error,
+        crate::AppError::Validation(_) | AppError::ValidationRefused { .. } | AppError::ValidationRefusedWithCount { .. } => error,
         other => crate::AppError::Repository(format!(
             "quality profile resolution temporarily unavailable: {other}"
         )),

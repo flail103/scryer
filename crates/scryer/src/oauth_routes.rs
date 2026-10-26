@@ -435,7 +435,7 @@ fn oauth_redirect_error(
 
 fn oauth_validation_error(err: AppError) -> Response {
     match err {
-        AppError::Unauthorized(error) => {
+        AppError::Unauthorized(error) | AppError::UnauthorizedReason { message: error, .. } => {
             tracing::debug!(error = %error, "OAuth validation rejected an authorization grant");
             oauth_error(
                 StatusCode::BAD_REQUEST,
@@ -443,10 +443,12 @@ fn oauth_validation_error(err: AppError) -> Response {
                 "OAuth grant is invalid",
             )
         }
-        AppError::Validation(message) if message == "invalid OAuth scope" => {
+        AppError::ValidationRefused {
+            message, reason, ..
+        } if reason == "OAUTH_INVALID_SCOPE" => {
             oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message)
         }
-        AppError::Validation(message) => {
+        AppError::Validation(message) | AppError::ValidationRefused { message, .. } => {
             oauth_error(StatusCode::BAD_REQUEST, "invalid_request", message)
         }
         other => {
@@ -462,7 +464,7 @@ fn oauth_validation_error(err: AppError) -> Response {
 
 fn oauth_app_error(err: AppError) -> Response {
     match err {
-        AppError::Unauthorized(error) => {
+        AppError::Unauthorized(error) | AppError::UnauthorizedReason { message: error, .. } => {
             tracing::debug!(error = %error, "OAuth grant was rejected");
             oauth_error(
                 StatusCode::BAD_REQUEST,
@@ -470,10 +472,12 @@ fn oauth_app_error(err: AppError) -> Response {
                 "OAuth grant is invalid",
             )
         }
-        AppError::Validation(message) if message == "invalid OAuth scope" => {
+        AppError::ValidationRefused {
+            message, reason, ..
+        } if reason == "OAUTH_INVALID_SCOPE" => {
             oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message)
         }
-        AppError::Validation(error) => {
+        AppError::Validation(error) | AppError::ValidationRefused { message: error, .. } => {
             tracing::debug!(error = %error, "OAuth request validation failed");
             oauth_error(
                 StatusCode::BAD_REQUEST,
@@ -505,7 +509,11 @@ fn oauth_token_response(body: OAuthTokenResponse) -> Response {
 
 fn oauth_error_description(err: &AppError) -> String {
     match err {
-        AppError::Validation(message) | AppError::Unauthorized(message) => message.clone(),
+        AppError::Validation(message)
+        | AppError::Unauthorized(message)
+        | AppError::ValidationRefused { message, .. }
+        | AppError::ValidationRefusedWithCount { message, .. }
+        | AppError::UnauthorizedReason { message, .. } => message.clone(),
         other => other.to_string(),
     }
 }

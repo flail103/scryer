@@ -1,3 +1,4 @@
+import { isArchivePasswordFailure } from "@/lib/utils/archive-password-reason";
 import * as React from "react";
 import { Link } from "react-router";
 import { useQuery } from "urql";
@@ -376,13 +377,14 @@ function passwordRetryTarget(event: TitleHistoryEvent): DownloadPasswordRetryTar
   const payload = historyHoverData(event.dataJson);
   const data = historyHoverData(payload?.data) ?? payload;
   const reason = historyHoverString(data, "reason");
+  const reasonCode = event.failureReasonCode ?? historyHoverString(data, "reason_code");
   const downloadId = historyHoverString(data, "canonical_download_id");
   const clientId = historyHoverString(data, "client_id");
   const clientType = historyHoverString(data, "client_type");
   const downloadClientItemId = historyHoverString(data, "download_id");
   if (!downloadId || !clientId || !clientType || !downloadClientItemId ||
       !["sabnzbd", "nzbget", "weaver"].includes(clientType) ||
-      !(reason?.startsWith("ARCHIVE_PASSWORD_REQUIRED:") || reason?.startsWith("ARCHIVE_PASSWORD_OR_CORRUPTION:"))) return null;
+      !isArchivePasswordFailure(reasonCode, reason)) return null;
   return { downloadId, clientId, clientType, downloadClientItemId, titleName: primarySourceLabel(event) };
 }
 

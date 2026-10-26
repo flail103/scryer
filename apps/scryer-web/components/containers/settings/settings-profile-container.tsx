@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useState, useCallback, useEffect, useMemo, useRef, type FormEvent } from "react";
 import { useClient } from "urql";
 import { notifyExternalAccountInviteSourcesChanged } from "@/components/containers/settings/external-account-invites-container";
@@ -37,7 +38,7 @@ import {
   myPasskeysQuery,
   myTotpQuery,
 } from "@/lib/graphql/queries";
-import { normalizeGraphQlErrorMessage } from "@/lib/graphql/error-message";
+import { hasGraphQlErrorReason } from "@/lib/graphql/error-message";
 import { shouldLoadProfilePasskeys } from "@/lib/utils/profile-passkey-gate";
 import {
   VISIBLE_EXTERNAL_ACCOUNT_PROVIDERS,
@@ -105,7 +106,7 @@ function requiresAccountSecurityReauthentication(error: unknown): boolean {
   return (
     graphqlErrors?.some(
       (graphqlError) => graphqlError.extensions?.code === "REAUTHENTICATION_REQUIRED",
-    ) ?? (error instanceof Error && error.message.includes("reauthentication"))
+    ) ?? false
   );
 }
 
@@ -124,8 +125,6 @@ const DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS: ExternalAuthRuntimeSettings = {
 };
 
 const TOTP_CODE_LENGTH = 6;
-const PASSKEY_FORM_LOGIN_DISABLED_ERROR =
-  "passkey authentication is unavailable while form login is disabled";
 
 function connectionsForProvider(
   settings: ExternalAuthRuntimeSettings,
@@ -138,8 +137,8 @@ function connectionLabelForDisplay(connection: ExternalAuthRuntimeConnection): s
   return connection.displayName;
 }
 
-function isPasskeyFormLoginDisabledError(message: string): boolean {
-  return normalizeGraphQlErrorMessage(message) === PASSKEY_FORM_LOGIN_DISABLED_ERROR;
+function isPasskeyFormLoginDisabledError(error: unknown): boolean {
+  return hasGraphQlErrorReason(error, "SECURITY_PASSKEY_AUTHENTICATION_UNAVAILABLE_WHILE_FORM_LOGIN_DISABLED", "VALIDATION_ERROR");
 }
 
 // Dismissing the browser's passkey prompt is a choice, not a failure, so it
@@ -225,10 +224,10 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       if (error.code === "cancelled") {
         return t("auth.passkeyCancelled");
       }
-      return error.message || t("profile.passkeyOperationFailed");
+      return userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t);
     }
 
-    return error instanceof Error ? error.message : t("profile.passkeyOperationFailed");
+    return userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t);
   }, [t]);
 
   const finishSecurityReauthentication = useCallback(
@@ -289,13 +288,13 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const login = result.data?.accountSecurityPasswordVerify;
       if (result.error || !login) {
-        setGlobalStatus(result.error?.message ?? "Account security verification failed.", { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.accountSecurityVerificationFailed"), t), { level: "ERROR" });
         return;
       }
       finishSecurityReauthentication(login);
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : "Account security verification failed.",
+        userFacingGraphQlErrorMessage(error, t("error.fallback.accountSecurityVerificationFailed"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -305,7 +304,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     client,
     finishSecurityReauthentication,
     securityReauthenticationPassword,
-    setGlobalStatus,
+    setGlobalStatus, t,
   ]);
 
   const handlePasskeySecurityReauthentication = useCallback(async () => {
@@ -343,13 +342,13 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const login = result.data?.mfaVerifyStepUp;
       if (result.error || !login) {
-        setGlobalStatus(result.error?.message ?? "Account security verification failed.", { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.accountSecurityVerificationFailed"), t), { level: "ERROR" });
         return;
       }
       finishSecurityReauthentication(login);
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : "Account security verification failed.",
+        userFacingGraphQlErrorMessage(error, t("error.fallback.accountSecurityVerificationFailed"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -359,7 +358,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     client,
     finishSecurityReauthentication,
     securityReauthenticationCode,
-    setGlobalStatus,
+    setGlobalStatus, t,
   ]);
 
   const handleChangePassword = useCallback(async () => {
@@ -378,7 +377,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
 
       if (result.error) {
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
 
@@ -395,7 +394,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setConfirmPassword("");
       setGlobalStatus(t("profile.passwordUpdated"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setSaving(false);
     }
@@ -436,7 +435,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         );
         if (result.error || !result.data?.setMyUiSettings) {
           setUiSettings(previous);
-          setGlobalStatus(result.error?.message ?? "Failed to update Sponsor preference.", { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.failedToUpdateSponsorPreference"), t), { level: "ERROR" });
           return;
         }
         setUiSettings(result.data.setMyUiSettings);
@@ -444,9 +443,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       } catch (error) {
         setUiSettings(previous);
         setGlobalStatus(
-          error instanceof Error
-            ? error.message
-            : "Failed to update Sponsor preference.",
+          userFacingGraphQlErrorMessage(error, t("error.fallback.failedToUpdateSponsorPreference"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -460,7 +457,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setUiSettings,
       uiSettings,
       uiSettingsLoaded,
-      uiSettingsLoading,
+      uiSettingsLoading, t,
     ],
   );
 
@@ -484,7 +481,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         );
         if (result.error || !result.data?.setMyUiSettings) {
           setUiSettings(previous);
-          setGlobalStatus(result.error?.message ?? t("profile.glowSaveFailed"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.glowSaveFailed"), t), { level: "ERROR" });
           return;
         }
         setUiSettings(result.data.setMyUiSettings);
@@ -492,7 +489,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       } catch (error) {
         setUiSettings(previous);
         setGlobalStatus(
-          error instanceof Error ? error.message : t("profile.glowSaveFailed"),
+          userFacingGraphQlErrorMessage(error, t("profile.glowSaveFailed"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -533,7 +530,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         if (cancelled) return;
 
         if (result.error) {
-          setGlobalStatus(result.error.message, { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
           setHasPassword(false);
           setAccountKind(null);
           return;
@@ -547,7 +544,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         if (!cancelled) {
           setHasPassword(false);
           setAccountKind(null);
-          setGlobalStatus(error instanceof Error ? error.message : t("profile.passkeyOperationFailed"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t), { level: "ERROR" });
         }
       }
     })();
@@ -577,19 +574,19 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         return;
       }
       if (result.error) {
-        if (isPasskeyFormLoginDisabledError(result.error.message)) {
+        if (isPasskeyFormLoginDisabledError(result.error)) {
           setPasskeys([]);
           return;
         }
 
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
 
       setPasskeys(result.data?.myPasskeys ?? []);
     } catch (error) {
       if (generation === passkeyLoadGenerationRef.current) {
-        setGlobalStatus(error instanceof Error ? error.message : t("profile.passkeyOperationFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t), { level: "ERROR" });
       }
     } finally {
       if (generation === passkeyLoadGenerationRef.current) {
@@ -626,16 +623,16 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .query<{ myOauthApps?: OAuthConnectedApp[] }>(myOauthAppsQuery, {})
         .toPromise();
       if (result.error) {
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
       setOauthApps(result.data?.myOauthApps ?? []);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : "Connected apps could not be loaded.", { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.connectedAppsCouldNotBeLoaded"), t), { level: "ERROR" });
     } finally {
       setLoadingOauthApps(false);
     }
-  }, [client, setGlobalStatus, userId]);
+  }, [client, setGlobalStatus, userId, t]);
 
   useEffect(() => {
     void loadOauthApps();
@@ -652,12 +649,12 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     try {
       const result = await client.query<{ myTotp?: TotpStatus }>(myTotpQuery, {}).toPromise();
       if (result.error) {
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
       setTotpStatus(result.data?.myTotp ?? null);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.totpOperationFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
     } finally {
       setLoadingTotp(false);
     }
@@ -680,7 +677,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .query<{ linkedAccounts?: LinkedAccount[] }>(linkedAccountsQuery, { userId })
         .toPromise();
       if (result.error) {
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
       setLinkedAccounts(
@@ -689,7 +686,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         ),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.linkedAccountsLoadFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.linkedAccountsLoadFailed"), t), { level: "ERROR" });
     } finally {
       setLoadingLinkedAccounts(false);
     }
@@ -716,14 +713,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         )
         .toPromise();
       if (result.error) {
-        setGlobalStatus(result.error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
       setExternalAuthSettings(
         result.data?.externalAuthRuntimeSettings ?? DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS,
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.linkAccountLoadFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.linkAccountLoadFailed"), t), { level: "ERROR" });
     } finally {
       setLoadingLinkOptions(false);
     }
@@ -807,7 +804,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       const deleted = result.data?.deleteMyPasskey;
       if (result.error || !deleted?.id) {
         if (requestSecurityReauthentication(result.error, { kind: "delete-passkey", id })) return;
-        setGlobalStatus(result.error?.message ?? t("profile.passkeyDeleteFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.passkeyDeleteFailed"), t), { level: "ERROR" });
         return;
       }
 
@@ -815,7 +812,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setGlobalStatus(t("profile.passkeyDeleted"), { level: "SUCCESS" });
     } catch (error) {
       if (requestSecurityReauthentication(error, { kind: "delete-passkey", id })) return;
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.passkeyDeleteFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyDeleteFailed"), t), { level: "ERROR" });
     } finally {
       setDeletingPasskeyId(null);
     }
@@ -831,18 +828,18 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         )
         .toPromise();
       if (result.error || result.data?.revokeMyOauthApp?.revoked !== true) {
-        setGlobalStatus(result.error?.message ?? "Connected app could not be revoked.", { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.connectedAppCouldNotBeRevoked"), t), { level: "ERROR" });
         return;
       }
 
       setOauthApps((current) => current.filter((app) => app.grantId !== grantId));
       setGlobalStatus("Connected app revoked.");
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : "Connected app could not be revoked.", { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.connectedAppCouldNotBeRevoked"), t), { level: "ERROR" });
     } finally {
       setRevokingOauthGrantId(null);
     }
-  }, [client, setGlobalStatus]);
+  }, [client, setGlobalStatus, t]);
 
   const handleStartTotpEnrollment = useCallback(async () => {
     setTotpBusy(true);
@@ -853,14 +850,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       if (result.error || !result.data?.totpEnrollmentStart) {
         if (requestSecurityReauthentication(result.error, { kind: "start-totp-enrollment" })) return;
-        setGlobalStatus(result.error?.message ?? t("profile.totpOperationFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
         return;
       }
       setTotpEnrollment(result.data.totpEnrollmentStart);
       setTotpEnrollmentCode("");
     } catch (error) {
       if (requestSecurityReauthentication(error, { kind: "start-totp-enrollment" })) return;
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.totpOperationFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
     } finally {
       setTotpBusy(false);
     }
@@ -884,7 +881,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const completed = result.data?.totpEnrollmentComplete;
       if (result.error || !completed) {
-        setGlobalStatus(result.error?.message ?? t("profile.totpOperationFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
         return;
       }
       setTotpStatus(completed.status);
@@ -893,7 +890,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpEnrollmentCode("");
       setGlobalStatus(t("profile.totpEnabled"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.totpOperationFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
     } finally {
       setTotpBusy(false);
     }
@@ -921,7 +918,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const disabled = result.data?.totpDisable;
       if (result.error || !disabled) {
-        setGlobalStatus(result.error?.message ?? t("profile.totpOperationFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
         return;
       }
       setTotpStatus(disabled);
@@ -929,7 +926,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpRecoveryCodes([]);
       setGlobalStatus(t("profile.totpDisabled"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.totpOperationFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
     } finally {
       setTotpBusy(false);
     }
@@ -948,7 +945,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const regenerated = result.data?.totpRegenerateRecoveryCodes;
       if (result.error || !regenerated) {
-        setGlobalStatus(result.error?.message ?? t("profile.totpOperationFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
         return;
       }
       setTotpStatus(regenerated.status);
@@ -956,7 +953,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpActionCode("");
       setGlobalStatus(t("profile.totpRecoveryCodesRegenerated"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("profile.totpOperationFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
     } finally {
       setTotpBusy(false);
     }
@@ -1002,7 +999,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         )
         .toPromise();
       if (result.error || !result.data?.unlinkExternalAccount?.linkedAccountId) {
-        setGlobalStatus(result.error?.message ?? t("profile.linkedAccountUnlinkFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.linkedAccountUnlinkFailed"), t), { level: "ERROR" });
         return;
       }
 
@@ -1011,7 +1008,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setGlobalStatus(t("profile.linkedAccountUnlinked"));
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("profile.linkedAccountUnlinkFailed"),
+        userFacingGraphQlErrorMessage(error, t("profile.linkedAccountUnlinkFailed"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -1100,7 +1097,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
 
       if (result.error || !result.data?.linkJellyfinAccount) {
-        const message = result.error?.message ?? t("profile.linkAccountFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("profile.linkAccountFailed"), t);
         setLinkAccountError(message);
         setGlobalStatus(message, { level: "ERROR" });
         return;
@@ -1112,7 +1109,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       notifyExternalAccountInviteSourcesChanged();
       setGlobalStatus(t("profile.linkAccountLinked"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("profile.linkAccountFailed");
+      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
       setLinkAccountError(message);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
@@ -1167,7 +1164,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       notifyExternalAccountInviteSourcesChanged();
       setGlobalStatus(t("profile.linkAccountLinked"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("profile.linkAccountFailed");
+      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
       setLinkAccountError(message);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
@@ -1207,7 +1204,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
 
       if (result.error || !result.data?.linkPlexAccount) {
-        const message = result.error?.message ?? t("profile.linkAccountFailed");
+        const message = userFacingGraphQlErrorMessage(result.error, t("profile.linkAccountFailed"), t);
         setLinkAccountError(message);
         setGlobalStatus(message, { level: "ERROR" });
         return;
@@ -1218,7 +1215,7 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       notifyExternalAccountInviteSourcesChanged();
       setGlobalStatus(t("profile.linkAccountLinked"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("profile.linkAccountFailed");
+      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
       setLinkAccountError(message);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {

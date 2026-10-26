@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import {
@@ -141,7 +142,7 @@ export function SettingsRecycleBinContainer() {
       setSettings(data.recycleBinSettings);
     } catch (error) {
       setSettings(null);
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setSettingsLoading(false);
     }
@@ -178,7 +179,7 @@ export function SettingsRecycleBinContainer() {
         setSelectedLibraryIds((current) => normalizeLibraryFilterSelection(current, nextLibraries));
       })
       .catch((error) => {
-        if (!cancelled) setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        if (!cancelled) setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       })
       .finally(() => {
         if (!cancelled) setLibrariesLoading(false);
@@ -213,7 +214,7 @@ export function SettingsRecycleBinContainer() {
       setTotalCount(data?.recycledItems?.totalCount ?? 0);
       setSelectedItemIds((current) => new Set(Array.from(current).filter((id) => nextIds.has(id))));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setItemsLoading(false);
     }
@@ -252,7 +253,7 @@ export function SettingsRecycleBinContainer() {
         { level: "SUCCESS" },
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setSettingsSaving(false);
     }
@@ -323,7 +324,7 @@ export function SettingsRecycleBinContainer() {
         conflictPolicy: "KEEP_BOTH",
       });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingId(null);
     }
@@ -365,7 +366,7 @@ export function SettingsRecycleBinContainer() {
       );
       setPendingAction(null);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingId(null);
     }
@@ -395,7 +396,7 @@ export function SettingsRecycleBinContainer() {
       );
       setPendingAction(null);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingId(null);
     }
@@ -428,7 +429,7 @@ export function SettingsRecycleBinContainer() {
       );
       setPendingAction(null);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingId(null);
     }

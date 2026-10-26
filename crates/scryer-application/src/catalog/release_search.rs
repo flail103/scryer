@@ -42,7 +42,7 @@ pub(crate) struct ScoredSearchOutcome {
     /// Indexers that could not answer any of the search's queries: no id they
     /// can search the facet by and no usable text query. Nothing was sent.
     pub unsupported_indexer_ids: Vec<String>,
-    pub incomplete_indexer_reasons: HashMap<String, String>,
+    pub incomplete_indexer_reasons: HashMap<String, IncompleteIndexerReason>,
     pub search_session_id: String,
 }
 
@@ -310,7 +310,9 @@ fn resolve_requested_episode(
 #[cfg(test)]
 fn extract_indexer_http_status(error: &AppError) -> Option<u16> {
     match error {
-        AppError::Repository(message) => extract_http_status_from_message(message),
+        AppError::Repository(message)
+        | AppError::RepositoryFailure { message, .. }
+        | AppError::RepositoryFailed { message, .. } => extract_http_status_from_message(message),
         _ => None,
     }
 }
@@ -544,32 +546,70 @@ fn record_query_coverage_outcomes(
     }
 }
 
-/// Opening words of the reason an indexer that asked Scryer to slow down gets.
-///
-/// The reason travels to the UI as free text, so this constant is the one place
-/// that spells it: [`reason_is_rate_limit`] reads it back to mark the snapshot
-/// row as a cooldown rather than a failure.
+/// The outcome that kept an indexer from covering the search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IncompleteIndexerKind {
+    RateLimited,
+    QueryBudget,
+    Contained,
+    Failed,
+}
+
+/// Human explanation beside the outcome used by the search state machine.
+#[derive(Clone, Debug)]
+pub(crate) struct IncompleteIndexerReason {
+    pub kind: IncompleteIndexerKind,
+    pub message: String,
+}
+impl IncompleteIndexerReason {
+    pub fn failed(message: String) -> Self {
+        Self {
+            kind: IncompleteIndexerKind::Failed,
+            message,
+        }
+    }
+}
+impl std::ops::Deref for IncompleteIndexerReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.message
+    }
+}
+
 pub(crate) const RATE_LIMITED_INDEXER_REASON: &str = "indexer is cooling down after a rate limit";
-
-/// Opening words of the reason an indexer skipped by an interactive search
-/// gets when its configured query budget has no slot soon enough.
 pub(crate) const QUERY_BUDGET_INDEXER_REASON: &str = "indexer is over its query budget";
-
-/// Opening words of the reason a contained indexer gets: the provider stopped
-/// at a limit of its own (a result ceiling, a saturated partition), so the
-/// indexer stays uncovered and waits out a backoff before it is asked again.
 pub(crate) const CONTAINED_INDEXER_REASON: &str =
     "indexer search contained at the provider's result limit";
 
-/// Whether an incomplete-indexer reason describes a wait on the indexer's
-/// pacing (a cooldown it asked for, or its own query budget), as opposed to
-/// something that went wrong.
-pub(crate) fn reason_is_rate_limit(reason: &str) -> bool {
-    reason.starts_with(RATE_LIMITED_INDEXER_REASON)
-        || reason.starts_with(QUERY_BUDGET_INDEXER_REASON)
+pub(crate) fn reason_is_rate_limit(reason: &IncompleteIndexerReason) -> bool {
+    matches!(
+        reason.kind,
+        IncompleteIndexerKind::RateLimited | IncompleteIndexerKind::QueryBudget
+    )
 }
 
-pub(crate) fn incomplete_indexer_reason(outcome: IndexerSearchOutcome) -> Option<String> {
+pub(crate) fn incomplete_indexer_reason(
+    outcome: IndexerSearchOutcome,
+) -> Option<IncompleteIndexerReason> {
+    let kind = match outcome {
+        IndexerSearchOutcome::Partial {
+            reason: Some(IndexerSearchIncompleteReason::RateLimited),
+            ..
+        } => IncompleteIndexerKind::RateLimited,
+        IndexerSearchOutcome::Partial {
+            reason: Some(IndexerSearchIncompleteReason::QueryBudgetExhausted),
+            ..
+        } => IncompleteIndexerKind::QueryBudget,
+        IndexerSearchOutcome::Partial {
+            reason:
+                Some(
+                    IndexerSearchIncompleteReason::PageCeilingReached
+                    | IndexerSearchIncompleteReason::SaturatedPartition,
+                ),
+            ..
+        } => IncompleteIndexerKind::Contained,
+        _ => IncompleteIndexerKind::Failed,
+    };
     let (reason, retry_after) = match outcome {
         IndexerSearchOutcome::Complete { .. } => return None,
         IndexerSearchOutcome::Partial {
@@ -615,9 +655,12 @@ pub(crate) fn incomplete_indexer_reason(outcome: IndexerSearchOutcome) -> Option
         IndexerSearchOutcome::Unsupported | IndexerSearchOutcome::BackedOff { .. } => return None,
         IndexerSearchOutcome::Errored => ("indexer search failed", None),
     };
-    Some(match retry_after {
-        Some(delay) => format!("{reason}; retry after {}s", delay.as_secs()),
-        None => reason.to_string(),
+    Some(IncompleteIndexerReason {
+        kind,
+        message: match retry_after {
+            Some(delay) => format!("{reason}; retry after {}s", delay.as_secs()),
+            None => reason.to_string(),
+        },
     })
 }
 
@@ -1097,9 +1140,10 @@ impl AppUseCase {
             } = self.download_source_capabilities().await;
             let scored_title = self.services.catalog.titles.get_by_id(title_id).await?;
             let Some(scored_title) = scored_title else {
-                return Err(AppError::NotFound(format!(
-                    "title {title_id} for release scoring"
-                )));
+                return Err(AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id} for release scoring"),
+                ));
             };
             let delay_profiles = self.load_delay_profiles().await;
             let delay_profile = crate::delay_profile::resolve_delay_profile(
@@ -2101,9 +2145,12 @@ impl AppUseCase {
                 Err(error) if error.is_canceled() => return Err(error),
                 Err(error) => {
                     for id in outcome.complete_indexer_ids.drain(..) {
-                        outcome
-                            .incomplete_indexer_reasons
-                            .insert(id, format!("localized query for {name} failed: {error}"));
+                        outcome.incomplete_indexer_reasons.insert(
+                            id,
+                            IncompleteIndexerReason::failed(format!(
+                                "localized query for {name} failed: {error}"
+                            )),
+                        );
                     }
                     outcome.unsupported_indexer_ids.clear();
                     warn!(title_id = title.id, query_name = name, error = %error, "localized query failed; retaining earlier results");
@@ -2402,7 +2449,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id}"),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -2450,7 +2502,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id}"),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -2463,10 +2520,16 @@ impl AppUseCase {
             .shows
             .get_series_movie_link_by_id(&series_movie_link_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("series movie {series_movie_link_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::SERIES_MOVIE_NOT_FOUND,
+                    format!("series movie {series_movie_link_id}"),
+                )
+            })?;
         if link.series_title_id != title.id {
-            return Err(AppError::Validation(
-                "series movie does not belong to title".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::SERIES_MOVIE_DOES_NOT_BELONG_TITLE,
+                "series movie does not belong to title",
             ));
         }
 
@@ -2516,7 +2579,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id}"),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -2796,7 +2864,7 @@ impl AppUseCase {
             let profile = crate::settings::runtime::quality_profile_by_id(&catalog, &profile_id)?
                 .cloned()
                 .ok_or_else(|| {
-                    AppError::Validation(format!(
+                    AppError::validation_refused(crate::error_reasons::catalog::CONFIGURED_QUALITY_PROFILE_MISSING_CATALOG, format!(
                         "configured quality profile '{profile_id}' from {} is missing from the catalog",
                         source.as_str()
                     ))
@@ -2809,10 +2877,8 @@ impl AppUseCase {
         }
 
         if !catalog.is_empty() {
-            return Err(AppError::Validation(
-                "no quality profile is configured; choose a global, category, library, or title profile"
-                    .to_string(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::catalog::NO_QUALITY_PROFILE_NOT_CONFIGURED, "no quality profile is configured; choose a global, category, library, or title profile"
+                    .to_string()));
         }
 
         let profile = builtin_default_quality_profile();

@@ -206,7 +206,7 @@ async fn restore_bundle_parts_into_postgres_pool(
         .filter(|table| row_counts.contains_key(*table))
     {
         let expected_rows = row_counts.get(table).ok_or_else(|| {
-            AppError::Validation(format!(
+            AppError::validation_refused(crate::error_reasons::DATASTORE_BACKUP_TABLE_SET_MISMATCH, format!(
                 "backup bundle table set does not match the current restore catalog: missing [{}], unexpected []",
                 table
             ))
@@ -221,9 +221,12 @@ async fn restore_bundle_parts_into_postgres_pool(
                 ))
             })?;
         if actual_rows as u64 != *expected_rows {
-            return Err(AppError::Validation(format!(
-                "restored table {table} row count mismatch: expected {expected_rows}, got {actual_rows}"
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::DATASTORE_RESTORED_TABLE_ROW_COUNT_MISMATCH,
+                format!(
+                    "restored table {table} row count mismatch: expected {expected_rows}, got {actual_rows}"
+                ),
+            ));
         }
     }
 
@@ -617,28 +620,34 @@ async fn import_table_part(
         .map(PgColumnInfo::import_rule)
         .collect::<Vec<_>>();
     let file = File::open(part_path).map_err(|error| {
-        AppError::Validation(format!("backup table payload missing for {table}: {error}"))
+        AppError::validation_refused(
+            crate::error_reasons::DATASTORE_BACKUP_TABLE_MISSING,
+            format!("backup table payload missing for {table}: {error}"),
+        )
     })?;
     let reader = BufReader::new(file);
 
     for (line_number, line) in reader.lines().enumerate() {
         let line = line.map_err(|error| {
-            AppError::Validation(format!(
-                "failed to read backup row {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_UNREADABLE,
+                format!("failed to read backup row {table}:{line_number}: {error}"),
+            )
         })?;
         if line.trim().is_empty() {
             continue;
         }
         let value: JsonValue = serde_json::from_str(&line).map_err(|error| {
-            AppError::Validation(format!(
-                "invalid backup row for {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_INVALID,
+                format!("invalid backup row for {table}:{line_number}: {error}"),
+            )
         })?;
         let mut object = value.as_object().cloned().ok_or_else(|| {
-            AppError::Validation(format!(
-                "backup row for {table}:{line_number} is not an object"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_NOT_OBJECT,
+                format!("backup row for {table}:{line_number} is not an object"),
+            )
         })?;
         normalize_import_object_for_target(
             table,
@@ -678,9 +687,10 @@ async fn import_table_part(
             query = bind_pg_value(query, column, value)?;
         }
         query.execute(&mut **tx).await.map_err(|error| {
-            AppError::Validation(format!(
-                "failed to import backup row for {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_IMPORT_FAILED,
+                format!("failed to import backup row for {table}:{line_number}: {error}"),
+            )
         })?;
     }
 
@@ -797,15 +807,22 @@ fn blob_bytes(value: &JsonValue) -> AppResult<Option<Vec<u8>>> {
                 .get("base64")
                 .and_then(JsonValue::as_str)
                 .ok_or_else(|| {
-                    AppError::Validation("backup blob payload is missing base64 bytes".into())
+                    AppError::validation_refused(
+                        crate::error_reasons::DATASTORE_BACKUP_BLOB_BYTES_MISSING,
+                        "backup blob payload is missing base64 bytes",
+                    )
                 })?;
             STANDARD.decode(encoded).map(Some).map_err(|error| {
-                AppError::Validation(format!("backup blob payload is invalid base64: {error}"))
+                AppError::validation_refused(
+                    crate::error_reasons::DATASTORE_BACKUP_BLOB_BASE64_INVALID,
+                    format!("backup blob payload is invalid base64: {error}"),
+                )
             })
         }
         JsonValue::String(value) => Ok(Some(value.as_bytes().to_vec())),
-        _ => Err(AppError::Validation(
-            "backup row contains an unsupported PostgreSQL bytea value".into(),
+        _ => Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_BACKUP_BYTEA_UNSUPPORTED,
+            "backup row contains an unsupported PostgreSQL bytea value",
         )),
     }
 }

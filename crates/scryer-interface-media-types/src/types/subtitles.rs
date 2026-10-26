@@ -180,6 +180,8 @@ pub struct TitleHistoryEventPayload {
     pub retry_requires_password: bool,
     /// Failure reason, or null when the event did not fail.
     pub failure_reason: Option<String>,
+    /// Stable failure condition separate from the human-readable reason.
+    pub failure_reason_code: Option<String>,
     /// Blocklist reason, or null when the event was not blocklisted.
     pub blocklist_reason: Option<String>,
     /// Source file path, or null when unavailable.

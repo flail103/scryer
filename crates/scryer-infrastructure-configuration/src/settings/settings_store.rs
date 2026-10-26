@@ -544,7 +544,8 @@ impl SettingsRepository for SettingsStore {
         let scope = scope.trim();
         let key_name = key_name.trim();
         if scope.is_empty() || key_name.is_empty() {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::CONFIGURATION_SETTING_READ_IDENTITY_REQUIRED,
                 "scope and key_name are required to read a setting".to_string(),
             ));
         }
@@ -892,7 +893,8 @@ async fn get_setting_with_defaults_exec(
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
     if scope.is_empty() || key_name.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_READ_IDENTITY_REQUIRED,
             "scope and key_name are required to read a setting".to_string(),
         ));
     }
@@ -925,7 +927,8 @@ async fn get_setting_explicit_exec(
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
     if scope.is_empty() || key_name.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_READ_IDENTITY_REQUIRED,
             "scope and key_name are required to read a setting".to_string(),
         ));
     }
@@ -1087,7 +1090,8 @@ async fn upsert_setting_value_tx(
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
     if scope.is_empty() || key_name.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_UPDATE_IDENTITY_REQUIRED,
             "scope and key_name are required to update a setting".to_string(),
         ));
     }
@@ -1095,12 +1099,16 @@ async fn upsert_setting_value_tx(
     let (definition_id, is_sensitive) = setting_definition_meta_tx(tx, &scope, &key_name)
         .await?
         .ok_or_else(|| {
-            AppError::Validation(format!("unknown setting key: {}.{}", scope, key_name))
+            AppError::validation_refused(
+                crate::error_reasons::CONFIGURATION_UNKNOWN_SETTING_KEY,
+                format!("unknown setting key: {}.{}", scope, key_name),
+            )
         })?;
 
     let value_json = value_json.trim();
     if value_json.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_VALUE_EMPTY,
             "setting value cannot be empty".to_string(),
         ));
     }
@@ -1113,7 +1121,10 @@ async fn upsert_setting_value_tx(
             ));
         }
         let installation_id = scope_id.as_ref().ok_or_else(|| {
-            AppError::Validation("plugin settings require an installed plugin".into())
+            AppError::validation_refused(
+                crate::error_reasons::CONFIGURATION_PLUGIN_SETTINGS_PLUGIN_REQUIRED,
+                "plugin settings require an installed plugin",
+            )
         })?;
         // Lock the installation in this transaction, serializing settings writes
         // against uninstall. A new installation gets a different scope identity.
@@ -1125,7 +1136,10 @@ async fn upsert_setting_value_tx(
         .await?
             == 0
         {
-            return Err(AppError::NotFound("plugin is no longer installed".into()));
+            return Err(AppError::not_found_reason(
+                crate::error_reasons::CONFIGURATION_PLUGIN_NOT_INSTALLED,
+                "plugin is no longer installed",
+            ));
         }
     }
     let now = Utc::now();
@@ -1208,7 +1222,8 @@ async fn delete_setting_value_tx(
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
     if scope.is_empty() || key_name.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_DELETE_IDENTITY_REQUIRED,
             "scope and key_name are required to delete a setting override".to_string(),
         ));
     }
@@ -1216,7 +1231,10 @@ async fn delete_setting_value_tx(
     let (definition_id, _is_sensitive) = setting_definition_meta_tx(tx, &scope, &key_name)
         .await?
         .ok_or_else(|| {
-        AppError::Validation(format!("unknown setting key: {}.{}", scope, key_name))
+        AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_UNKNOWN_SETTING_KEY,
+            format!("unknown setting key: {}.{}", scope, key_name),
+        )
     })?;
     let normalized_scope_id = normalize_scope_id(scope_id);
 
@@ -1264,12 +1282,15 @@ async fn setting_definition_meta_tx(
             .collect::<AppResult<Vec<_>>>()?;
         categories.sort();
         categories.dedup();
-        return Err(AppError::Validation(format!(
-            "ambiguous setting key {}.{} found in categories: {}",
-            scope,
-            key_name,
-            categories.join(", ")
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::CONFIGURATION_SETTING_KEY_AMBIGUOUS,
+            format!(
+                "ambiguous setting key {}.{} found in categories: {}",
+                scope,
+                key_name,
+                categories.join(", ")
+            ),
+        ));
     }
 
     let row = rows.into_iter().next().expect("checked non-empty");

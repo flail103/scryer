@@ -2539,8 +2539,9 @@ impl AppUseCase {
                 &episodes,
             )
         }) {
-            return Err(AppError::Validation(
-                "Acquisition is paused for content covered by this release. Resume it before searching.".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::PAUSED_CONTENT_COVERED_RELEASE,
+                "Acquisition is paused for content covered by this release. Resume it before searching.",
             ));
         }
         Ok(())
@@ -3010,8 +3011,9 @@ impl AppUseCase {
             tvdb_id.as_deref(),
             anidb_id.as_deref(),
         ) {
-            return Err(AppError::Validation(
-                "title has no name or external IDs".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::TITLE_NO_NAME_EXTERNAL_IDS,
+                "title has no name or external IDs",
             ));
         }
 
@@ -3076,8 +3078,9 @@ impl AppUseCase {
         let season = season.trim();
         let episode = episode.trim();
         if season.is_empty() || episode.is_empty() {
-            return Err(AppError::Validation(
-                "season and episode are required".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::SEASON_EPISODE_REQUIRED,
+                "season and episode are required",
             ));
         }
 
@@ -3090,17 +3093,24 @@ impl AppUseCase {
             .filter(|value| value.is_ascii_digit())
             .collect();
         if season_digits.is_empty() || episode_digits.is_empty() {
-            return Err(AppError::Validation(
-                "season and episode must include numeric values".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::SEASON_EPISODE_INVALID,
+                "season and episode must include numeric values",
             ));
         }
 
-        let season_num = season_digits
-            .parse::<u32>()
-            .map_err(|_| AppError::Validation("invalid season value".into()))?;
-        let episode_num = episode_digits
-            .parse::<u32>()
-            .map_err(|_| AppError::Validation("invalid episode value".into()))?;
+        let season_num = season_digits.parse::<u32>().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::acquisition::SEASON_VALUE_INVALID,
+                "invalid season value",
+            )
+        })?;
+        let episode_num = episode_digits.parse::<u32>().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::acquisition::EPISODE_VALUE_INVALID,
+                "invalid episode value",
+            )
+        })?;
 
         let episode_record = self
             .services
@@ -3332,9 +3342,7 @@ impl AppUseCase {
             queries.push(String::new());
         }
         if queries.is_empty() {
-            return Err(AppError::Validation(
-                "season pack search subject has no searchable title or external IDs".into(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::acquisition::SEASON_PACK_SEARCH_SUBJECT_NO_SEARCHABLE_TITLE_EXTERNAL_IDS, "season pack search subject has no searchable title or external IDs"));
         }
 
         Ok(PendingReleaseSearchSubject {
@@ -3378,8 +3386,9 @@ impl AppUseCase {
     ) -> AppResult<(Title, ResolvedReleaseSearchSubject)> {
         let search_title = series_movie_search_title(title, link);
         if search_title.name.trim().is_empty() {
-            return Err(AppError::Validation(
-                "series movie search subject has no searchable title".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::SERIES_MOVIE_SEARCH_SUBJECT_NO_SEARCHABLE_TITLE,
+                "series movie search subject has no searchable title",
             ));
         }
 
@@ -3657,11 +3666,17 @@ fn absolute_scale_known_without_lookup(
 fn whole_season_number(season: &str) -> AppResult<u32> {
     let season = season.trim();
     if season.is_empty() || !season.chars().all(|value| value.is_ascii_digit()) {
-        return Err(AppError::Validation("season must be a whole number".into()));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::SEASON_INVALID,
+            "season must be a whole number",
+        ));
     }
-    season
-        .parse::<u32>()
-        .map_err(|_| AppError::Validation("invalid season value".into()))
+    season.parse::<u32>().map_err(|_| {
+        AppError::validation_refused(
+            crate::error_reasons::acquisition::SEASON_VALUE_INVALID,
+            "invalid season value",
+        )
+    })
 }
 
 /// Expected runtime of a whole-season pack, the basis its size is scored on:
@@ -3768,7 +3783,12 @@ mod tests {
         assert_eq!(whole_season_number(" 02 ").ok(), Some(2));
         for rejected in ["-1", "2x5", "", "  ", "S02", "1.5"] {
             assert!(
-                matches!(whole_season_number(rejected), Err(AppError::Validation(_))),
+                matches!(
+                    whole_season_number(rejected),
+                    Err(AppError::Validation(_)
+                        | AppError::ValidationRefused { .. }
+                        | AppError::ValidationRefusedWithCount { .. })
+                ),
                 "{rejected:?} must be refused"
             );
         }

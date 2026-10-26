@@ -25,7 +25,7 @@ use scryer_interface::RequestLoaders;
 use scryer_interface::context::{
     ApiKeyManagementSession, AuthRuntimeStateHandle, AuthlessDefaultSession, ConnectionAuthEpoch,
     InteractiveSession, LoginAttemptLimiter, MfaVerification, OAuthActorSession, RequestClientIp,
-    RequestSessionPersistence,
+    RequestSessionPersistence, to_gql_error,
 };
 use scryer_logging::{ActorContext, LogContext, RequestContext, context_span, update_context};
 use std::collections::HashMap;
@@ -1046,7 +1046,9 @@ pub(crate) async fn graphql_ws_handler(
 
     let initial_actor = match resolve_actor(&state, &headers, Some(remote_addr)).await {
         Ok(actor) => actor,
-        Err(AppError::Unauthorized(_)) => return oauth_access_revoked_http_response(),
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) => {
+            return oauth_access_revoked_http_response();
+        }
         Err(error) => {
             tracing::error!(error = %error, "failed to resolve GraphQL WebSocket actor");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -1153,21 +1155,23 @@ pub(crate) async fn graphql_ws_handler(
                         if let Some(value) = value.get(api_explorer::HEADER) {
                             let mode =
                                 api_explorer::AccessMode::parse(value.as_str().unwrap_or(""))
-                                    .map_err(|error| {
-                                        async_graphql::Error::new(error.to_string())
-                                    })?;
+                                    .map_err(to_gql_error)?;
                             if mode == api_explorer::AccessMode::ApiKey {
-                                return Err(async_graphql::Error::new(
+                                return Err(to_gql_error(AppError::unauthorized_reason(
+                                    crate::error_reasons::HTTP_WEBSOCKET_API_KEY_UNSUPPORTED,
                                     "API keys are not supported for WebSocket connections",
-                                ));
+                                )));
                             }
                             let actor = actor.as_mut().ok_or_else(|| {
-                                async_graphql::Error::new("API explorer requires a web session")
+                                to_gql_error(AppError::unauthorized_reason(
+                                    crate::error_reasons::HTTP_API_EXPLORER_WEB_SESSION_REQUIRED,
+                                    "API explorer requires a web session",
+                                ))
                             })?;
                             let original = actor.clone();
                             api_explorer::masquerade(&app_for_init, actor, mode)
                                 .await
-                                .map_err(|error| async_graphql::Error::new(error.to_string()))?;
+                                .map_err(to_gql_error)?;
                             let _ = explorer_sender.send(Some(original));
                         }
                         *oauth_session
@@ -1603,10 +1607,12 @@ pub(crate) async fn graphql_handler(
         .is_some_and(is_api_key_bearer);
     let actor = match resolve_actor(&state, &headers, Some(remote_addr)).await {
         Ok(actor) => actor,
-        Err(AppError::Unauthorized(_)) if api_key_bearer => {
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) if api_key_bearer => {
             return api_key_unauthorized_graphql_response();
         }
-        Err(AppError::Unauthorized(_)) => return oauth_access_revoked_graphql_response(),
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) => {
+            return oauth_access_revoked_graphql_response();
+        }
         Err(error) => {
             tracing::error!(error = %error, "failed to resolve GraphQL actor");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -1765,8 +1771,12 @@ pub(crate) async fn graphql_handler(
         .await
     {
         tracing::error!(error = %error, "failed to durably register GraphQL image proxy sources");
+        // The source flush is an internal durability invariant. Keep its detail
+        // in the log, and use the same masked GraphQL mapping as repository failures.
+        let error =
+            unpositioned_graphql_error(to_gql_error(AppError::Repository(error.to_string())));
         let body = serde_json::to_vec(&serde_json::json!({
-            "errors": [{"message": "failed to register image sources"}]
+            "errors": [error]
         }))
         .unwrap_or_else(|_| b"{}".to_vec());
         return Response::builder()
@@ -1821,13 +1831,13 @@ pub(crate) async fn emby_avatar_handler(
         .await
     {
         Ok(Some(avatar)) => avatar,
-        Err(AppError::Unauthorized(_)) => {
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) => {
             return Response::builder()
                 .status(StatusCode::FORBIDDEN)
                 .body(Body::empty())
                 .unwrap();
         }
-        Ok(None) | Err(AppError::NotFound(_)) => {
+        Ok(None) | Err(AppError::NotFound(_) | AppError::NotFoundReason { .. }) => {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(Body::empty())
@@ -1912,6 +1922,15 @@ fn authless_web_client_forbidden_response(message: &str) -> Response {
         Json(ErrorResponse::new(message.to_string())),
     )
         .into_response()
+}
+
+/// Transport-level failures have no document position, but keep the same
+/// extension and source information as errors raised during execution.
+fn unpositioned_graphql_error(error: async_graphql::Error) -> ServerError {
+    let mut server_error = ServerError::new(error.message, None);
+    server_error.source = error.source;
+    server_error.extensions = error.extensions;
+    server_error
 }
 
 fn graphql_response_has_error_code(response: &async_graphql::BatchResponse, code: &str) -> bool {
@@ -2255,9 +2274,12 @@ async fn resolve_ws_connection_init_actor(
 
     if let Some(raw) = auth_value {
         return match parse_bearer_token(raw) {
-            Some(token) if is_api_key_bearer(token) => Err(async_graphql::Error::new(
-                "API keys are not supported for WebSocket connections",
-            )),
+            Some(token) if is_api_key_bearer(token) => {
+                Err(to_gql_error(AppError::unauthorized_reason(
+                    crate::error_reasons::HTTP_WEBSOCKET_API_KEY_UNSUPPORTED,
+                    "API keys are not supported for WebSocket connections",
+                )))
+            }
             Some(token) => match app.authenticate_token_with_claims(token).await {
                 Ok((user, token_claims)) => attach_resolved_actor(
                     app,
@@ -2271,12 +2293,13 @@ async fn resolve_ws_connection_init_actor(
                     touch_oauth_grant_last_used_background(app, &actor);
                     Some(actor)
                 })
-                .map_err(|e| async_graphql::Error::new(format!("authentication failed: {e}"))),
-                Err(e) => Err(async_graphql::Error::new(format!(
-                    "authentication failed: {e}"
-                ))),
+                .map_err(to_gql_error),
+                Err(error) => Err(to_gql_error(error)),
             },
-            None => Err(async_graphql::Error::new("invalid authorization header")),
+            None => Err(to_gql_error(AppError::unauthorized_reason(
+                crate::error_reasons::HTTP_AUTHORIZATION_HEADER_INVALID,
+                "invalid authorization header",
+            ))),
         };
     }
 
@@ -2289,9 +2312,10 @@ async fn resolve_ws_connection_init_actor(
     }
 
     if authless_proof_required && !proof_state.validate_headers(headers, proof_value) {
-        return Err(async_graphql::Error::new(
+        return Err(to_gql_error(AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_WEBSOCKET_CLIENT_PROOF_REQUIRED,
             "Scryer web client proof is required for unauthenticated websocket access",
-        ));
+        )));
     }
 
     if !auth_enabled || local_bypass_active {
@@ -2447,11 +2471,18 @@ fn authorization_token_from_headers(headers: &HeaderMap) -> Result<Option<&str>,
         return Ok(None);
     };
 
-    let raw = auth_header
-        .to_str()
-        .map_err(|_| AppError::Unauthorized("invalid authorization header".into()))?;
-    let token = parse_bearer_token(raw)
-        .ok_or_else(|| AppError::Unauthorized("invalid authorization header".into()))?;
+    let raw = auth_header.to_str().map_err(|_| {
+        AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_AUTHORIZATION_HEADER_INVALID,
+            "invalid authorization header",
+        )
+    })?;
+    let token = parse_bearer_token(raw).ok_or_else(|| {
+        AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_AUTHORIZATION_HEADER_INVALID,
+            "invalid authorization header",
+        )
+    })?;
 
     Ok(Some(token))
 }
@@ -3010,7 +3041,7 @@ fn classify_http_rate_limit(_method: &Method, path: &str) -> Option<HttpRateLimi
 
 pub(crate) fn map_app_error(error: AppError) -> Response {
     match error {
-        AppError::Unauthorized(message) => {
+        AppError::Unauthorized(message) | AppError::UnauthorizedReason { message, .. } => {
             (StatusCode::UNAUTHORIZED, Json(ErrorResponse::new(message))).into_response()
         }
         AppError::Validation(message) => {
@@ -3019,6 +3050,7 @@ pub(crate) fn map_app_error(error: AppError) -> Response {
         // The refusal code is a GraphQL-side contract; over REST this stays the
         // validation failure it is.
         AppError::ValidationRefused { message, .. }
+        | AppError::ValidationRefusedWithCount { message, .. }
         | AppError::LocationPlanRefused { message, .. }
         | AppError::LocationRootRefused { message, .. }
         | AppError::PublicUrlRejected { message, .. } => {
@@ -3044,7 +3076,7 @@ pub(crate) fn map_app_error(error: AppError) -> Response {
             Json(ErrorResponse::new(error.to_string())),
         )
             .into_response(),
-        AppError::NotFound(message) => {
+        AppError::NotFound(message) | AppError::NotFoundReason { message, .. } => {
             (StatusCode::NOT_FOUND, Json(ErrorResponse::new(message))).into_response()
         }
         AppError::DownloadFeedbackTimeout(message) => (
@@ -3141,7 +3173,8 @@ pub(crate) fn map_app_error(error: AppError) -> Response {
         }
         AppError::ImportEvidenceUnavailable(message)
         | AppError::Repository(message)
-        | AppError::RepositoryFailed { message, .. } => {
+        | AppError::RepositoryFailed { message, .. }
+        | AppError::RepositoryFailure { message, .. } => {
             let error_id = Id::new().0;
             tracing::error!(
                 error_id = %error_id,
@@ -3470,7 +3503,7 @@ mod tests {
         );
         assert!(matches!(
             context.app.totp_enrollment_start(&actor.user).await,
-            Err(AppError::Unauthorized(_))
+            Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
         ));
 
         context
@@ -3547,7 +3580,7 @@ mod tests {
                 Some(SocketAddr::from((Ipv4Addr::LOCALHOST, 3000))),
             )
             .await,
-            Err(AppError::Unauthorized(_))
+            Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
         ));
 
         let router = Router::new()
@@ -3602,7 +3635,10 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(AppError::Unauthorized(_))));
+        assert!(matches!(
+            result,
+            Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
+        ));
     }
 
     #[tokio::test]
@@ -3683,7 +3719,84 @@ mod tests {
             Ok(_) => panic!("invalid WebSocket credentials must not fall back to authless access"),
             Err(error) => error,
         };
-        assert!(error.message.contains("authentication failed"));
+        let wire = serde_json::to_value(unpositioned_graphql_error(error)).unwrap();
+        assert_eq!(wire["extensions"]["code"], "UNAUTHORIZED");
+    }
+
+    #[tokio::test]
+    async fn websocket_connection_init_rejections_name_the_condition() {
+        let context = common::TestContext::new().await;
+        let proof_state = AuthlessWebClientProofState::new();
+        let (headers, proof) = authless_ws_proof_headers(&proof_state);
+        let admin = context
+            .app
+            .find_or_create_default_user()
+            .await
+            .expect("isolated administrator");
+        let issued_key = context
+            .app
+            .create_api_key(
+                &admin,
+                scryer_application::CreateApiKey {
+                    label: "WebSocket refusal fixture".into(),
+                    expiry: scryer_application::ApiKeyExpiryPreset::Never,
+                },
+            )
+            .await
+            .expect("isolated API key");
+        assert!(
+            context
+                .app
+                .authenticate_api_key(&issued_key.raw_key)
+                .await
+                .is_ok()
+        );
+        assert!(is_api_key_bearer(&issued_key.raw_key));
+        assert!(proof_state.validate_headers(&headers, Some(&proof)));
+        assert!(!proof_state.validate_headers(&headers, None));
+        let api_key = format!("Bearer {}", issued_key.raw_key);
+        for (auth, proof_value, reason) in [
+            (
+                Some(api_key.as_str()),
+                Some(proof.as_str()),
+                crate::error_reasons::HTTP_WEBSOCKET_API_KEY_UNSUPPORTED,
+            ),
+            (
+                Some("Basic invalid"),
+                Some(proof.as_str()),
+                crate::error_reasons::HTTP_AUTHORIZATION_HEADER_INVALID,
+            ),
+            (
+                None,
+                None,
+                crate::error_reasons::HTTP_WEBSOCKET_CLIENT_PROOF_REQUIRED,
+            ),
+        ] {
+            let result = resolve_ws_connection_init_actor(
+                &context.app,
+                WsConnectionInitActorRequest {
+                    auth_enabled: false,
+                    local_bypass_active: false,
+                    initial_actor: Some(authless_ws_test_actor()),
+                    auth_value: auth,
+                    authless_proof_required: true,
+                    proof_state: &proof_state,
+                    headers: &headers,
+                    proof_value,
+                },
+            )
+            .await;
+            let error = match result {
+                Ok(_) => {
+                    panic!("refused WebSocket initialization must not acquire authless access")
+                }
+                Err(error) => error,
+            };
+            let wire = serde_json::to_value(unpositioned_graphql_error(error)).unwrap();
+            assert_eq!(wire["extensions"]["code"], "UNAUTHORIZED");
+            assert_eq!(wire["extensions"]["reason"], reason);
+            assert!(wire.get("locations").is_none());
+        }
     }
 
     #[tokio::test]
@@ -4087,6 +4200,60 @@ mod tests {
         );
         assert!(!body_text.contains("database password"));
         assert!(!body_text.contains("upstream detail"));
+    }
+
+    #[test]
+    fn unpositioned_graphql_error_keeps_masking_and_extensions_without_a_location() {
+        let error = to_gql_error(AppError::Repository("private durability detail".into()));
+        let wire = serde_json::to_value(unpositioned_graphql_error(error)).unwrap();
+        assert_eq!(wire["message"], INTERNAL_SERVER_ERROR_MESSAGE);
+        assert_eq!(wire["extensions"]["code"], "INTERNAL_ERROR");
+        assert!(
+            wire["extensions"]["errorId"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        );
+        assert!(wire.get("locations").is_none());
+        assert!(wire.get("path").is_none());
+        assert!(!wire.to_string().contains("private durability detail"));
+    }
+
+    #[tokio::test]
+    async fn coded_errors_preserve_rest_status_and_repository_masking() {
+        for (error, status) in [
+            (
+                AppError::unauthorized_reason("HTTP_TEST_AUTH", "diagnostic"),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                AppError::not_found_reason("HTTP_TEST_ABSENT", "diagnostic"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                AppError::validation_refused("HTTP_TEST_INVALID", "diagnostic"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AppError::repository_failure(
+                    scryer_application::RepositoryErrorKind::UniqueViolation,
+                    "private database detail",
+                ),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                AppError::RepositoryFailed {
+                    message: "private filesystem detail".into(),
+                    reason: "IMPORT_PERMISSION_DENIED",
+                },
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ] {
+            let response = map_app_error(error);
+            assert_eq!(response.status(), status);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body = String::from_utf8(body.to_vec()).unwrap();
+            assert!(!body.contains("private"));
+        }
     }
 
     #[tokio::test]

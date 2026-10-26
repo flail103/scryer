@@ -49,3 +49,5 @@ pub use sqlite::SqliteServices;
 pub mod sql {
     pub mod spellfix_retirement;
 }
+
+mod error_reasons;

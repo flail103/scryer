@@ -161,10 +161,7 @@ function isRateLimitedError(error: unknown): boolean {
       return true;
     }
 
-    return (
-      typeof entry.message === "string" &&
-      entry.message.trim().toLowerCase() === "api rate limit exceeded"
-    );
+    return false;
   });
 }
 

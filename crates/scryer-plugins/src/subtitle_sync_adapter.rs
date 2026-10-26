@@ -383,10 +383,13 @@ impl PreparedSubtitleSyncCommand {
 
 fn guest_file_path(root: &str, host_path: &Path) -> AppResult<PathBuf> {
     let file_name = host_path.file_name().ok_or_else(|| {
-        AppError::Validation(format!(
-            "subtitle sync path '{}' has no file name",
-            host_path.display()
-        ))
+        AppError::validation_refused(
+            crate::error_reasons::PLUGIN_SUBTITLE_SYNC_FILENAME_REQUIRED,
+            format!(
+                "subtitle sync path '{}' has no file name",
+                host_path.display()
+            ),
+        )
     })?;
     Ok(Path::new(root).join(file_name))
 }
@@ -419,10 +422,13 @@ fn validate_rewritten_output_path(
     expected_path: &Path,
 ) -> AppResult<()> {
     if rewritten.path != expected_path {
-        return Err(AppError::Validation(format!(
-            "subtitle sync plugin returned unexpected rewritten subtitle path '{}'",
-            rewritten.path.display()
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_PATH_MISMATCH,
+            format!(
+                "subtitle sync plugin returned unexpected rewritten subtitle path '{}'",
+                rewritten.path.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -445,15 +451,19 @@ fn read_guest_output_file(output_root: &Path, path: &Path) -> AppResult<Vec<u8>>
         ))
     })?;
     if !metadata.file_type().is_file() {
-        return Err(AppError::Validation(format!(
-            "subtitle sync plugin output is not a regular file: {}",
-            path.display()
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_NOT_FILE,
+            format!(
+                "subtitle sync plugin output is not a regular file: {}",
+                path.display()
+            ),
+        ));
     }
     if metadata.len() > MAX_REWRITTEN_SUBTITLE_BYTES {
-        return Err(AppError::Validation(format!(
-            "subtitle sync plugin output exceeds {MAX_REWRITTEN_SUBTITLE_BYTES} bytes"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_TOO_LARGE,
+            format!("subtitle sync plugin output exceeds {MAX_REWRITTEN_SUBTITLE_BYTES} bytes"),
+        ));
     }
 
     let output_root = output_root.canonicalize().map_err(|error| {
@@ -469,10 +479,13 @@ fn read_guest_output_file(output_root: &Path, path: &Path) -> AppResult<Vec<u8>>
         ))
     })?;
     if !canonical.starts_with(&output_root) {
-        return Err(AppError::Validation(format!(
-            "subtitle sync plugin output escapes the output directory: {}",
-            path.display()
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_OUTSIDE_DIRECTORY,
+            format!(
+                "subtitle sync plugin output escapes the output directory: {}",
+                path.display()
+            ),
+        ));
     }
 
     std::fs::read(&canonical).map_err(|error| {
@@ -565,7 +578,10 @@ mod tests {
             .expect_err("symlink escape must be rejected");
 
         assert!(
-            matches!(error, AppError::Validation(_)),
+            matches!(
+                error,
+                AppError::Validation(_) | AppError::ValidationRefused { .. }
+            ),
             "expected a validation error, got {error:?}"
         );
         // The secret bytes must never surface, not even in the error text.
@@ -591,7 +607,10 @@ mod tests {
             .align_response_to_port(response)
             .expect_err("symlink output must be rejected");
         assert!(
-            matches!(error, AppError::Validation(_)),
+            matches!(
+                error,
+                AppError::Validation(_) | AppError::ValidationRefused { .. }
+            ),
             "expected a validation error, got {error:?}"
         );
     }

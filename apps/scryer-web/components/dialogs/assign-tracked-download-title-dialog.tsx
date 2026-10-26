@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { CheckCircle2, Search } from "lucide-react";
 import { useClient } from "urql";
@@ -106,7 +107,7 @@ export function AssignTrackedDownloadTitleDialog({
           if (cancelled) return;
           setResults([]);
           setError(
-            err instanceof Error ? err.message : t("status.failedToLoad"),
+            userFacingGraphQlErrorMessage(err, t("status.failedToLoad"), t),
           );
         } finally {
           if (!cancelled) {

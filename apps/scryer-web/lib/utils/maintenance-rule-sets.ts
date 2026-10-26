@@ -1,3 +1,4 @@
+import { graphQlErrorNumberExtension } from "../graphql/error-message.ts";
 import type {
   MaintenanceActionDescriptor,
   MaintenanceActionKind,
@@ -732,22 +733,9 @@ export function maintenanceSearchHistoryState(
   return progress?.run?.state.toLowerCase() ?? "waiting";
 }
 
-/// The server rejects enabling a deleting rule whose acknowledged count no
-/// longer matches, and puts the current count in the message. Pull it out so the
-/// confirm dialog can re-ask against the number the server actually has,
-/// instead of making the operator refresh the page to find out.
-///
-/// Pinned shape:
-/// `destructive arming requires acknowledging the current candidate count (N)`
-export function parseAcknowledgedCandidateCountMismatch(
-  message: string,
-): number | null {
-  const match = /acknowledging the current candidate count \((\d+)\)/i.exec(message);
-  if (!match) {
-    return null;
-  }
-  const count = Number.parseInt(match[1], 10);
-  return Number.isFinite(count) ? count : null;
+/** Candidate count travels as a numeric extension beside the stable refusal. */
+export function parseAcknowledgedCandidateCountMismatch(error: unknown): number | null {
+  return graphQlErrorNumberExtension(error, "VALIDATION_ERROR", "MAINTENANCE_ARM_COUNT_MISMATCH", "currentCount");
 }
 
 export function setMaintenanceRuleStateVariables(

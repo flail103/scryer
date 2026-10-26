@@ -3239,15 +3239,13 @@ where
 {
     if !respect_title_monitoring {
         if app.location_owned_title_ids().await?.contains(title_id) {
-            return Err(AppError::Validation(
-                "This title is being moved. Search is available when the move finishes.".into(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE, "This title is being moved. Search is available when the move finishes."));
         }
         let excluded = app.non_wanted_state_scope_keys().await?;
         if scope_keys
             .is_some_and(|keys| !keys.is_empty() && keys.iter().all(|key| excluded.contains(key)))
         {
-            return Err(AppError::Validation("The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish.".into()));
+            return Err(AppError::validation_refused(crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING, "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish."));
         }
     }
     let title = app
@@ -3256,7 +3254,7 @@ where
         .titles
         .get_by_id(title_id)
         .await?
-        .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::catalog::TITLE_NOT_FOUND, format!("title {title_id}")))?;
 
     let now = Utc::now();
     let targets = app
@@ -3343,14 +3341,10 @@ where
         .iter()
         .all(|target| excluded.contains(&target.scope_key))
     {
-        return Err(AppError::Validation(
-            "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish.".into(),
-        ));
+        return Err(AppError::validation_refused(crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING, "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish."));
     }
     if app.location_owned_title_ids().await?.contains(title_id) {
-        return Err(AppError::Validation(
-            "This title is being moved. Search is available when the move finishes.".into(),
-        ));
+        return Err(AppError::validation_refused(crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE, "This title is being moved. Search is available when the move finishes."));
     }
 
     // Resolved but not read by an interactive walk (see `AcquisitionWalkIntent`);
@@ -3540,10 +3534,8 @@ async fn process_single_target(
     };
     let item = &mut item;
     if item.status == AcquisitionScopeStatus::Paused {
-        return Err(AppError::Validation(
-            "Acquisition was paused while this search was waiting. Resume it before searching."
-                .into(),
-        ));
+        return Err(AppError::validation_refused(crate::error_reasons::acquisition::PAUSED_WHILE_SEARCH_WAITING, "Acquisition was paused while this search was waiting. Resume it before searching."
+                ));
     }
 
     // Item-aware gate: skip only when an active/recent submission blocks this

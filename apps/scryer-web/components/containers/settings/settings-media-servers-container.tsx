@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { type ComponentProps, type FormEvent, useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { SettingsMediaServersSection } from "@/components/views/settings/settings-media-servers-section";
@@ -344,7 +345,7 @@ export function SettingsMediaServersContainer() {
     void Promise.all([refreshConnections(), refreshLibraries(), refreshAuthRuntimeState()])
       .catch((error: unknown) => {
         if (!cancelled) {
-          setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
         }
       });
     return () => {
@@ -461,7 +462,7 @@ export function SettingsMediaServersContainer() {
           : t("settings.plexServerDiscoveryEmpty"),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setPlexDiscoveryBusy(false);
     }
@@ -500,7 +501,7 @@ export function SettingsMediaServersContainer() {
           : "No Emby Connect servers were found",
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setEmbyConnectBusy(false);
     }
@@ -525,11 +526,11 @@ export function SettingsMediaServersContainer() {
       }
       setGlobalStatus("Emby Connect test passed", { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : "Emby Connect test failed", { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.embyConnectTestFailed"), t), { level: "ERROR" });
     } finally {
       setEmbyConnectBusy(false);
     }
-  }, [client, draft.embyConnectPassword, draft.embyConnectUsernameOrEmail, editingConnectionId, setGlobalStatus]);
+  }, [client, draft.embyConnectPassword, draft.embyConnectUsernameOrEmail, editingConnectionId, setGlobalStatus, t]);
 
   const submitConnection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -596,7 +597,7 @@ export function SettingsMediaServersContainer() {
       notifyExternalAccountInviteSourcesChanged();
     } catch (error) {
       if (!isReportedConnectionFeedbackError(error)) {
-        const message = error instanceof Error ? error.message : t("status.failedToUpdate");
+        const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
         setEditorError(message);
         setGlobalStatus(message, { level: "ERROR" });
       }
@@ -663,7 +664,7 @@ export function SettingsMediaServersContainer() {
       await refreshConnections();
       notifyExternalAccountInviteSourcesChanged();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingConnectionId(null);
     }
@@ -693,7 +694,7 @@ export function SettingsMediaServersContainer() {
         setEditorMode("create");
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingConnectionId(null);
       setPendingDeleteConnection(null);

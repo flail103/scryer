@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
@@ -421,7 +422,7 @@ export const SettingsContainer = memo(function SettingsContainer({
       setIndexerDownloadClientMappingCatalogResource((previous) =>
         failIndexerDownloadClientCatalogRequest(
           previous,
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
         ),
       );
     }

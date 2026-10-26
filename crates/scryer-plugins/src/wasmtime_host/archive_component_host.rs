@@ -598,6 +598,14 @@ fn finish_error(
         AppError::Repository(message) => {
             AppError::Repository(scryer_application::redact_archive_diagnostic(&message))
         }
+        AppError::RepositoryFailure { message, kind } => AppError::repository_failure(
+            kind,
+            scryer_application::redact_archive_diagnostic(&message),
+        ),
+        AppError::RepositoryFailed { message, reason } => AppError::RepositoryFailed {
+            message: scryer_application::redact_archive_diagnostic(&message),
+            reason,
+        },
         other => other,
     }
 }

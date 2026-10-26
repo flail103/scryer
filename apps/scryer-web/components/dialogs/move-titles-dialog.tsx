@@ -309,7 +309,7 @@ export function MoveTitlesDialog({
         if (error) {
           setPreview(null);
           setPreviewError(
-            userFacingGraphQlErrorMessage(error, t("move.previewFailed")),
+            userFacingGraphQlErrorMessage(error, t("move.previewFailed"), t),
           );
           return;
         }
@@ -331,7 +331,7 @@ export function MoveTitlesDialog({
         }
         setPreview(null);
         setPreviewError(
-          userFacingGraphQlErrorMessage(error, t("move.previewFailed")),
+          userFacingGraphQlErrorMessage(error, t("move.previewFailed"), t),
         );
       })
       .finally(() => {

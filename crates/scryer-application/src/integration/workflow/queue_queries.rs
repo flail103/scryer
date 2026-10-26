@@ -401,6 +401,7 @@ fn apply_import_record_to_queue_item(item: &mut DownloadQueueItem, record: &Impo
     item.import_error_message = error_message.clone();
     if let Some(error_message) = error_message {
         item.attention_reason = Some(error_message);
+        item.attention_reason_code = error_code.map(|code| format!("IMPORT_{}", code.as_str().to_ascii_uppercase()));
     }
 }
 fn apply_delete_command_to_queue_item(
@@ -411,6 +412,7 @@ fn apply_delete_command_to_queue_item(
     item.delete_error_message = command.error_text.clone();
     if let Some(error_text) = command.error_text.as_ref() {
         item.attention_reason = Some(error_text.clone());
+        item.attention_reason_code = None;
     }
 }
 fn queue_item_import_state_eligible(item: &DownloadQueueItem) -> bool {
@@ -1188,6 +1190,7 @@ fn password_retry_recovery_queue_item(submission: DownloadSubmission) -> Downloa
         queued_at: None,
         last_updated_at: None,
         attention_required: true,
+        attention_reason_code: None,
         attention_reason: Some(crate::DOWNLOAD_PASSWORD_RETRY_REASON.into()),
         download_client_item_id: submission.download_client_item_id,
         download_id: Some(submission.download_id.to_wire()),
@@ -1434,9 +1437,7 @@ impl AppUseCase {
             .into_iter()
             .collect::<HashSet<_>>();
         if allowed_library_ids.is_empty() {
-            return Err(AppError::Unauthorized(
-                "You do not have access to this library".to_string(),
-            ));
+            return Err(AppError::unauthorized_reason(crate::error_reasons::integration::LIBRARY_ACCESS_DENIED, "You do not have access to this library".to_string()));
         }
         let can_view_operational_history = self
             .has_app_permission(actor, scryer_domain::AppPermission::ManageSystemSettings)
@@ -1542,9 +1543,7 @@ impl AppUseCase {
     ) -> AppResult<Option<DownloadQueueItem>> {
         let target_download_client_item_id = download_client_item_id.trim();
         if target_download_client_item_id.is_empty() {
-            return Err(AppError::Validation(
-                "download client item id is required".to_string(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::integration::DOWNLOAD_CLIENT_ITEM_ID_REQUIRED, "download client item id is required".to_string()));
         }
 
         let normalized_client_type = client_type
@@ -1637,9 +1636,7 @@ impl AppUseCase {
             return Ok(());
         }
 
-        Err(AppError::Validation(
-            "this download is not in a state that can be imported by hand right now".to_string(),
-        ))
+        Err(AppError::validation_refused(crate::error_reasons::integration::DOWNLOAD_NOT_STATE_IMPORTED_HAND_RIGHT_NOW, "this download is not in a state that can be imported by hand right now".to_string()))
     }
 
     /// Resolve a local password retry only when the latest attempt still belongs
@@ -1655,7 +1652,7 @@ impl AppUseCase {
             .await
         {
             Ok(()) => {}
-            Err(AppError::Unauthorized(_)) => return Ok(None),
+            Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) => return Ok(None),
             Err(error) => return Err(error),
         }
         let Some(download_id) =
@@ -1682,7 +1679,7 @@ impl AppUseCase {
                 .await
             {
                 Ok(_) => {}
-                Err(AppError::Unauthorized(_) | AppError::NotFound(_)) => return Ok(None),
+                Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. } | AppError::NotFound(_) | AppError::NotFoundReason { .. }) => return Ok(None),
                 Err(error) => return Err(error),
             }
         }
@@ -1904,9 +1901,7 @@ impl AppUseCase {
             .into_iter()
             .collect::<HashSet<_>>();
         if allowed_library_ids.is_empty() {
-            return Err(AppError::Unauthorized(
-                "You do not have access to this library".to_string(),
-            ));
+            return Err(AppError::unauthorized_reason(crate::error_reasons::integration::LIBRARY_ACCESS_DENIED, "You do not have access to this library".to_string()));
         }
         let can_view_operational_history = self
             .has_app_permission(actor, scryer_domain::AppPermission::ManageSystemSettings)
@@ -2112,6 +2107,7 @@ fn merge_download_queue_item(existing: &mut DownloadQueueItem, incoming: Downloa
     existing.attention_required |= incoming.attention_required;
     if existing.attention_reason.is_none() {
         existing.attention_reason = incoming.attention_reason.clone();
+        existing.attention_reason_code = incoming.attention_reason_code.clone();
     }
     if incoming.import_status.is_some() {
         existing.import_status = incoming.import_status;
@@ -2185,6 +2181,7 @@ mod queue_query_unit_tests {
             queued_at: None,
             last_updated_at: None,
             attention_required: false,
+            attention_reason_code: None,
             attention_reason: None,
             download_client_item_id: "item-1".to_string(),
             download_id: None,

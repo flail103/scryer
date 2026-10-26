@@ -248,17 +248,23 @@ fn map_child_path(root: &Path, path: &Path) -> AppResult<String> {
         root.join(path)
     };
     let relative = path.strip_prefix(root).map_err(|_| {
-        AppError::Validation(format!(
-            "archive plugin path '{}' is outside allowed root '{}'",
-            scryer_application::redact_archive_diagnostic(&path.to_string_lossy()),
-            scryer_application::redact_archive_diagnostic(&root.to_string_lossy())
-        ))
+        AppError::validation_refused(
+            crate::error_reasons::PLUGIN_ARCHIVE_PATH_OUTSIDE_ROOT,
+            format!(
+                "archive plugin path '{}' is outside allowed root '{}'",
+                scryer_application::redact_archive_diagnostic(&path.to_string_lossy()),
+                scryer_application::redact_archive_diagnostic(&root.to_string_lossy())
+            ),
+        )
     })?;
     if !is_safe_relative_plugin_path(relative) {
-        return Err(AppError::Validation(format!(
-            "archive plugin path '{}' is not a safe relative path",
-            scryer_application::redact_archive_diagnostic(&path.to_string_lossy())
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::PLUGIN_ARCHIVE_PATH_UNSAFE,
+            format!(
+                "archive plugin path '{}' is not a safe relative path",
+                scryer_application::redact_archive_diagnostic(&path.to_string_lossy())
+            ),
+        ));
     }
     let guest_path = Path::new(GUEST_SOURCE_ROOT).join(relative);
     Ok(guest_path.to_string_lossy().into_owned())

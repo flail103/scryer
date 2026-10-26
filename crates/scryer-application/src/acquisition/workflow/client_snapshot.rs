@@ -210,7 +210,7 @@ pub(crate) async fn record_password_retry_failure(
         .download_submissions
         .find_by_canonical_download_id(&td.download_id)
         .await?
-        .ok_or_else(|| AppError::NotFound("download submission not found".into()))?;
+        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::acquisition::DOWNLOAD_SUBMISSION_NOT_FOUND, "download submission not found"))?;
     let attribution = resolve_failed_release_attribution(
         app,
         Some(&submission.title_id),
@@ -238,6 +238,7 @@ pub(crate) async fn record_password_retry_failure(
         client_type: Some(td.client_type.clone()),
         quality: None,
         reason: Some(failure.message().to_string()),
+        reason_code: Some(failure.reason_code().to_string()),
         episode_ids: attribution.episode_ids,
         collection_id: attribution.collection_id,
     });
@@ -344,6 +345,7 @@ async fn record_failed_release_outcome(
         client_name: normalized_client_name.clone(),
         client_type: normalized_client_type.clone(),
         quality: quality.clone(),
+        reason_code: None,
         reason: failure_reason,
         episode_ids: attribution.episode_ids.clone(),
         collection_id: attribution.collection_id.clone(),

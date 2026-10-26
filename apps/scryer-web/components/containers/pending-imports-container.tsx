@@ -404,7 +404,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
       })
       .catch((error) => {
         if (!cancelled) {
-          setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
         }
       })
       .finally(() => {
@@ -517,7 +517,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
         setConnection(nextConnection);
         return nextConnection;
       } catch (err) {
-        setError(err instanceof Error ? err.message : t("pendingImports.loadFailed"));
+        setError(userFacingGraphQlErrorMessage(err, t("pendingImports.loadFailed"), t));
         return null;
       } finally {
         setLoading(false);
@@ -623,7 +623,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
           if (!active || isAbortError(err)) {
             return;
           }
-          const message = err instanceof Error ? err.message : t("pendingImports.searchFailed");
+          const message = userFacingGraphQlErrorMessage(err, t("pendingImports.searchFailed"), t);
           setSearchResults([]);
           // Surfaced inline on the card too: a failed request must not read as
           // "no metadata matches found".
@@ -702,7 +702,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
           );
         })
         .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : t("pendingImports.bindPreviewLoadFailed");
+          const message = userFacingGraphQlErrorMessage(err, t("pendingImports.bindPreviewLoadFailed"), t);
           setBindingError(message);
           setGlobalStatus(message, { level: "ERROR" });
         })
@@ -833,7 +833,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
       );
       clearActiveItem();
     } catch (err) {
-      setGlobalStatus(err instanceof Error ? err.message : t("pendingImports.resolveFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(err, t("pendingImports.resolveFailed"), t), { level: "ERROR" });
     } finally {
       inFlightPendingImportActionsRef.current.delete(itemId);
       setResolvingItemId((current) => (current === itemId ? null : current));
@@ -879,7 +879,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
       );
       clearActiveItem();
     } catch (err) {
-      setGlobalStatus(err instanceof Error ? err.message : t("pendingImports.bindFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(err, t("pendingImports.bindFailed"), t), { level: "ERROR" });
     } finally {
       inFlightPendingImportActionsRef.current.delete(itemId);
       setResolvingItemId((current) => (current === itemId ? null : current));
@@ -914,7 +914,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
       })
       .catch((err: unknown) => {
         if (assignRequestRef.current !== request) return;
-        setAssignLoadError(userFacingGraphQlErrorMessage(err, t("pendingImports.bindPreviewLoadFailed")));
+        setAssignLoadError(userFacingGraphQlErrorMessage(err, t("pendingImports.bindPreviewLoadFailed"), t));
       });
   }, [client, t]);
 
@@ -942,7 +942,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
         if (mutationError) {
           return {
             kind: "error",
-            message: userFacingGraphQlErrorMessage(mutationError, t("pendingImports.bindFailed")),
+            message: userFacingGraphQlErrorMessage(mutationError, t("pendingImports.bindFailed"), t),
           };
         }
         const result = data?.bindPendingImport as ResolvePendingImportResult | undefined;
@@ -998,7 +998,7 @@ export const PendingImportsContainer = React.memo(function PendingImportsContain
         setIgnoreTargetItem(null);
       }
     } catch (err) {
-      setGlobalStatus(err instanceof Error ? err.message : t("pendingImports.ignoreFailed"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(err, t("pendingImports.ignoreFailed"), t), { level: "ERROR" });
     } finally {
       inFlightPendingImportActionsRef.current.delete(itemId);
       setIgnoringItemId((current) => (current === itemId ? null : current));

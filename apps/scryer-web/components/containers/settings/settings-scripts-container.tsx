@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useState } from "react";
 import { useClient } from "urql";
 
@@ -65,7 +66,7 @@ function useScriptInterpreterSettings() {
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          setGlobalStatus(error.message, { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
           return;
         }
         const loaded = interpreterDraftFrom(data?.scriptInterpreterSettings);
@@ -82,7 +83,7 @@ function useScriptInterpreterSettings() {
     return () => {
       cancelled = true;
     };
-  }, [client, setGlobalStatus]);
+  }, [client, setGlobalStatus, t]);
 
   const save = useCallback(async () => {
     setIsSaving(true);
@@ -101,7 +102,7 @@ function useScriptInterpreterSettings() {
       setBaseline(saved);
       setGlobalStatus(t("settings.scriptInterpreters.saved"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setIsSaving(false);
     }

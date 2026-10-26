@@ -496,8 +496,13 @@ impl DownloadQueueSnapshotCache {
             return;
         };
 
-        if item.attention_reason == item.import_error_message {
+        if item
+            .attention_reason_code
+            .as_deref()
+            .is_some_and(|code| code.starts_with("IMPORT_"))
+        {
             item.attention_reason = None;
+            item.attention_reason_code = None;
         }
         item.import_status = Some(record.status);
         item.import_type = Some(record.import_type);
@@ -505,6 +510,11 @@ impl DownloadQueueSnapshotCache {
         item.import_error_message = error_message.clone();
         if error_message.is_some() {
             item.attention_reason = error_message;
+            item.attention_reason_code = Some(
+                error_code
+                    .map(|code| format!("IMPORT_{}", code.as_str().to_ascii_uppercase()))
+                    .unwrap_or_else(|| "IMPORT_FAILED".to_string()),
+            );
         }
         item.import_transfer_phase = record.import_transfer_phase;
         item.import_transfer_bytes = record.import_transfer_bytes;
@@ -741,6 +751,7 @@ mod download_queue_snapshot_cache_tests {
             queued_at: None,
             last_updated_at: None,
             attention_required: false,
+            attention_reason_code: None,
             attention_reason: None,
             download_client_item_id: id,
             download_id: None,

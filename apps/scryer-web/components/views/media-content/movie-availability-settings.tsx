@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useState } from "react";
 import { useClient } from "urql";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,7 @@ export function MovieAvailabilitySettingsFields() {
       )
       .toPromise();
     if (error) {
-      setGlobalStatus(error.message || t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       return;
     }
     setDraft(data?.mediaSettings ?? null);
@@ -90,7 +91,7 @@ export function MovieAvailabilitySettingsFields() {
       if (data?.updateMediaSettings) setDraft(data.updateMediaSettings);
       setGlobalStatus(t("settings.mediaSettingsSaved"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), {
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), {
         level: "ERROR",
       });
     } finally {

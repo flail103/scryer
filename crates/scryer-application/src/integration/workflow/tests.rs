@@ -180,6 +180,7 @@ mod tests {
             queued_at: Some(Utc::now().timestamp_millis().to_string()),
             last_updated_at: Some(Utc::now().timestamp_millis().to_string()),
             attention_required: false,
+            attention_reason_code: None,
             attention_reason: None,
             download_client_item_id: id.to_string(),
             download_id: None,
@@ -211,7 +212,7 @@ mod tests {
             completed_source: None,
             state: TrackedDownloadState::ImportPending,
             status: TrackedDownloadStatus::Warning,
-            status_messages: vec!["retry later".to_string()],
+            status_messages: vec!["retry later".to_string().into()],
             title_id: Some("title-1".to_string()),
             facet: Some("series".to_string()),
             source_title: Some("Example.Release".to_string()),
@@ -513,7 +514,7 @@ mod tests {
         let mut duplicate = tracked_for_dispatch(duplicate_id);
         duplicate.state = TrackedDownloadState::ImportPending;
         duplicate.status = TrackedDownloadStatus::Warning;
-        duplicate.status_messages = vec!["waiting for import".to_string()];
+        duplicate.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("waiting for import".to_string())];
         let duplicate_download_id = tracker.insert_for_tests(duplicate);
 
         reconcile_duplicate_terminal_source_states(&mut tracker);
@@ -1057,7 +1058,7 @@ mod tests {
         held.client_id = client_item.client_id.clone();
         held.client_type = client_item.client_type.clone();
         held.status = TrackedDownloadStatus::Warning;
-        held.status_messages = vec!["Password retry is awaiting confirmation from the download client; sources are preserved.".into()];
+        held.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("Password retry is awaiting confirmation from the download client; sources are preserved.")];
         let metadata = tracked_download_queue_snapshot(&held);
         let mut projected = synthetic_tracked_snapshot_queue_item(&metadata, None)
             .expect("held retry remains visible when no native queue row exists");
@@ -1147,7 +1148,7 @@ mod tests {
             completed_source: None,
             state: TrackedDownloadState::ImportBlocked,
             status: TrackedDownloadStatus::Warning,
-            status_messages: vec!["needs manual import".to_string()],
+            status_messages: vec!["needs manual import".to_string().into()],
             title_id: Some("title-1".to_string()),
             facet: Some("series".to_string()),
             source_title: None,
@@ -1207,7 +1208,7 @@ mod tests {
                 completed_source: None,
                 state: TrackedDownloadState::ImportBlocked,
                 status: TrackedDownloadStatus::Warning,
-                status_messages: vec!["needs manual import".to_string()],
+                status_messages: vec!["needs manual import".to_string().into()],
                 title_id: Some("title-1".to_string()),
                 facet: Some("series".to_string()),
                 source_title: None,
@@ -1534,7 +1535,7 @@ mod tests {
         let mut tracked = tracked_in_state(&queue_item, TrackedDownloadState::ImportBlocked);
         tracked.status = TrackedDownloadStatus::Warning;
         tracked.status_messages =
-            vec!["no_video_files: no importable video found after 3 unchanged checks".to_string()];
+            vec![crate::tracked_downloads::TrackedStatusMessage::from("no_video_files: no importable video found after 3 unchanged checks".to_string())];
         let metadata = tracked_download_queue_snapshot(&tracked);
         apply_tracked_download_activity_projection(&mut queue_item, &metadata);
 
@@ -2304,7 +2305,7 @@ mod tests {
             );
             let mut runtime = super::TrackedDownloadRuntimeState::new();
             let mut tracked = reconcile_row(Some(&title.id), TrackedDownloadState::Importing);
-            tracked.status_messages = vec!["worker in progress".into()];
+            tracked.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("worker in progress")];
             let download_id = runtime.tracker.insert_for_tests(tracked);
             let mut finished = runtime
                 .tracker
@@ -2312,7 +2313,7 @@ mod tests {
                 .unwrap()
                 .clone();
             finished.state = TrackedDownloadState::Imported;
-            finished.status_messages = vec!["finished once".into()];
+            finished.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("finished once")];
             let client_item_id = finished.client_item.download_client_item_id.clone();
             runtime
                 .tracked_work_in_flight
@@ -2445,7 +2446,7 @@ mod tests {
             let mut finished = tracker.get_by_download_id(live).expect("live row").clone();
             finished.state = TrackedDownloadState::ImportPending;
             finished.status = TrackedDownloadStatus::Warning;
-            finished.status_messages = vec!["worker finished".to_string()];
+            finished.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("worker finished".to_string())];
 
             let mut in_flight = std::collections::HashSet::from([SHARED_TORRENT_ID.to_string()]);
             let deferred = super::handle_tracked_download_background_work_result(
@@ -2465,7 +2466,7 @@ mod tests {
             assert!(in_flight.is_empty());
             let merged = tracker.get_by_download_id(live).expect("live row");
             assert_eq!(merged.state, TrackedDownloadState::ImportPending);
-            assert_eq!(merged.status_messages, vec!["worker finished".to_string()]);
+            assert_eq!(crate::tracked_downloads::status_texts(&merged.status_messages), vec!["worker finished".to_string()]);
             assert_eq!(merged.title_id.as_deref(), Some(title.id.as_str()));
             assert_eq!(row_debug(&tracker, settled), settled_before);
         }
@@ -2528,7 +2529,7 @@ mod tests {
 
             let mut finished = snapshot;
             finished.state = TrackedDownloadState::Imported;
-            finished.status_messages = vec!["retry finished".to_string()];
+            finished.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from("retry finished".to_string())];
             let (reply, response) = tokio::sync::oneshot::channel();
             super::handle_tracked_download_command(
                 &app,
@@ -2546,11 +2547,10 @@ mod tests {
             .await;
             response.await.expect("reply").expect("finish");
             assert!(in_flight.is_empty());
-            assert_eq!(
-                tracker
+            assert_eq!(crate::tracked_downloads::status_texts(&tracker
                     .get_by_download_id(settled)
                     .expect("claimed row")
-                    .status_messages,
+                    .status_messages),
                 vec!["retry finished".to_string()]
             );
             assert_eq!(row_debug(&tracker, live), live_before);
@@ -2585,7 +2585,7 @@ mod tests {
                 warned
                     .status_messages
                     .iter()
-                    .any(|message| message.contains("wasn't grabbed"))
+                    .any(|message| message.text.contains("wasn't grabbed"))
             );
             assert_eq!(row_debug(&tracker, settled), settled_before);
 

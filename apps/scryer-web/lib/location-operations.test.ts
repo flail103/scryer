@@ -35,7 +35,6 @@ import {
   settledDestinationPick,
   isActiveWorkBlock,
   isAmbiguousDestinationBlock,
-  isBlockedSelectionMessage,
   isCrossLibraryDestination,
   isSameNameWarning,
   mergeDestinationTitleId,
@@ -45,8 +44,6 @@ import {
   mergeRoleGroupKey,
   mergeStatement,
   mergeSummaryPresentation,
-  isInsufficientSpaceMessage,
-  isStalePlanMessage,
   isTerminalOperationState,
   offersModeSelection,
   operationByteProgress,
@@ -768,30 +765,6 @@ test("the verification stamp names the depth and any quick-check fallback", () =
   );
 });
 
-test("a refused confirmation is recognised as a stale plan, not a raw failure", () => {
-  assert.equal(
-    isStalePlanMessage(
-      "the preview no longer matches what is on disk or in the catalog; review a fresh preview before confirming",
-    ),
-    true,
-  );
-  assert.equal(isStalePlanMessage("stale_plan"), true);
-  assert.equal(isStalePlanMessage("something else went wrong"), false);
-  assert.equal(isStalePlanMessage(null), false);
-});
-
-test("a refused confirmation over blocked titles is recognised too", () => {
-  assert.equal(
-    isBlockedSelectionMessage(
-      "some selected titles still need a decision; resolve or remove them before starting",
-    ),
-    true,
-  );
-  assert.equal(isBlockedSelectionMessage("blocked_items"), true);
-  assert.equal(isBlockedSelectionMessage("disk full"), false);
-  assert.equal(isBlockedSelectionMessage(undefined), false);
-});
-
 test("the server's refusal code is preferred over the message prose", () => {
   const refused = (refusalCode: string) => ({
     graphQLErrors: [
@@ -811,17 +784,17 @@ test("the server's refusal code is preferred over the message prose", () => {
   // An unknown code is not silently promoted into a refusal.
   assert.equal(startRefusalCodeFromError(refused("something_new")), null);
 
-  // The prose stays the fallback for an error that carries no extensions.
+  // Prose without an attached code never decides how the dialog behaves.
   assert.equal(
     recognizeStartRefusal(
       { graphQLErrors: [{ message: "validation: boom" }] },
       "the preview no longer matches what is on disk or in the catalog",
     ),
-    "stale_plan",
+    null,
   );
   assert.equal(
     recognizeStartRefusal(new Error("boom"), "blocked_items"),
-    "blocked_items",
+    null,
   );
   assert.equal(recognizeStartRefusal(new Error("boom"), "disk full"), null);
 
@@ -851,19 +824,18 @@ test("a refusal for free space is recognized and is not re-previewable", () => {
     "the new code is recognized rather than dropped as unknown",
   );
   assert.equal(recognizeStartRefusal(refused, null), "insufficient_space");
-  // The prose fallback, for a refusal that lost its extensions in transit.
+  // Uncoded sentences are unknown failures.
   assert.equal(
     recognizeStartRefusal(new Error("boom"), "insufficient_space"),
-    "insufficient_space",
+    null,
   );
   assert.equal(
     recognizeStartRefusal(
       new Error("boom"),
       "The destination does not have enough free space for this move.",
     ),
-    "insufficient_space",
+    null,
   );
-  assert.equal(isInsufficientSpaceMessage("the plan went stale"), false);
 
   // Re-previewing the same selection onto the same volume would only measure
   // the same shortfall again, so the dialog says so instead.

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { useBeforeUnload, useBlocker } from "react-router";
@@ -531,7 +532,7 @@ export const MediaLibrarySettingsPanel = React.memo(function MediaLibrarySetting
       })
       .catch((error) => {
         if (!cancelled) {
-          setSettingsError(error instanceof Error ? error.message : t("settings.librarySettingsLoadFailed"));
+          setSettingsError(userFacingGraphQlErrorMessage(error, t("settings.librarySettingsLoadFailed"), t));
         }
       })
       .finally(() => {
@@ -986,7 +987,7 @@ export const MediaLibrarySettingsPanel = React.memo(function MediaLibrarySetting
         setDraftDownloadClientRoutingOrder(nextState.order);
       } catch (error) {
         setSettingsError(
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
         );
       } finally {
         setDraftDownloadClientRoutingLoading(false);
@@ -1070,7 +1071,7 @@ export const MediaLibrarySettingsPanel = React.memo(function MediaLibrarySetting
             setSettingsError(null);
           } catch (error) {
             setSettingsError(
-              error instanceof Error ? error.message : t("settings.librarySettingsLoadFailed"),
+              userFacingGraphQlErrorMessage(error, t("settings.librarySettingsLoadFailed"), t),
             );
           }
           setMode("existing");
@@ -1091,7 +1092,7 @@ export const MediaLibrarySettingsPanel = React.memo(function MediaLibrarySetting
           setSettingsError(null);
         } catch (error) {
           setSettingsError(
-            error instanceof Error ? error.message : t("settings.librarySettingsLoadFailed"),
+            userFacingGraphQlErrorMessage(error, t("settings.librarySettingsLoadFailed"), t),
           );
         }
         return updatedLibrary;

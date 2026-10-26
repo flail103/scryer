@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useClient } from "urql";
 import { ACTIVITY_READ_TIMEOUT_MS, boundedQuery, QueryTimeoutError } from "@/lib/graphql/bounded-query";
@@ -250,7 +251,7 @@ export function useDownloadQueuePage({
   const reportError = useCallback(
     (error: unknown) => {
       const message = error instanceof QueryTimeoutError ? t("activity.refreshTimedOut") :
-        error instanceof Error ? error.message : "Failed to load queue.";
+        userFacingGraphQlErrorMessage(error, t("error.fallback.failedToLoadQueue"), t);
       setQueueError(message);
       setQueueSnapshotStale(true);
       if (lastReportedErrorRef.current !== message) {

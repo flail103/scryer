@@ -34,7 +34,7 @@ export function TrustedProxiesPanel() {
           setDraft(result.data.serviceSettings.trustedProxyIps.join("\n"));
         }
       } catch (cause) {
-        if (!cancelled) setError(userFacingGraphQlErrorMessage(cause, t("settings.trustedProxiesLoadError")));
+        if (!cancelled) setError(userFacingGraphQlErrorMessage(cause, t("settings.trustedProxiesLoadError"), t));
       }
     })();
     return () => { cancelled = true; };
@@ -59,7 +59,7 @@ export function TrustedProxiesPanel() {
       setDraft(result.data.updateServiceSettings.trustedProxyIps.join("\n"));
       setSaved(true);
     } catch (cause) {
-      setError(userFacingGraphQlErrorMessage(cause, t("settings.trustedProxiesSaveError")));
+      setError(userFacingGraphQlErrorMessage(cause, t("settings.trustedProxiesSaveError"), t));
     } finally {
       setBusy(false);
     }

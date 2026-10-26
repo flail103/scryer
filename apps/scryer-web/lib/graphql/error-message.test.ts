@@ -1,21 +1,25 @@
+import { PUBLIC_ERROR_REASON_CODES } from "./public-error-reason-codes.ts";
+import { t } from "../i18n/index.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ERROR_REASON_KEYS,
+  isLostWarmupSessionError,
+  hasGraphQlErrorReason,
+  graphQlErrorNumberExtension,
   isMfaStepUpRequiredError,
   normalizeGraphQlErrorMessage,
   userFacingGraphQlErrorMessage,
 } from "./error-message.ts";
 
-test("missing titles have a clean message even with duplicated GraphQL errors", () => {
-  for (const message of [
-    "not found: title missing-id",
-    "[GraphQL] not found: title missing-id",
-    "not found: title missing-id [GraphQL] not found: title missing-id",
-  ]) {
-    assert.equal(userFacingGraphQlErrorMessage(new Error(message), "Failed"), "Title not found.");
-  }
-  assert.equal(normalizeGraphQlErrorMessage("not found: library missing-id"), "not found: library missing-id");
+function coded(reason: string, code = "VALIDATION_ERROR", message = "This sentence was reworded") {
+  return { graphQLErrors: [{ message, extensions: { code, reason } }] };
+}
+
+test("missing titles use their reason even after the sentence changes", () => {
+  assert.equal(userFacingGraphQlErrorMessage(coded("TITLE_NOT_FOUND", "NOT_FOUND"), "Failed"), "Title not found.");
+  assert.equal(userFacingGraphQlErrorMessage(new Error("not found: title missing-id"), "Failed"), "not found: title missing-id");
 });
 
 test("normalizeGraphQlErrorMessage strips GraphQL validation prefixes", () => {
@@ -27,13 +31,8 @@ test("normalizeGraphQlErrorMessage strips GraphQL validation prefixes", () => {
   );
 });
 
-test("normalizeGraphQlErrorMessage masks legacy GraphQL repository prefixes", () => {
-  assert.equal(
-    normalizeGraphQlErrorMessage(
-      "[GraphQL] repository: validation: passkeys require a password-backed account",
-    ),
-    "Internal server error",
-  );
+test("uncoded prose is display cleanup only", () => {
+  assert.equal(normalizeGraphQlErrorMessage("[GraphQL] repository: validation: old words"), "repository: validation: old words");
 });
 
 test("normalizeGraphQlErrorMessage strips plain GraphQL prefixes", () => {
@@ -45,17 +44,8 @@ test("normalizeGraphQlErrorMessage strips plain GraphQL prefixes", () => {
   );
 });
 
-test("expired release candidates show an actionable message", () => {
-  const rawMessage = "unauthorized: invalid release candidate token: ExpiredSignature";
-  for (const error of [
-    new Error(rawMessage),
-    new Error(`[GraphQL] ${rawMessage}`),
-    { graphQLErrors: [{ message: rawMessage }] },
-  ]) {
-    const message = userFacingGraphQlErrorMessage(error, "queue failed");
-    assert.equal(message, "Search results expired, please search again");
-    assert.equal(normalizeGraphQlErrorMessage(message), message);
-  }
+test("expired release candidates use a reason rather than JWT diagnostic text", () => {
+  assert.equal(userFacingGraphQlErrorMessage(coded("RELEASE_TOKEN_EXPIRED", "UNAUTHORIZED"), "queue failed"), "Search results expired, please search again");
 });
 
 test("other token errors are not described as expired search results", () => {
@@ -67,13 +57,18 @@ test("other token errors are not described as expired search results", () => {
   }
 });
 
-test("normalizeGraphQlErrorMessage rewrites config step-up errors", () => {
-  assert.equal(
-    normalizeGraphQlErrorMessage(
-      "[GraphQL] MFA verification is required before changing system configuration",
-    ),
-    "Settings verification expired. Enter an authenticator code to continue.",
-  );
+test("configuration verification uses the existing MFA code", () => {
+  assert.equal(userFacingGraphQlErrorMessage(coded("", "MFA_STEP_UP_REQUIRED"), "Failed"), "Settings verification expired. Enter an authenticator code to continue.");
+});
+
+test("known reasons use the current translator and unknown reasons keep their sentence", () => {
+  assert.equal(userFacingGraphQlErrorMessage(coded("TAG_ALREADY_EXISTS"), "Failed", (key) => `translated:${key}`), "translated:error.tagAlreadyExists");
+  assert.equal(userFacingGraphQlErrorMessage(coded("FUTURE_UNKNOWN"), "Failed"), "This sentence was reworded");
+});
+
+test("network failures are identified by the network field", () => {
+  assert.equal(userFacingGraphQlErrorMessage({ networkError: new Error("different browser wording") }, "Failed"), "Disconnected");
+  assert.equal(userFacingGraphQlErrorMessage(new Error("[Network] Failed to fetch"), "Failed"), "[Network] Failed to fetch");
 });
 
 test("isMfaStepUpRequiredError detects GraphQL extension codes", () => {
@@ -144,4 +139,48 @@ test("GraphQL internal errors mask repository details and include the reference 
     message,
     "Internal server error. Reference ID: err-123",
   );
+});
+
+
+test("every known public reason has a real base localization entry", () => {
+  for (const [reason, key] of Object.entries(ERROR_REASON_KEYS)) {
+    assert.notEqual(t(key, "eng"), key, `${reason} has no base copy`);
+    assert.ok(PUBLIC_ERROR_REASON_CODES.get(reason)?.length, `${reason} has no coarse-code contract`);
+  }
+});
+
+
+test("reworded conditions drive scan, import, tag, and rule decisions", () => {
+  for (const reason of ["LIBRARY_SCAN_ALREADY_RUNNING", "EXTERNAL_IMPORT_SESSION_GONE", "TAG_ALREADY_EXISTS", "RULE_PACK_UP_TO_DATE", "RULE_TARGETS_PERSON"]) {
+    const code = reason === "EXTERNAL_IMPORT_SESSION_GONE" ? "NOT_FOUND" : "VALIDATION_ERROR";
+    assert.equal(hasGraphQlErrorReason(coded(reason, code), reason, code), true);
+    assert.equal(hasGraphQlErrorReason(coded(reason, "PLUGIN_FAILED"), reason, code), false);
+    assert.equal(hasGraphQlErrorReason(new Error(reason), reason, code), false);
+  }
+  assert.equal(isLostWarmupSessionError(coded("EXTERNAL_IMPORT_SESSION_GONE", "NOT_FOUND")), true);
+  assert.equal(isLostWarmupSessionError(new Error("no warmup session")), false);
+});
+
+
+test("public account-link failures never recover private relationship detail", () => {
+  const error = coded("EXTERNAL_ACCOUNT_LINK_FAILED", "REQUEST_CONFLICT", "Jellyfin account could not be linked");
+  assert.equal(userFacingGraphQlErrorMessage(error, "Failed"), "The external account could not be linked.");
+});
+
+
+test("a reason never changes its broad error family", () => {
+  assert.equal(userFacingGraphQlErrorMessage(coded("TAG_ALREADY_EXISTS", "REPOSITORY_ERROR"), "Failed"), "This sentence was reworded");
+  assert.equal(userFacingGraphQlErrorMessage(coded("PLUGIN_AUTH_FAILED", "VALIDATION_ERROR"), "Failed"), "This sentence was reworded");
+  assert.notEqual(userFacingGraphQlErrorMessage(coded("PLUGIN_AUTH_FAILED", "PLUGIN_FAILED"), "Failed"), "This sentence was reworded");
+});
+
+
+test("behavior helpers require the expected broad code and reason together", () => {
+  assert.equal(isLostWarmupSessionError(coded("EXTERNAL_IMPORT_SESSION_GONE", "PLUGIN_FAILED")), false);
+  assert.equal(isLostWarmupSessionError(coded("EXTERNAL_IMPORT_SESSION_GONE", "VALIDATION_ERROR")), false);
+  const countError = (code: string) => ({ graphQLErrors: [{ message: "arbitrary", extensions: { code, reason: "MAINTENANCE_ARM_COUNT_MISMATCH", currentCount: 12 } }] });
+  assert.equal(graphQlErrorNumberExtension(countError("PLUGIN_FAILED"), "VALIDATION_ERROR", "MAINTENANCE_ARM_COUNT_MISMATCH", "currentCount"), null);
+  assert.equal(graphQlErrorNumberExtension(countError("VALIDATION_ERROR"), "VALIDATION_ERROR", "MAINTENANCE_ARM_COUNT_MISMATCH", "currentCount"), 12);
+  for (const code of ["VALIDATION_ERROR", "PLUGIN_FAILED", "UNKNOWN_FAMILY"]) assert.equal(userFacingGraphQlErrorMessage(coded("TITLE_NOT_FOUND", code), "Failed"), "This sentence was reworded");
+  assert.equal(userFacingGraphQlErrorMessage(coded("RELEASE_TOKEN_EXPIRED", "NOT_FOUND"), "Failed"), "This sentence was reworded");
 });

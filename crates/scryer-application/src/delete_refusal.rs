@@ -41,7 +41,12 @@ mod tests {
             crate::AppError::Repository("database unavailable".into()),
             ROOT_UNAVAILABLE,
         );
-        assert!(matches!(error, crate::AppError::Repository(_)));
+        assert!(matches!(
+            error,
+            crate::AppError::Repository(_)
+                | crate::AppError::RepositoryFailure { .. }
+                | crate::AppError::RepositoryFailed { .. }
+        ));
         let error = classify_validation(
             crate::AppError::validation_refused(PREVIEW_STALE, "changed"),
             ROOT_UNAVAILABLE,

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { Search, X } from "lucide-react";
 import { useClient } from "urql";
@@ -186,7 +187,7 @@ export function TitleAutocompletePicker({
             return;
           }
           setResults([]);
-          setSearchError(error instanceof Error ? error.message : t("status.failedToLoad"));
+          setSearchError(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t));
           setOpen(true);
           refreshMenuWidth();
         })

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClient } from "urql";
 import type { MetadataTvdbSearchItem } from "@/lib/graphql/smg-queries";
@@ -1059,7 +1060,7 @@ export function useGlobalSearch({
         setGlobalStatus(matches.length ? t("status.foundTvdb", { count: matches.length }) : t("status.nothingFound"));
         return matches;
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
         setTvdbCandidates([]);
         return [];
       }
@@ -1245,12 +1246,12 @@ export function useGlobalSearch({
         catalogResult.status === "rejected" &&
         !isAbortError(catalogResult.reason)
       ) {
-        const msg = catalogResult.reason instanceof Error ? catalogResult.reason.message : t("status.apiError");
+        const msg = userFacingGraphQlErrorMessage(catalogResult.reason, t("status.apiError"), t);
         setGlobalStatus(msg, { level: "ERROR" });
       }
       if (metadataResult.status === "rejected" && !isAbortError(metadataResult.reason)) {
         if (options?.surfaceErrors !== false) {
-          const msg = metadataResult.reason instanceof Error ? metadataResult.reason.message : t("status.apiError");
+          const msg = userFacingGraphQlErrorMessage(metadataResult.reason, t("status.apiError"), t);
           setGlobalStatus(msg, { level: "ERROR" });
         }
         setMetadataSearchResults((prev) => (isMetadataEmpty(prev) ? prev : emptyMetadataSearchResults));
@@ -1325,7 +1326,7 @@ export function useGlobalSearch({
       setGlobalStatus(t("label.ready"));
     } catch (error) {
       if (requestId !== autocompleteRequestId.current || isAbortError(error)) return;
-      const msg = error instanceof Error ? error.message : t("status.apiError");
+      const msg = userFacingGraphQlErrorMessage(error, t("status.apiError"), t);
       setGlobalStatus(msg, { level: "ERROR" });
       setCatalogSearchResults((previous) => (previous.length === 0 ? previous : []));
     } finally {
@@ -1587,7 +1588,7 @@ export function useGlobalSearch({
         void runMetadataAutocomplete(globalSearch.trim(), { surfaceErrors: false });
         return titleId;
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.queueFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.queueFailed"), t), { level: "ERROR" });
         return null;
       } finally {
         pendingCatalogAddKeysRef.current.delete(requestKey);
@@ -1631,7 +1632,7 @@ export function useGlobalSearch({
         void runMetadataAutocomplete(globalSearch.trim(), { surfaceErrors: false });
         return true;
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.queueFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.queueFailed"), t), { level: "ERROR" });
         return false;
       } finally {
         pendingRequestKeysRef.current.delete(requestKey);

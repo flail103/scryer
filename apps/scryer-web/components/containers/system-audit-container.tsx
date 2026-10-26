@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { ChevronDown, ChevronUp, RefreshCcw, TextSearch } from "lucide-react";
 import { useClient } from "urql";
@@ -126,7 +127,7 @@ export const SystemAuditContainer = React.memo(function SystemAuditContainer() {
       setEvents(nextEvents);
       setGlobalStatus(t("system.auditLoaded"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setLoading(false);
     }
@@ -148,7 +149,7 @@ export const SystemAuditContainer = React.memo(function SystemAuditContainer() {
       });
       setGlobalStatus(t("system.auditLoaded"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setLoadingOlder(false);
     }

@@ -633,7 +633,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
               : { ...current, [collectionId]: [] },
           );
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.apiError"),
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
             { level: "ERROR" },
           );
         }
@@ -738,13 +738,13 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
         const failed = settled.find((result) => result.status === "rejected");
         if (failed?.status === "rejected") {
           setGlobalStatus(
-            failed.reason instanceof Error ? failed.reason.message : t("status.apiError"),
+            userFacingGraphQlErrorMessage(failed.reason, t("status.apiError"), t),
             { level: "ERROR" },
           );
         }
       } catch (error: unknown) {
         if (currentTitleIdRef.current === requestedTitleId) {
-          setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
         }
       } finally {
         for (const collectionId of collectionIdsToRefresh) {
@@ -1054,7 +1054,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       } catch (error: unknown) {
         if (currentTitleIdRef.current === requestedTitleId) {
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.apiError"),
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
             { level: "ERROR" },
           );
         }
@@ -1158,7 +1158,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       } catch (error: unknown) {
         if (currentTitleIdRef.current === requestedTitleId) {
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.apiError"),
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
             { level: "ERROR" },
           );
         }
@@ -1294,7 +1294,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
         if (!cancelled) {
           setTitleLookupFailed(true);
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.apiError"),
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
             { level: "ERROR" },
           );
         }
@@ -1430,7 +1430,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
         );
         await refreshTitleDetail();
       } catch (error: unknown) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setMonitoredUpdating(false);
       }
@@ -1549,7 +1549,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       }
       onTitleNotFound?.();
     } catch (error: unknown) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setDeleteLoading(false);
     }
@@ -1737,7 +1737,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
         setGlobalStatus(t("status.primaryMovieFileUpdated"), { level: "SUCCESS" });
         await refreshTitleDetail();
       } catch (error: unknown) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError")), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setPrimaryMovieFileUpdatingId(null);
       }
@@ -1902,7 +1902,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       try {
         await startAutomaticSearch(title.id, seasonNum);
       } catch (error: unknown) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setSeasonSearchLoadingByCollection((prev) => ({ ...prev, [collection.id]: false }));
       }
@@ -1945,7 +1945,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       )
         .catch((error: unknown) => {
           if (isAbortError(error) || abortController.signal.aborted) return;
-          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError")), {
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), {
             level: "ERROR",
           });
         })

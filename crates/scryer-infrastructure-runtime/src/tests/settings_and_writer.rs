@@ -604,14 +604,16 @@ async fn serialized_writer_handles_notification_channel_and_subscription_round_t
         .expect("second subscription should delete");
     assert!(matches!(
         NotificationSubscriptionRepository::delete_subscription(&store, &subscription.id).await,
-        Err(scryer_application::AppError::NotFound(_))
+        Err(scryer_application::AppError::NotFound(_)
+            | scryer_application::AppError::NotFoundReason { .. })
     ));
     NotificationChannelRepository::delete_channel(&store, &updated.id)
         .await
         .expect("channel should delete");
     assert!(matches!(
         NotificationChannelRepository::delete_channel(&store, &updated.id).await,
-        Err(scryer_application::AppError::NotFound(_))
+        Err(scryer_application::AppError::NotFound(_)
+            | scryer_application::AppError::NotFoundReason { .. })
     ));
 
     let remaining =

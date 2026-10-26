@@ -614,14 +614,12 @@ impl AppUseCase {
             .await?;
 
         if limit <= 0 {
-            return Err(AppError::Validation(
-                "limit is required and must be greater than zero".into(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::settings::LIMIT_REQUIRED_OUT_OF_RANGE, "limit is required and must be greater than zero"));
         }
 
         let source = source.trim();
         if source.is_empty() {
-            return Err(AppError::Validation("source is required".into()));
+            return Err(AppError::validation_refused(crate::error_reasons::settings::SOURCE_REQUIRED, "source is required"));
         }
 
         self.services

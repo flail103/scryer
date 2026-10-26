@@ -66,6 +66,7 @@ export type RequestRuleSetDetail = {
 export type RequestRuleValidationResult = {
   valid: boolean;
   errors: string[];
+  diagnostics?: import("../utils/rego-diagnostics").RuleValidationDiagnostic[];
 };
 
 /// The whole vocabulary a requester is permitted to see about why a rule

@@ -357,7 +357,7 @@ async fn push(
             "temporarilyRejected": outcome.status == ExternalReleaseStatus::Held,
             "rejections": outcome.reasons,
         }])).into_response(),
-        Err(AppError::Validation(message)) => validation("release", message),
+        Err(AppError::Validation(message) | AppError::ValidationRefused { message, .. } | AppError::ValidationRefusedWithCount { message, .. }) => validation("release", message),
         Err(error) => map_app_error(error),
     }
 }
@@ -648,11 +648,11 @@ mod tests {
             let mut restricted = admin.clone();
             restricted.authorization = scryer_domain::UserAuthorization { loaded: true, ..Default::default() };
             let release = || input(0, Value::Null).into_release(Flavor::Radarr).unwrap();
-            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(primary)).await, Err(scryer_application::AppError::Validation(_))));
+            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(primary)).await, Err(scryer_application::AppError::Validation(_) | scryer_application::AppError::ValidationRefused { .. })));
             restricted.authorization.libraries.insert(primary.into(), scryer_domain::LibraryPermissionMask::from_permissions([scryer_domain::LibraryPermission::View]));
-            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(primary)).await, Err(scryer_application::AppError::Validation(_))));
+            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(primary)).await, Err(scryer_application::AppError::Validation(_) | scryer_application::AppError::ValidationRefused { .. })));
             restricted.authorization.libraries.insert(primary.into(), scryer_domain::LibraryPermissionMask::from_permissions([scryer_domain::LibraryPermission::View, scryer_domain::LibraryPermission::ManageTitles]));
-            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(secondary)).await, Err(scryer_application::AppError::Validation(_))));
+            assert!(matches!(context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(secondary)).await, Err(scryer_application::AppError::Validation(_) | scryer_application::AppError::ValidationRefused { .. })));
             let outcome = context.app.submit_arr_compat_release(&restricted, release(), &[MediaFacet::Movie], Some(primary)).await.unwrap();
             assert_eq!(outcome.status, ExternalReleaseStatus::Rejected);
             assert!(outcome.title_id.is_none());
