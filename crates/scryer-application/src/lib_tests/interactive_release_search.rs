@@ -2826,3 +2826,72 @@ async fn localized_search_failure_retains_primary_results() {
             .any(|call| call.query.starts_with("Svensk Titel"))
     );
 }
+
+#[tokio::test]
+async fn download_enrichment_unlinked_grab_invalidates_before_filename_persistence() {
+    let client = ScriptedIndexerClient::default()
+        .with_releases(
+            "idx-a",
+            vec![nzb_release("Example.2012.1080p.WEB-DL", "g1")],
+        )
+        .await;
+    let (app, user) = bootstrap_search(
+        Arc::new(StoredSettingsRepo::default()),
+        client,
+        vec![synthetic_direct_nab_indexer_config("idx-a", "newznab")],
+    );
+    let submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    *submissions.grabbed_names_gate.lock().await = Some((entered.clone(), release.clone()));
+    let client = Arc::new(StubDownloadClient {
+        grabbed_file_names: vec![crate::GrabbedFileName {
+            name: "example.mkv".into(),
+            exact_size_bytes: None,
+            posted_size_bytes: None,
+        }],
+        ..Default::default()
+    });
+    let app = app.with_test_overrides(|services| {
+        services
+            .with_download_submissions(submissions.clone())
+            .with_download_client(client)
+    });
+    let config = create_enabled_download_client_config(&app, &user, "Primary", "nzbget").await;
+    let start = app
+        .start_interactive_release_search(&user, query_request("example"))
+        .await
+        .unwrap();
+    let done = await_completion(&app, &user, &start.id).await;
+    let url = done.results[0].download_url.clone().unwrap();
+    let generation = app.runtime.acquisition.download_registry_generation();
+    let writer_app = app.clone();
+    let writer = tokio::spawn(async move {
+        writer_app
+            .queue_unlinked_release_with_category(
+                &user,
+                &start.id,
+                &url,
+                &config.id,
+                Some("custom".into()),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(30), entered.notified())
+        .await
+        .unwrap();
+    assert!(
+        !submissions.store.lock().await.is_empty(),
+        "submission committed before gate"
+    );
+    assert!(
+        app.runtime.acquisition.download_registry_generation() > generation,
+        "accepted ownership must invalidate before the downstream write"
+    );
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(30), writer)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

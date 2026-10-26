@@ -263,6 +263,23 @@ pub(crate) const DOWNLOAD_QUEUE_LEGACY_SUBSCRIPTIONS: &str =
 /// per-download-client families live in the router crate and are described by
 /// `scryer_infrastructure_acquisition::describe_download_client_router_metrics`.
 pub fn describe_download_queue_metrics() {
+    metrics::describe_counter!(
+        "scryer_download_enrichment_cache_total",
+        "Stable enrichment cache lookups and evictions, by result."
+    );
+    metrics::describe_counter!(
+        "scryer_download_enrichment_batch_total",
+        "Enrichment repository batch operations, by lookup family."
+    );
+    metrics::describe_gauge!(
+        "scryer_download_enrichment_cache_entries",
+        "Retained stable enrichment cache entries."
+    );
+    metrics::describe_gauge!(
+        "scryer_download_enrichment_cache_bytes",
+        metrics::Unit::Bytes,
+        "Accounted retained enrichment keys, values and entry overhead."
+    );
     metrics::describe_gauge!(
         DOWNLOAD_QUEUE_ITEMS,
         "Download-queue items currently projected, by queue state."
@@ -1102,6 +1119,8 @@ pub struct AppRuntimeAcquisitionState {
     /// not keep resolving). Bumping invalidates the whole memo; in steady
     /// state (history unchanged, nothing grabbed or imported) nothing bumps.
     pub(crate) download_registry_generation: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) download_enrichment:
+        Arc<crate::integration::download_enrichment::DownloadEnrichmentCache>,
     /// Process-wide memo of client-observation identity resolutions, shared by
     /// the queue-enrichment and tracked-download paths. See
     /// [`crate::download_identity::ObservationResolutionCache`].
@@ -2631,6 +2650,7 @@ impl AppRuntimeState {
                 download_queue_read_model: DownloadQueueReadModelCache::default(),
                 wanted_projection_generation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
                 download_registry_generation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                download_enrichment: Arc::default(),
                 download_observation_resolutions: Arc::new(tokio::sync::Mutex::new(
                     Default::default(),
                 )),

@@ -2057,7 +2057,12 @@ impl AppUseCase {
                 references: destination_references,
             };
             match submissions.reassign_download_to_title(&reassignment).await {
-                Ok(true) => moved.push(download_id),
+                Ok(true) => {
+                    self.runtime
+                        .acquisition
+                        .invalidate_download_registry_observations();
+                    moved.push(download_id);
+                }
                 Ok(false) => debug!(
                     title_id = %source_title_id,
                     download_id = %download_id,
@@ -2077,11 +2082,6 @@ impl AppUseCase {
         }
 
         if !moved.is_empty() {
-            // Resolutions memoized against the source title must not outlive
-            // the move.
-            self.runtime
-                .acquisition
-                .invalidate_download_registry_observations();
             if let Some(handle) = self.runtime.acquisition.tracked_download_handle.as_ref() {
                 match handle
                     .reassign_title(

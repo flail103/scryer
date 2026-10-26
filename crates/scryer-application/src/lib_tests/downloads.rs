@@ -2753,6 +2753,44 @@ async fn assign_tracked_download_title_serializes_submission_and_runtime_assignm
     assert_eq!(tracked.state, TrackedDownloadState::ImportBlocked);
 }
 
+#[tokio::test]
+async fn download_enrichment_manual_assignment_invalidates_warmed_submission() {
+    use crate::integration::download_enrichment::DownloadEnrichmentPass;
+    let mut fixture = tracked_title_assignment_fixture().await;
+    let key = ClientJobLocator::from_submission(&fixture.submission);
+    let mut previous = fixture.submission.clone();
+    previous.title_id = "previous-title".into();
+    fixture
+        .submissions
+        .record_submission(previous)
+        .await
+        .unwrap();
+    let mut pass = DownloadEnrichmentPass::default();
+    pass.load(&fixture.app, std::slice::from_ref(&key)).await;
+    assert_eq!(
+        pass.submissions[&key].as_ref().unwrap().title_id,
+        "previous-title"
+    );
+    let actor = crate::domain_events::DomainEventActor::from(&fixture.user)
+        .into_download_submission_actor_snapshot();
+    crate::integration::workflow::assign_tracked_download_title_command(
+        &fixture.app,
+        &mut fixture.tracker,
+        &HashSet::new(),
+        fixture.tracked_id.clone(),
+        fixture.title.clone(),
+        fixture.submission.clone(),
+        actor,
+    )
+    .await
+    .unwrap();
+    pass.load(&fixture.app, std::slice::from_ref(&key)).await;
+    assert_eq!(
+        pass.submissions[&key].as_ref().unwrap().title_id,
+        fixture.title.id
+    );
+}
+
 const GRAB_TIME_LISTING: &str = r#"{"v":1,"thumbs_up":4,"captured_at":"2026-08-01T00:00:00Z"}"#;
 
 #[tokio::test]

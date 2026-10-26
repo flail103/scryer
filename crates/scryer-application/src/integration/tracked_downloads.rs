@@ -1658,7 +1658,8 @@ impl TrackedDownloadService {
                 td.client_item.category.as_deref(),
                 category_admission.as_deref(),
             )
-            && let Err(error) = app
+        {
+            match app
                 .services
                 .workflow
                 .download_submissions
@@ -1685,8 +1686,15 @@ impl TrackedDownloadService {
                     release_listing_json: None,
                 })
                 .await
-        {
-            tracing::warn!(error = %error, id = %td.id, "failed to record tracked download stub submission");
+            {
+                Ok(()) => app
+                    .runtime
+                    .acquisition
+                    .invalidate_download_registry_observations(),
+                Err(error) => {
+                    tracing::warn!(error = %error, id = %td.id, "failed to record tracked download stub submission")
+                }
+            }
         }
 
         // 3. Parse-based monitored title resolution for downloader observations.

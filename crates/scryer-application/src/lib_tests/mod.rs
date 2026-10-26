@@ -22,6 +22,7 @@ mod cross_library_transfer;
 mod custom_job_shutdown;
 mod diacritic_release_matching;
 mod discovery_sync;
+mod download_enrichment;
 mod downloads;
 pub(crate) use downloads::RecordingDownloadRegistry;
 mod episode_file_delete;

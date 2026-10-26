@@ -1556,6 +1556,9 @@ impl AppUseCase {
             .await
         {
             Ok(disposition) => {
+                self.runtime
+                    .acquisition
+                    .invalidate_download_registry_observations();
                 self.record_grabbed_file_names(&download_id, &grab).await;
                 disposition
             }
@@ -1565,11 +1568,6 @@ impl AppUseCase {
                 )));
             }
         };
-        // The store minted or re-bound this download's binding in its own
-        // transaction; memoized observation resolutions are retired.
-        self.runtime
-            .acquisition
-            .invalidate_download_registry_observations();
         if let crate::CanonicalDownloadIdentityDisposition::AdoptedExisting {
             download_id: effective_download_id,
         } = disposition

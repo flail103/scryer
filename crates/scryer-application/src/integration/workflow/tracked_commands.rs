@@ -1030,10 +1030,14 @@ async fn process_tracked_download_snapshot(
     excluded_client_type_refs: &[&str],
     authoritative_client_ids: Option<&HashSet<String>>,
     snapshot_label: &'static str,
+    enrichment: &mut DownloadEnrichmentPass,
 ) {
     let cycle_started_at = Instant::now();
 
-    enrich_download_queue_items_from_submissions(app, &mut items).await;
+    enrich_download_queue_items_from_submissions_with_original_identities(
+        app, &mut items, None, enrichment,
+    )
+    .await;
     drop_rows_outside_download_client_adoption_scope(app, &mut items, snapshot_label).await;
     if let TrackedDownloadSnapshotProjection::Publish { source } = &projection {
         // Poller items already carry import-record state (the poller loads
@@ -1830,6 +1834,7 @@ async fn process_external_tracked_download_snapshot_update(
         excluded_client_type_refs,
         authoritative_client_ids.as_ref(),
         "external",
+        &mut DownloadEnrichmentPass::default(),
     )
     .await;
 }
@@ -2027,8 +2032,9 @@ pub async fn start_download_queue_poller_with_options(
                 // and it makes the tick self-sufficient rather than a
                 // best-effort sighting that history occasionally repairs.
                 let client_refresh_started_at = Instant::now();
-                let collection = app.collect_download_snapshot_items_excluding_client_types(
-                    true, true, false, &excluded_client_type_refs,
+                let mut enrichment = DownloadEnrichmentPass::default();
+                let collection = app.collect_download_snapshot_with_enrichment(
+                    true, true, false, &excluded_client_type_refs, &mut enrichment,
                 );
                 let Some(collected) = await_snapshot_servicing_commands(
                     &app, &actor, &mut runtime, &tracked_work_result_tx,
@@ -2118,6 +2124,7 @@ pub async fn start_download_queue_poller_with_options(
                     &excluded_client_type_refs,
                     Some(&authoritative_client_ids),
                     "poller",
+                    &mut enrichment,
                 )
                 .await;
                 // Whole-tick wall time. Per-client refresh timing is labelled
@@ -2245,6 +2252,9 @@ pub(crate) async fn assign_tracked_download_title_command(
         .download_submissions
         .record_submission(submission)
         .await?;
+    app.runtime
+        .acquisition
+        .invalidate_download_registry_observations();
     if let Err(error) = app
         .services
         .workflow

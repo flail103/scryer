@@ -717,15 +717,15 @@ impl AppUseCase {
                 scope: intent.scope.clone(),
             })
             .await?;
-        // The intent's unbound binding retires memoized resolutions of its id.
+        // Retire cached ownership before any subsequent fallible write.
+        self.runtime
+            .acquisition
+            .invalidate_download_registry_observations();
         self.services
             .workflow
             .download_submissions
             .set_password_candidates(&download_id, &request.password_candidates())
             .await?;
-        self.runtime
-            .acquisition
-            .invalidate_download_registry_observations();
         tracing::debug!(
             title_id = %title_id,
             download_id = %download_id,
@@ -881,6 +881,9 @@ impl AppUseCase {
             .await
         {
             Ok(disposition) => {
+                self.runtime
+                    .acquisition
+                    .invalidate_download_registry_observations();
                 tracing::debug!(
                     title_id = %title_id,
                     download_id = %download_id,
@@ -911,11 +914,6 @@ impl AppUseCase {
                 ));
             }
         };
-        // A grab's binding was created (or a stale terminal one retired and
-        // replaced) inside the store's own transaction.
-        self.runtime
-            .acquisition
-            .invalidate_download_registry_observations();
         if let CanonicalDownloadIdentityDisposition::AdoptedExisting {
             download_id: effective_download_id,
         } = identity_disposition

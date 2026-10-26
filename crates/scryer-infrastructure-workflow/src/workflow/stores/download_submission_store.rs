@@ -1936,6 +1936,14 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
         }
 
         let mut states = Vec::new();
+        let mut known_identities = std::collections::HashSet::new();
+        let key = |identity: &ClientJobLocator| {
+            (
+                normalize_download_client_id(identity.client_id.as_deref()),
+                identity.client_type.clone(),
+                identity.item_id.clone(),
+            )
+        };
         for chunk in chunks {
             let mut args = Vec::with_capacity(chunk.len() + 2);
             let clauses = client_locator_chunk_predicate(
@@ -1960,6 +1968,7 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
                     ),
                     row.text("tracked_state")?,
                 ));
+                known_identities.insert(key(&states.last().expect("just appended state").0));
             }
 
             // Submissions that pre-date identity states (or whose state row
@@ -1968,14 +1977,7 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
             // "never tracked" and freezes its scope while absent.
             let missing: Vec<&ClientJobLocator> = chunk
                 .iter()
-                .filter(|identity| {
-                    !states.iter().any(|(known, _)| {
-                        known.client_type == identity.client_type
-                            && known.item_id == identity.item_id
-                            && normalize_download_client_id(known.client_id.as_deref())
-                                == normalize_download_client_id(identity.client_id.as_deref())
-                    })
-                })
+                .filter(|identity| !known_identities.contains(&key(identity)))
                 .collect();
             if missing.is_empty() {
                 continue;
@@ -2003,6 +2005,7 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
                     ),
                     row.text("tracked_state")?,
                 ));
+                known_identities.insert(key(&states.last().expect("just appended state").0));
             }
         }
         Ok(states)
@@ -7075,6 +7078,70 @@ mod seed_goal_tests {
         let remainder = store.list_due_download_cleanup(100).await.unwrap();
         assert_eq!(remainder.len(), 5);
         assert!(remainder.iter().all(|record| record.download_id != live));
+    }
+
+    #[tokio::test]
+    async fn download_enrichment_chunked_states_match_individual_lookups() {
+        let store = store().await;
+        let mut expected = std::collections::HashMap::new();
+        let mut requested = Vec::new();
+        for (index, client) in [None, Some("primary"), Some("other-client")]
+            .into_iter()
+            .enumerate()
+        {
+            let id = DownloadId::new();
+            let mut row = submission(id, "shared-native-id", "title-1");
+            row.download_client_id = client.map(str::to_string);
+            store.record_submission(row).await.unwrap();
+            let locator = ClientJobLocator::new(client, "qbittorrent", "shared-native-id");
+            if index == 1 {
+                SqlRuntime::execute_write(
+                    &store.datastore,
+                    "legacy_fixture",
+                    "UPDATE download_submissions SET tracked_state = 'imported' WHERE id = {}",
+                    vec![SqlArg::Text(id.to_string())],
+                )
+                .await
+                .unwrap();
+            } else {
+                store
+                    .record_identity_tracked_state_for_download(
+                        Some(&id),
+                        &submission_identity(id),
+                        Some(&locator),
+                        "downloading",
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            expected.extend(
+                store
+                    .list_identity_tracked_states_for_client_items(std::slice::from_ref(&locator))
+                    .await
+                    .unwrap(),
+            );
+            requested.push(locator);
+            for n in 0..DOWNLOAD_SUBMISSION_BATCH_LOOKUP_CHUNK_SIZE + 1 {
+                requested.push(ClientJobLocator::new(
+                    client,
+                    "qbittorrent",
+                    format!("missing-{index}-{n}"),
+                ));
+            }
+        }
+        let actual = store
+            .list_identity_tracked_states_for_client_items(&requested)
+            .await
+            .unwrap();
+        assert_eq!(actual.len(), 3);
+        assert_eq!(
+            actual
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>(),
+            expected
+        );
     }
 
     #[tokio::test]

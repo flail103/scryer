@@ -305,6 +305,13 @@ pub(super) async fn title_blocklist_entries(
 
 #[derive(Default, Clone)]
 pub(super) struct TrackingDownloadSubmissionRepo {
+    pub(super) grabbed_names_gate: Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>,
+    pub(super) enrichment_canonical_reads: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) enrichment_calls: Arc<Mutex<Vec<(&'static str, Vec<ClientJobLocator>)>>>,
+    pub(super) enrichment_goals: Arc<Mutex<HashMap<ClientJobLocator, crate::PersistedSeedGoals>>>,
+    pub(super) enrichment_failures: Arc<Mutex<HashSet<&'static str>>>,
+    pub(super) enrichment_generation_on_read: Arc<Mutex<Option<Arc<std::sync::atomic::AtomicU64>>>>,
+    pub(super) enrichment_gate: Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>,
     pub(super) presence_scopes: Arc<Mutex<Option<Arc<TrackingAcquisitionScopeStateRepo>>>>,
     pub(super) password_retry_recovery: Arc<Mutex<Vec<DownloadSubmission>>>,
     /// Calls to `list_password_retry_recovery_submissions`.
@@ -873,6 +880,21 @@ impl TrackingDownloadSubmissionRepo {
 
 #[async_trait]
 impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
+    async fn record_grabbed_file_names(
+        &self,
+        _download_id: &scryer_domain::download_identity::DownloadId,
+        _names: &[crate::GrabbedFileName],
+    ) -> AppResult<()> {
+        let gate = self.grabbed_names_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            entered.notify_one();
+            tokio::time::timeout(std::time::Duration::from_secs(30), release.notified())
+                .await
+                .expect("release filename persistence gate");
+        }
+        Ok(())
+    }
+
     async fn transition_client_presence(
         &self,
         change: &crate::ClientPresenceTransition,
@@ -1187,6 +1209,8 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         &self,
         download_id: &scryer_domain::download_identity::DownloadId,
     ) -> AppResult<Option<DownloadSubmission>> {
+        self.enrichment_canonical_reads
+            .fetch_add(1, Ordering::SeqCst);
         Ok(self
             .store
             .lock()
@@ -1194,6 +1218,24 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
             .iter()
             .find(|submission| &submission.download_id == download_id)
             .cloned())
+    }
+
+    async fn list_by_download_id_for_download(
+        &self,
+        canonical_download_id: Option<&scryer_domain::download_identity::DownloadId>,
+        client_id: Option<&str>,
+        client_type: &str,
+        download_id: &str,
+    ) -> AppResult<Vec<DownloadSubmission>> {
+        if let Some(id) = canonical_download_id {
+            return Ok(self
+                .find_by_canonical_download_id(id)
+                .await?
+                .into_iter()
+                .collect());
+        }
+        self.list_by_download_id(client_id, client_type, download_id)
+            .await
     }
 
     async fn list_by_download_id(
@@ -1388,19 +1430,34 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         &self,
         client_items: &[ClientJobLocator],
     ) -> AppResult<Vec<DownloadSubmission>> {
+        self.enrichment_calls
+            .lock()
+            .await
+            .push(("submission", client_items.to_vec()));
+        if self.enrichment_failures.lock().await.contains("submission") {
+            return Err(AppError::Repository(
+                "synthetic submission read failure".into(),
+            ));
+        }
         let entries = self.store.lock().await;
-        Ok(entries
+        let requested: HashSet<_> = client_items.iter().cloned().collect();
+        let result = entries
             .iter()
-            .filter(|entry| {
-                client_items.iter().any(|identity| {
-                    entry.download_client_id.as_deref().unwrap_or("").trim()
-                        == identity.client_id.as_deref().unwrap_or("")
-                        && entry.download_client_type == identity.client_type.as_str()
-                        && entry.download_client_item_id == identity.item_id.as_str()
-                })
-            })
+            .filter(|entry| requested.contains(&ClientJobLocator::from_submission(entry)))
             .cloned()
-            .collect())
+            .collect();
+        drop(entries);
+        let gate = self.enrichment_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            entered.notify_one();
+            tokio::time::timeout(std::time::Duration::from_secs(30), release.notified())
+                .await
+                .expect("enrichment fill released");
+        }
+        if let Some(generation) = self.enrichment_generation_on_read.lock().await.as_ref() {
+            generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(result)
     }
 
     async fn list_for_title(&self, title_id: &str) -> AppResult<Vec<DownloadSubmission>> {
@@ -1668,6 +1725,13 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         &self,
         client_items: &[ClientJobLocator],
     ) -> AppResult<Vec<(ClientJobLocator, String)>> {
+        self.enrichment_calls
+            .lock()
+            .await
+            .push(("state", client_items.to_vec()));
+        if self.enrichment_failures.lock().await.contains("state") {
+            return Err(AppError::Repository("synthetic state read failure".into()));
+        }
         let tracked_states = self.tracked_states.lock().await;
         Ok(client_items
             .iter()
@@ -1678,6 +1742,27 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
                     .map(|state| (identity.clone(), state))
             })
             .collect())
+    }
+
+    async fn list_seed_goals_for_client_items(
+        &self,
+        client_items: &[ClientJobLocator],
+    ) -> AppResult<Vec<(ClientJobLocator, crate::PersistedSeedGoals)>> {
+        self.enrichment_calls
+            .lock()
+            .await
+            .push(("goals", client_items.to_vec()));
+        if self.enrichment_failures.lock().await.contains("goals") {
+            return Err(AppError::Repository("synthetic goal read failure".into()));
+        }
+        let mut out = Vec::new();
+        for identity in client_items {
+            let explicit = self.enrichment_goals.lock().await.get(identity).cloned();
+            if let Some(goals) = explicit.or(self.get_seed_goals(identity).await?) {
+                out.push((identity.clone(), goals));
+            }
+        }
+        Ok(out)
     }
 
     async fn list_client_ids_with_live_downloads(&self) -> AppResult<Vec<String>> {
@@ -2346,6 +2431,7 @@ impl StubSubmitError {
 
 #[derive(Default, Clone)]
 pub(super) struct StubDownloadClient {
+    pub(super) grabbed_file_names: Vec<crate::GrabbedFileName>,
     pub(super) password_retry_gate: Arc<Mutex<Option<OneshotGate>>>,
     pub(super) native_data_removal: bool,
     pub(super) observation_error: Arc<Mutex<Option<String>>>,
@@ -2664,7 +2750,7 @@ impl DownloadClient for StubDownloadClient {
             client_type: "nzbget".to_string(),
             info_hash: self.grab_info_hash.lock().await.clone(),
             seed_goals: None,
-            grabbed_file_names: Vec::new(),
+            grabbed_file_names: self.grabbed_file_names.clone(),
         })
     }
 
