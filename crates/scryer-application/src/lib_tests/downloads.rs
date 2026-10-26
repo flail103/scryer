@@ -5513,7 +5513,7 @@ async fn import_series_duplicate_destination_requires_catalog_for_already_import
         result
             .error_message
             .as_deref()
-            .is_some_and(|message| message.contains("destination exists with identical size")),
+            .is_some_and(|message| message.contains("destination exists with identical contents")),
         "expected duplicate destination message, got {:?}",
         result.error_message
     );

@@ -4,6 +4,7 @@
 //! `run_import_checks` executes them in order and short-circuits on the first
 //! `Reject`.
 
+use std::io::Read;
 use std::path::Path;
 
 use crate::release_parser::ParsedReleaseMetadata;
@@ -119,6 +120,30 @@ fn available_disk_space(path: &Path) -> std::io::Result<u64> {
     Ok(crate::filesystem_space_raw(path)?.available_bytes)
 }
 
+fn files_have_identical_contents(
+    source_path: &Path,
+    dest_path: &Path,
+    size: u64,
+) -> std::io::Result<bool> {
+    let mut source = std::fs::File::open(source_path)?;
+    let mut destination = std::fs::File::open(dest_path)?;
+    let mut source_buffer = [0; 64 * 1024];
+    let mut destination_buffer = [0; 64 * 1024];
+    let mut remaining = size;
+
+    while remaining > 0 {
+        let chunk_size = remaining.min(source_buffer.len() as u64) as usize;
+        source.read_exact(&mut source_buffer[..chunk_size])?;
+        destination.read_exact(&mut destination_buffer[..chunk_size])?;
+        if source_buffer[..chunk_size] != destination_buffer[..chunk_size] {
+            return Ok(false);
+        }
+        remaining -= chunk_size as u64;
+    }
+
+    Ok(true)
+}
+
 // ── Individual checks ────────────────────────────────────────────────────────
 
 /// Reject files with extensions outside the known video set, unless a content
@@ -209,7 +234,7 @@ pub fn check_not_unpacking(ctx: &ImportCheckContext<'_>) -> ImportVerdict {
     ImportVerdict::Accept
 }
 
-/// Skip a same-sized destination, allowing move retries to finish persistence.
+/// Skip a destination only when its same-sized contents are identical.
 pub fn check_not_already_imported(ctx: &ImportCheckContext<'_>) -> ImportVerdict {
     // A failed catalog write can leave verified bytes at the destination. Let
     // the coordinated importer prove their content and claim catalog ownership
@@ -228,10 +253,13 @@ pub fn check_not_already_imported(ctx: &ImportCheckContext<'_>) -> ImportVerdict
         .map(|m| m.len())
         .unwrap_or(0);
 
-    if existing_size == ctx.source_size {
+    if existing_size == ctx.source_size
+        && files_have_identical_contents(ctx.source_path, ctx.dest_path, ctx.source_size)
+            .unwrap_or(false)
+    {
         ImportVerdict::Reject {
             reason: format!(
-                "destination exists with identical size ({} bytes)",
+                "destination exists with identical contents ({} bytes)",
                 ctx.source_size
             ),
             code: ImportCheckCode::DuplicateFile,
@@ -643,6 +671,19 @@ mod tests {
     }
 
     #[test]
+    fn same_sized_different_content_is_not_treated_as_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mkv");
+        let dest = dir.path().join("destination.mkv");
+        std::fs::write(&source, b"av1!").unwrap();
+        std::fs::write(&dest, b"h264").unwrap();
+        let parsed = parse_release_metadata("movie");
+        let ctx = dummy_ctx(&source, &dest, 4, &parsed, &[]);
+
+        assert!(check_not_already_imported(&ctx).is_accept());
+    }
+
+    #[test]
     fn pipeline_accepts_clean_file() {
         let parsed = parse_release_metadata("Movie.2024.1080p.BluRay.x264");
         let src = PathBuf::from("/tmp/Movie.2024.1080p.BluRay.x264.mkv");
@@ -718,6 +759,7 @@ mod tests {
         let parsed = parse_release_metadata("Show.S01E01");
         let src = dir.path().join("episode.mkv");
         let dest = dir.path().join("destination.mkv");
+        std::fs::write(&src, b"video").unwrap();
         std::fs::write(&dest, b"video").unwrap();
         let ctx = dummy_ctx(&src, &dest, 5, &parsed, &[]);
         let (verdict, measurement) = run_checks_with_measurement(&ctx, |_| {

@@ -1715,7 +1715,10 @@ impl AppUseCase {
         else {
             return Ok(());
         };
-        let folder_path = planned.folder_path.as_str();
+        let planned_path = stored_path_to_path_buf(&planned.folder_path);
+        let folder_path = Self::resolve_existing_path_spelling(&planned_path).await;
+        let folder_path = path_to_stored_string(&folder_path);
+        let folder_path = folder_path.as_str();
         if title
             .folder_path
             .as_deref()
@@ -1787,6 +1790,32 @@ impl AppUseCase {
             .titles
             .set_folder_path(&title.id, folder_path)
             .await
+    }
+
+    async fn resolve_existing_path_spelling(path: &Path) -> PathBuf {
+        let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) else {
+            return path.to_path_buf();
+        };
+        let Ok(mut entries) = tokio::fs::read_dir(parent).await else {
+            return path.to_path_buf();
+        };
+        let mut case_insensitive_match = None;
+        loop {
+            let Ok(Some(entry)) = entries.next_entry().await else {
+                break;
+            };
+            if entry.file_name() == file_name {
+                return entry.path();
+            }
+            let entry_path = entry.path();
+            if crate::stored_paths::paths_match_ignoring_case(
+                &path_to_stored_string(&entry_path),
+                &path_to_stored_string(path),
+            ) {
+                case_insensitive_match = Some(entry_path);
+            }
+        }
+        case_insensitive_match.unwrap_or_else(|| path.to_path_buf())
     }
 
     async fn library_id_for_rename_item(&self, item: &RenameApplyItemResult) -> Option<String> {

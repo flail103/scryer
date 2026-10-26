@@ -6544,28 +6544,47 @@ fn parse_season_keyword_episode_at(
     index: usize,
 ) -> Option<(Option<u32>, Vec<u32>, Vec<usize>)> {
     let token = tokens.get(index)?.normalized.as_str();
-    if token != "SEASON" {
-        return None;
-    }
-    let season = tokens.get(index + 1)?.normalized.parse::<u32>().ok()?;
-    let episode_token = tokens.get(index + 2)?;
+    let (season, episode_index, mut consumed) = if token == "SEASON" {
+        (
+            tokens.get(index + 1)?.normalized.parse::<u32>().ok()?,
+            index + 2,
+            vec![index, index + 1],
+        )
+    } else {
+        let season = parse_ordinal_season_token(token)?;
+        if tokens.get(index + 1)?.normalized != "SEASON" {
+            return None;
+        }
+        (season, index + 2, vec![index, index + 1])
+    };
+    let episode_token = tokens.get(episode_index)?;
     let episode = if episode_token.separator_before == SeparatorKind::Hyphen {
         parse_numeric_token(episode_token.normalized.as_str())?
     } else {
-        dot_split_episode_after_season(tokens, index + 2)?
+        dot_split_episode_after_season(tokens, episode_index)?
     };
-    if let Some(range_end) = split_episode_range_end(tokens, index + 3, episode) {
-        return Some((
-            Some(season),
-            (episode..=range_end).collect(),
-            vec![index, index + 1, index + 2, index + 3],
-        ));
+    consumed.push(episode_index);
+    if let Some(range_end) = split_episode_range_end(tokens, episode_index + 1, episode) {
+        consumed.push(episode_index + 1);
+        return Some((Some(season), (episode..=range_end).collect(), consumed));
     }
-    Some((
-        Some(season),
-        vec![episode],
-        vec![index, index + 1, index + 2],
-    ))
+    Some((Some(season), vec![episode], consumed))
+}
+
+fn parse_ordinal_season_token(token: &str) -> Option<u32> {
+    let digits_end = token.find(|character: char| !character.is_ascii_digit())?;
+    let season = token.get(..digits_end)?.parse::<u32>().ok()?;
+    let suffix = token.get(digits_end..)?;
+    let expected_suffix = match season % 100 {
+        11..=13 => "TH",
+        _ => match season % 10 {
+            1 => "ST",
+            2 => "ND",
+            3 => "RD",
+            _ => "TH",
+        },
+    };
+    (suffix == expected_suffix && valid_explicit_season(season)).then_some(season)
 }
 
 fn parse_standard_episode_suffix(suffix: &str) -> Option<Vec<u32>> {
@@ -6768,7 +6787,7 @@ fn parse_hyphenated_standard_episode_range_at(
     let endpoint = split_episode_revision(&next.normalized)
         .map_or(next.normalized.as_str(), |(episode, _)| episode);
     let range_end = parse_episode_component(endpoint)
-        .filter(|end| endpoint == next.normalized || *end <= 999)
+        .filter(|end| *end <= 999)
         .or_else(|| {
             let (end_season, end_episodes) =
                 parse_standard_episode_token(next.normalized.as_str())?;

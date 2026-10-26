@@ -648,6 +648,24 @@ fn range_pack_parser_handles_anime_batch_release() {
 }
 
 #[test]
+fn anime_ordinal_season_and_trailing_year_keep_single_episode_scope() {
+    let target = context(ContextFacetHint::Anime, "Title");
+    for (raw, expected_season, expected_episode) in [
+        ("Title 3rd Season - 02", 3, 2),
+        ("Title 2nd Season - 05", 2, 5),
+        ("Title 3rd Season - 12", 3, 12),
+        ("Title (2024) 3rd Season S3E01-2026", 3, 1),
+    ] {
+        let parsed = crate::best_parse_for_target(raw, &target);
+        let episode = parsed.episode.expect(raw);
+
+        assert_eq!(episode.season, Some(expected_season), "{raw}");
+        assert_eq!(episode.episode_numbers, vec![expected_episode], "{raw}");
+        assert!(!episode.full_season, "{raw}");
+    }
+}
+
+#[test]
 fn anime_context_keeps_trailing_parenthetical_episode_range() {
     let analysis = analyze_release_for_target(
         "Emberfall Season 12 - (213 - 229) [Typis]",
