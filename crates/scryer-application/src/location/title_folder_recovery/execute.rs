@@ -251,7 +251,7 @@ impl AppUseCase {
         guard: LiveRunnerGuard,
     ) {
         let app = self.clone();
-        self.restore_coordinator().spawn_task(async move {
+        self.restore_coordinator().clone().spawn_worker(async move {
             let _guard = guard;
             if let Err(error) = app.run_title_folder_recovery(&operation_id, &plan).await {
                 tracing::warn!(operation_id, %error, "Title folder recovery stopped; original files preserved");

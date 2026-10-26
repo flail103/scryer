@@ -509,9 +509,22 @@ impl SelfRestartController {
         }
     }
 
-    fn handle(&self) -> RestoreRestartHandle {
+    fn handle(&self, restore: Arc<scryer_application::RestoreCoordinator>) -> RestoreRestartHandle {
         let controller = self.clone();
-        RestoreRestartHandle::new(move || controller.schedule_restart())
+        RestoreRestartHandle::new(move || {
+            let restore = restore.clone();
+            controller.schedule_restart_with_failure(move || {
+                if let Some(status) = restore.snapshot().filter(|status| {
+                    status.phase == scryer_application::RestoreJobPhase::Restarting
+                }) && let Err(error) = restore.transition(
+                    &status.id,
+                    scryer_application::RestoreJobPhase::Failed,
+                    Some(scryer_application::restore_refusal::RESTORE_RESTART_FAILED),
+                ) {
+                    tracing::error!(%error, "could not persist failed restore restart");
+                }
+            });
+        })
     }
 
     fn application_upgrade_handle(
@@ -531,6 +544,10 @@ impl SelfRestartController {
     }
 
     fn schedule_restart(&self) {
+        self.schedule_restart_with_failure(|| {});
+    }
+
+    fn schedule_restart_with_failure(&self, on_failure: impl FnOnce() + Send + 'static) {
         if self.inner.scheduled.swap(true, Ordering::SeqCst) {
             tracing::info!("restore restart already scheduled");
             return;
@@ -542,6 +559,7 @@ impl SelfRestartController {
             if let Err(error) = (inner.launcher)() {
                 tracing::error!(error = %error, "failed to restart after restore");
                 inner.scheduled.store(false, Ordering::SeqCst);
+                on_failure();
             }
         });
     }
@@ -1277,6 +1295,7 @@ async fn bootstrap_application(
     application_upgrade_assessment: scryer_application::application_upgrade::InstallationAssessment,
     restore_coordinator: Arc<scryer_application::RestoreCoordinator>,
 ) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+    scryer_application::check_restore_deadline()?;
     let bootstrap_start = std::time::Instant::now();
     scryer_application::initialize_archive_workspace_ownership(&data_dir)?;
 
@@ -1297,6 +1316,7 @@ async fn bootstrap_application(
             return Err(format!("failed to initialize datastore services: {error}").into());
         }
     };
+    scryer_application::check_restore_deadline()?;
     let bootstrap_settings_store = datastore.settings_store();
     let bootstrap_quality_profile_store = datastore.quality_profile_store();
     let datastore_info = bootstrap_settings_store
@@ -1311,6 +1331,7 @@ async fn bootstrap_application(
     );
 
     let t = std::time::Instant::now();
+    scryer_application::check_restore_deadline()?;
     seed_service_setting_definitions(bootstrap_settings_store.clone())
         .await
         .map_err(|e| format!("failed to seed service setting definitions: {e}"))?;
@@ -1318,6 +1339,7 @@ async fn bootstrap_application(
 
     // Bootstrap encryption master key (env > keystore > legacy DB migration > auto-generate).
     let t = std::time::Instant::now();
+    scryer_application::check_restore_deadline()?;
     let encryption_bootstrap = datastore
         .bootstrap_encryption()
         .await
@@ -1349,7 +1371,9 @@ async fn bootstrap_application(
     tracing::info!(elapsed_ms = %t.elapsed().as_millis(), "encryption bootstrapped");
 
     // Detect version upgrades by comparing with last-run version stored in DB
+    scryer_application::check_restore_deadline()?;
     let version_lifecycle = check_version_upgrade(bootstrap_settings_store.clone()).await;
+    scryer_application::check_restore_deadline()?;
     let customization_store = datastore.customization_store();
     let mut application_migrator = startup_migrations::runner::ApplicationMigrator::load(
         datastore.datastore(),
@@ -1364,6 +1388,7 @@ async fn bootstrap_application(
     application_migrator
         .run_proxy_compatibility(datastore.proxy_configs())
         .await?;
+    scryer_application::check_restore_deadline()?;
     record_post_upgrade_auto_backup_pending_if_needed(
         bootstrap_settings_store.clone(),
         &version_lifecycle,
@@ -1371,6 +1396,7 @@ async fn bootstrap_application(
     .await;
 
     let t = std::time::Instant::now();
+    scryer_application::check_restore_deadline()?;
     if let Err(error) =
         seed_service_settings_from_environment(bootstrap_settings_store.clone()).await
     {
@@ -1379,6 +1405,7 @@ async fn bootstrap_application(
             "failed to persist optional settings from environment"
         );
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(error) =
         migrate_legacy_download_client_routing_settings(bootstrap_settings_store.clone()).await
     {
@@ -1388,6 +1415,7 @@ async fn bootstrap_application(
         );
     }
 
+    scryer_application::check_restore_deadline()?;
     if let Err(error) =
         migrate_legacy_download_client_default_category_settings(bootstrap_settings_store.clone())
             .await
@@ -1400,6 +1428,7 @@ async fn bootstrap_application(
     tracing::info!(elapsed_ms = %t.elapsed().as_millis(), "environment settings synced");
 
     let t = std::time::Instant::now();
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = normalize_media_path_setting(
         bootstrap_settings_store.clone(),
         MOVIES_PATH_KEY.to_string(),
@@ -1412,6 +1441,7 @@ async fn bootstrap_application(
         );
     }
 
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = normalize_media_path_setting(
         bootstrap_settings_store.clone(),
         SERIES_PATH_KEY.to_string(),
@@ -1435,6 +1465,7 @@ async fn bootstrap_application(
     )));
     let facet_registry = Arc::new(registry);
 
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = normalize_quality_profile_settings(
         bootstrap_settings_store.clone(),
         bootstrap_quality_profile_store.clone(),
@@ -1483,19 +1514,23 @@ async fn bootstrap_application(
         .map_err(|error| {
             format!("failed to initialize plugin HTTP trusted certificates: {error}")
         })?;
+    scryer_application::check_restore_deadline()?;
     let staged_nzb_store = Arc::new(
         FileSystemStagedNzbStore::new_with_startup_purge(datastore.staged_nzb_path(), true)
             .await
             .map_err(|e| format!("failed to initialize staged nzb store: {e}"))?,
     );
     let staged_nzb_pipeline_limit = Arc::new(tokio::sync::Semaphore::new(4));
+    scryer_application::check_restore_deadline()?;
     bootstrap_plugin_installations(&customization_store, finalized_pending_restore)
         .await
         .map_err(|e| format!("failed to bootstrap plugin installations: {e}"))?;
+    scryer_application::check_restore_deadline()?;
     let (runtime_plugins, disabled_builtin_plugins) =
         load_runtime_plugin_state(&customization_store)
             .await
             .map_err(|e| format!("failed to load runtime plugin state: {e}"))?;
+    scryer_application::check_restore_deadline()?;
     scryer_plugins::schedule_plugin_rehydration(&runtime_plugins, &disabled_builtin_plugins);
     let indexer_runtime_plugins = runtime_plugins
         .iter()
@@ -1561,6 +1596,7 @@ async fn bootstrap_application(
     // Seed the API hit counters from the persisted rows before any indexer
     // traffic starts. Without this the dashboard restarts at zero every time
     // the process does, while the indexer's own counter keeps climbing.
+    scryer_application::check_restore_deadline()?;
     indexer_stats.hydrate().await;
     if shutdown_token.is_cancelled() {
         indexer_stats.close_dispatch_gate();
@@ -1878,12 +1914,14 @@ async fn bootstrap_application(
             },
         );
     }
+    scryer_application::check_restore_deadline()?;
     app_use_case
         .rebuild_request_rules_engine()
         .await
         .map_err(|error| {
             format!("failed to rebuild persisted request rules at startup: {error}")
         })?;
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = app_use_case.ensure_expired_request_leases_rule().await {
         tracing::warn!(error = %error, "failed to create the expired request leases rule");
     }
@@ -1896,9 +1934,11 @@ async fn bootstrap_application(
             "failed to initialize download-client category feedback scopes; using unfiltered polling until a refresh succeeds"
         );
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = app_use_case.sync_image_cache_runtime_limit().await {
         tracing::warn!(error = %error, "failed to apply configured image cache limit");
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = image_proxy_runtime.prune().await {
         tracing::warn!(error = %error, "failed to run startup image cache maintenance");
     }
@@ -1961,13 +2001,14 @@ async fn bootstrap_application(
     );
     app_use_case.warm_runtime_performance();
     if finalized_pending_restore {
+        scryer_application::check_restore_deadline()?;
         tracing::info!("recovering restored plugins from remote catalogs");
         if let Err(error) = app_use_case
             .recover_restored_plugins_after_backup_restore()
             .await
         {
             tracing::error!(error = %error, "failed to recover restored plugins");
-            std::process::exit(1);
+            return Err(error.into());
         }
     }
     let previous_version = match &version_lifecycle {
@@ -1982,11 +2023,13 @@ async fn bootstrap_application(
             VERSION,
         )
         .await?;
+    scryer_application::check_restore_deadline()?;
     spawn_post_upgrade_auto_backup_if_pending(
         app_use_case.clone(),
         bootstrap_settings_store.clone(),
     )
     .await;
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = app_use_case
         .repair_legacy_jellyfin_external_account_invites()
         .await
@@ -1997,6 +2040,7 @@ async fn bootstrap_application(
         );
     }
 
+    scryer_application::check_restore_deadline()?;
     app_use_case.connect_library_scan_tracker().await;
     spawn_sigstore_trust_root_prime_task(app_use_case.clone());
     spawn_plugin_catalog_refresh_task(app_use_case.clone());
@@ -2008,6 +2052,7 @@ async fn bootstrap_application(
     );
 
     let mut location_reservations_readable = true;
+    scryer_application::check_restore_deadline()?;
     let mut upgrade_reconcile_exclusions = match app_use_case
         .finalize_application_upgrade_journal_with_boot_time(application_upgrade_boot_time())
         .await
@@ -2035,12 +2080,14 @@ async fn bootstrap_application(
 
     // A script run still marked running was cut off by the previous
     // process; nothing in this one can finish it.
+    scryer_application::check_restore_deadline()?;
     if let Err(error) = app_use_case.reconcile_interrupted_script_runs().await {
         tracing::warn!(error = %error, "failed to reconcile interrupted script runs on startup");
     }
 
     // Durable maintenance search intents resume with their original job ids.
     // Keep those reservations out of generic interrupted-job reconciliation.
+    scryer_application::check_restore_deadline()?;
     match app_use_case.resume_interrupted_maintenance_searches().await {
         Ok(recovered) if location_reservations_readable => {
             upgrade_reconcile_exclusions.extend(recovered);
@@ -2063,6 +2110,7 @@ async fn bootstrap_application(
         }
     }
 
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case.reconcile_default_library_roots().await {
         tracing::warn!(error = %e, "failed to reconcile default library roots on startup");
     }
@@ -2078,6 +2126,7 @@ async fn bootstrap_application(
     // can pick it up where it stopped, without repeating verified work
     // (FR-033). This runs after root reconciliation because a resumed move
     // needs its roots to be the ones the plan was confirmed against.
+    scryer_application::check_restore_deadline()?;
     match app_use_case.resume_interrupted_location_operations().await {
         Ok(0) => {}
         Ok(resumed) => tracing::info!(
@@ -2089,19 +2138,23 @@ async fn bootstrap_application(
         }
     }
 
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case.migrate_legacy_persona_preferences().await {
         tracing::warn!(error = %e, "failed to migrate legacy persona preferences on startup");
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case
         .migrate_canonical_audio_persona_settings()
         .await
     {
         tracing::warn!(error = %e, "failed to migrate canonical audio/persona settings on startup");
     }
+    scryer_application::check_restore_deadline()?;
     app_use_case
         .bootstrap_builtin_trash_rule_pack()
         .await
         .map_err(|error| format!("cannot activate the scoring configuration: {error}"))?;
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case
         .migrate_legacy_opensubtitles_provider_config()
         .await
@@ -2111,15 +2164,18 @@ async fn bootstrap_application(
             "failed to migrate legacy opensubtitles settings into subtitle provider configs on startup"
         );
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case.reconcile_indexer_configs().await {
         tracing::warn!(error = %e, "failed to reconcile indexer configs on startup");
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case
         .ensure_indexer_routing_entries_for_existing_indexers()
         .await
     {
         tracing::warn!(error = %e, "failed to ensure indexer routing on startup");
     }
+    scryer_application::check_restore_deadline()?;
     if let Err(e) = app_use_case.normalize_routing_settings().await {
         tracing::warn!(error = %e, "failed to normalize routing settings on startup");
     }
@@ -2135,6 +2191,7 @@ async fn bootstrap_application(
     let bootstrap_admin = startup_auth::read_bootstrap_admin()?;
     let auth_mode = resolve_auth_mode_from_env(bootstrap_admin.active())?;
     if bootstrap_admin.active() {
+        scryer_application::check_restore_deadline()?;
         app_use_case
             .configure_bootstrap_admin(
                 bootstrap_admin.username.as_deref(),
@@ -2152,6 +2209,7 @@ async fn bootstrap_application(
     }
     app_use_case.set_recovery_admin_login_enabled(auth_mode.recovery_active());
     if auth_mode.recovery_active() {
+        scryer_application::check_restore_deadline()?;
         let recovery_password = normalize_env_option(RECOVERY_ADMIN_PASSWORD_ENV)
             .ok_or_else(|| format!("{RECOVERY_ADMIN_PASSWORD_ENV} was set but empty"))?;
         tracing::warn!(
@@ -2202,7 +2260,7 @@ async fn bootstrap_application(
             data_dir: data_dir.clone(),
             datastore_config: restore_datastore_config(&backup_datastore_config),
             datastore: restore_datastore_handle(),
-            restart: restore_restart_controller.handle(),
+            restart: restore_restart_controller.handle(app_use_case.restore_coordinator().clone()),
         }),
         application_upgrade_assessment,
     );
@@ -2279,6 +2337,7 @@ async fn bootstrap_application(
             );
         }
     }
+    scryer_application::check_restore_deadline()?;
     #[cfg(any(debug_assertions, test, feature = "e2e-harness"))]
     if let Err(error) = dev_api_keys::sync_from_env(&app_use_case).await {
         tracing::error!(error = %error, "failed to synchronize development API keys");
@@ -2292,6 +2351,7 @@ async fn bootstrap_application(
     // queue facade. The supervisor starts/stops the bridge as weaver
     // becomes/stops being the primary enabled client, and the poller reads
     // this shared handle every tick to stand down (or resume) in lockstep.
+    scryer_application::check_restore_deadline()?;
     let bridged_client_types = BridgedClientTypesHandle::new();
     let poller_options = DownloadQueuePollerOptions {
         bridged_client_types: bridged_client_types.clone(),
@@ -4130,32 +4190,62 @@ mod tests {
             }),
         );
 
-        // The launcher runs on its own thread; poll for its observable effects.
-        let wait_until = |what: &str, condition: &dyn Fn() -> bool| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            while !condition() {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "timed out waiting for {what}"
-                );
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        };
-
-        controller.schedule_restart();
-        wait_until("the failed launch to clear the schedule", &|| {
-            attempts.load(Ordering::SeqCst) == 1
-                && !controller.inner.scheduled.load(Ordering::SeqCst)
-        });
-        controller.schedule_restart();
-        wait_until("the retry to launch", &|| {
-            attempts.load(Ordering::SeqCst) == 2
-        });
-        wait_until("the retry to clear the schedule", &|| {
-            !controller.inner.scheduled.load(Ordering::SeqCst)
-        });
+        for expected in 1..=2 {
+            let (finished, completion) = std::sync::mpsc::channel();
+            controller.schedule_restart_with_failure(move || finished.send(()).unwrap());
+            completion.recv_timeout(Duration::from_secs(60)).unwrap();
+            assert_eq!(attempts.load(Ordering::SeqCst), expected);
+            assert!(!controller.inner.scheduled.load(Ordering::SeqCst));
+        }
 
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn background_restore_restart_failure_is_observable_and_retryable() {
+        use scryer_application::{
+            RestoreCoordinator, RestoreJobKind, RestoreJobPhase, restore_refusal,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let restore = Arc::new(RestoreCoordinator::default());
+        let (attempt, _) = restore
+            .start(directory.path(), "fixture", RestoreJobKind::Apply)
+            .unwrap();
+        restore
+            .transition(&attempt.id, RestoreJobPhase::Restarting, None)
+            .unwrap();
+        let controller = SelfRestartController::with_launcher(
+            Duration::ZERO,
+            Arc::new(|| {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "synthetic launch failure",
+                ))
+            }),
+        );
+        let changed = restore.changed.notified();
+        tokio::pin!(changed);
+        changed.as_mut().enable();
+        controller.handle(restore.clone()).schedule_restart();
+        tokio::time::timeout(Duration::from_secs(60), changed)
+            .await
+            .unwrap();
+        let status = restore.snapshot().unwrap();
+        assert_eq!(status.phase, RestoreJobPhase::Failed);
+        assert_eq!(
+            status.reason.as_deref(),
+            Some(restore_refusal::RESTORE_RESTART_FAILED)
+        );
+        assert!(restore.blocks_application());
+        assert!(restore.can_retry());
+        let recovered = RestoreCoordinator::recover(directory.path()).unwrap();
+        assert!(recovered.blocks_application());
+        assert!(recovered.can_retry());
+        let (retry, fresh) = restore
+            .start(directory.path(), "fixture", RestoreJobKind::Apply)
+            .unwrap();
+        assert!(fresh);
+        assert_ne!(retry.id, attempt.id);
     }
 
     #[test]

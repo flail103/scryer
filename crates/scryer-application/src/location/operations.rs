@@ -1400,7 +1400,7 @@ impl AppUseCase {
         };
 
         let app = self.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().clone().spawn_worker(async move {
             // The guard releases the slot when this task ends, however it ends
             // — including a panic — so a crashed runner never leaves an
             // operation permanently unresumable.

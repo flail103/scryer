@@ -370,19 +370,6 @@ where
     if !pending_dir.exists() {
         return Ok(false);
     }
-    if !pending_ready.exists() {
-        let _ = std::fs::remove_dir_all(&pending_dir);
-        return Ok(false);
-    }
-
-    let pending_secrets = pending_restore_instance_secrets_path(data_dir);
-    if !pending_secrets.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "pending restore secrets are missing",
-        ));
-    }
-
     let target_secrets = managed_instance_secrets_path(data_dir);
     let mut promotion_targets = vec![target_secrets.clone()];
     if datastore_config.engine == DatastoreEngine::Sqlite {
@@ -397,6 +384,18 @@ where
         cleanup_restore_promotion_artifacts(&promotion_targets).map_err(restore_recovery_error)?;
         let _ = std::fs::remove_dir_all(&pending_dir);
         return Ok(true);
+    }
+    if !pending_ready.exists() {
+        let _ = std::fs::remove_dir_all(&pending_dir);
+        return Ok(false);
+    }
+
+    let pending_secrets = pending_restore_instance_secrets_path(data_dir);
+    if !pending_secrets.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "pending restore secrets are missing",
+        ));
     }
     recover_interrupted_restore_promotion(&promotion_targets).map_err(restore_recovery_error)?;
     scryer_application::check_restore_deadline().map_err(std::io::Error::other)?;
@@ -559,6 +558,10 @@ mod tests {
             b"complete",
         )
         .unwrap();
+        // Interrupted staging-directory cleanup may already have removed
+        // its inputs. The durable commit marker still owns recovery.
+        std::fs::remove_file(pending_restore_ready_path(data)).unwrap();
+        std::fs::remove_file(pending_restore_instance_secrets_path(data)).unwrap();
         let deadline = scryer_application::RestoreDeadline::new();
         deadline.cancel();
         let config = DatastoreConfig::sqlite(

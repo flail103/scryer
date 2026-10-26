@@ -1404,7 +1404,7 @@ impl AppUseCase {
             return Ok(ids);
         }
         let app = self.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().clone().spawn_worker(async move {
             // One worker at a time, sharing admission with live searches.
             for (mut run, cancellation) in reserved {
                 let guard = app

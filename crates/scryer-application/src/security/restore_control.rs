@@ -30,6 +30,8 @@ pub mod refusal {
     pub const RESTORE_RECOVERY_REQUIRED: &str = "RESTORE_RECOVERY_REQUIRED";
     /// Restore control cannot be mixed with ordinary or ambiguous operations.
     pub const RESTORE_OPERATION_INVALID: &str = "RESTORE_OPERATION_INVALID";
+    /// The prepared restore could not launch its restart handoff.
+    pub const RESTORE_RESTART_FAILED: &str = "RESTORE_RESTART_FAILED";
     pub const ALL: &[&str] = &[
         RESTORE_DEADLINE_EXCEEDED,
         RESTORE_MAINTENANCE_ACTIVE,
@@ -37,6 +39,7 @@ pub mod refusal {
         RESTORE_ATTEMPT_NOT_FOUND,
         RESTORE_RECOVERY_REQUIRED,
         RESTORE_OPERATION_INVALID,
+        RESTORE_RESTART_FAILED,
     ];
 }
 

@@ -210,6 +210,7 @@ impl ApplicationMigrator {
         datastore: StoreDatastore,
         settings: Arc<SettingsStore>,
     ) -> Result<Self, String> {
+        restore_checkpoint()?;
         validate_registry(MIGRATIONS)?;
         let ledger = MigrationLedger { datastore };
         let applied = ledger.applied_ids().await?;
@@ -224,6 +225,7 @@ impl ApplicationMigrator {
 
     async fn adopt_legacy_completion_markers(&mut self) -> Result<(), String> {
         for spec in MIGRATIONS {
+            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -244,6 +246,7 @@ impl ApplicationMigrator {
                     serde_json::from_str::<String>(&record.effective_value_json).ok()
                 });
             if state.as_deref() == Some("completed") {
+                restore_checkpoint()?;
                 self.ledger.record(*spec, 0).await?;
                 self.applied.insert(spec.id.to_string());
                 tracing::info!(
@@ -265,6 +268,7 @@ impl ApplicationMigrator {
             .copied()
             .filter(|spec| spec.phase == MigrationPhase::Early)
         {
+            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -321,6 +325,7 @@ impl ApplicationMigrator {
         &mut self,
         proxies: Arc<dyn scryer_application::ProxyConfigRepository>,
     ) -> Result<(), String> {
+        restore_checkpoint()?;
         let datastore = self.ledger.datastore.clone();
         let spec = *MIGRATIONS
             .iter()
@@ -340,6 +345,7 @@ impl ApplicationMigrator {
         previous_version: Option<&str>,
         current_version: &str,
     ) -> Result<(), String> {
+        restore_checkpoint()?;
         let datastore = self.ledger.datastore.clone();
         let store = DatastoreCustomizationStore::new(datastore.clone());
         if let Err(error) = app.resume_pending_title_tag_renames().await {
@@ -352,6 +358,7 @@ impl ApplicationMigrator {
         // Inspect per-installation progress even after global completion: a
         // restored catalog can introduce another legacy artifact later.
         let started = Instant::now();
+        restore_checkpoint()?;
         if super::_0014_plugin_components_020::migrate(app, &datastore, &store).await? {
             self.record_success(spec, started).await?;
         }
@@ -360,6 +367,7 @@ impl ApplicationMigrator {
             .copied()
             .filter(|spec| spec.phase == MigrationPhase::ApplicationReady)
         {
+            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -399,7 +407,8 @@ impl ApplicationMigrator {
                     let app = app.clone();
                     let settings = self.settings.clone();
                     let current_version = current_version.to_string();
-                    std::mem::drop(self.spawn_retryable(spec, async move {
+                    let restore = app.restore_coordinator().clone();
+                    std::mem::drop(self.spawn_retryable(restore, spec, async move {
                         migration_0005::rehydrate_title_metadata_for_017_upgrade(
                             &app,
                             settings,
@@ -432,7 +441,8 @@ impl ApplicationMigrator {
                     let app = app.clone();
                     let settings = self.settings.clone();
                     let current_version = current_version.to_string();
-                    std::mem::drop(self.spawn_retryable(spec, async move {
+                    let restore = app.restore_coordinator().clone();
+                    std::mem::drop(self.spawn_retryable(restore, spec, async move {
                         migration_0008::rehydrate_title_credits_for_018_upgrade(
                             &app,
                             settings,
@@ -465,6 +475,9 @@ impl ApplicationMigrator {
     }
 
     pub(crate) fn spawn_title_folder_recovery(&self, app: &AppUseCase) {
+        if restore_checkpoint().is_err() {
+            return;
+        }
         let spec = *MIGRATIONS
             .iter()
             .find(|spec| spec.id == super::_0018_title_folder_recovery::ID)
@@ -473,7 +486,8 @@ impl ApplicationMigrator {
             return;
         }
         let app = app.clone();
-        std::mem::drop(self.spawn_retryable(spec, async move {
+        let restore = app.restore_coordinator().clone();
+        std::mem::drop(self.spawn_retryable(restore, spec, async move {
             app.enroll_title_folder_recovery()
                 .await
                 .map_err(|error| error.to_string())
@@ -493,16 +507,39 @@ impl ApplicationMigrator {
         app: &AppUseCase,
         previous_version: Option<&str>,
     ) {
-        if !self
-            .claim_empty_duplicate_title_folder_cleanup(previous_version)
-            .await
-        {
+        if restore_checkpoint().is_err() {
             return;
         }
         let app = app.clone();
-        std::mem::drop(tokio::spawn(async move {
-            migration_0017::run(&app).await;
-        }));
+        self.queue_empty_duplicate_title_folder_cleanup(
+            app.restore_coordinator().clone(),
+            previous_version,
+            async move {
+                migration_0017::run(&app).await;
+            },
+        );
+    }
+
+    fn queue_empty_duplicate_title_folder_cleanup(
+        &self,
+        restore: Arc<scryer_application::RestoreCoordinator>,
+        previous_version: Option<&str>,
+        cleanup: impl Future<Output = ()> + Send + 'static,
+    ) {
+        let mut worker = Self {
+            ledger: self.ledger.clone(),
+            applied: self.applied.clone(),
+            settings: self.settings.clone(),
+        };
+        let previous_version = previous_version.map(str::to_owned);
+        restore.spawn_worker(async move {
+            if worker
+                .claim_empty_duplicate_title_folder_cleanup(previous_version.as_deref())
+                .await
+            {
+                cleanup.await;
+            }
+        });
     }
 
     async fn claim_empty_duplicate_title_folder_cleanup(
@@ -536,6 +573,9 @@ impl ApplicationMigrator {
     where
         F: Future<Output = Result<(), String>>,
     {
+        if restore_checkpoint().is_err() {
+            return;
+        }
         let started = Instant::now();
         match migration.await {
             Ok(()) => {
@@ -549,12 +589,18 @@ impl ApplicationMigrator {
         }
     }
 
-    fn spawn_retryable<F>(&self, spec: MigrationSpec, migration: F) -> tokio::task::JoinHandle<()>
+    fn spawn_retryable<F>(
+        &self,
+        restore: Arc<scryer_application::RestoreCoordinator>,
+        spec: MigrationSpec,
+        migration: F,
+    ) -> tokio::sync::oneshot::Receiver<()>
     where
         F: Future<Output = Result<(), String>> + Send + 'static,
     {
         let ledger = self.ledger.clone();
-        tokio::spawn(async move {
+        let (finished, completion) = tokio::sync::oneshot::channel();
+        restore.spawn_worker(async move {
             let started = Instant::now();
             match migration.await {
                 Ok(()) => {
@@ -572,7 +618,9 @@ impl ApplicationMigrator {
                     tracing::warn!(migration_id = spec.id, error = %error, "background application migration deferred until the next startup");
                 }
             }
-        })
+            let _ = finished.send(());
+        });
+        completion
     }
 
     async fn record_success(
@@ -580,11 +628,16 @@ impl ApplicationMigrator {
         spec: MigrationSpec,
         started: Instant,
     ) -> Result<(), String> {
+        restore_checkpoint()?;
         self.ledger.record(spec, elapsed_ms(started)).await?;
         self.applied.insert(spec.id.to_string());
         tracing::info!(migration_id = spec.id, "application migration completed");
         Ok(())
     }
+}
+
+fn restore_checkpoint() -> Result<(), String> {
+    scryer_application::check_restore_deadline().map_err(|error| error.to_string())
 }
 
 fn elapsed_ms(started: Instant) -> i64 {
@@ -877,7 +930,8 @@ mod tests {
         let spec = MIGRATIONS[0];
         let (release, wait) = tokio::sync::oneshot::channel();
         let (started_tx, started) = tokio::sync::oneshot::channel();
-        let handle = migrator.spawn_retryable(spec, async move {
+        let restore = Arc::new(scryer_application::RestoreCoordinator::default());
+        let handle = migrator.spawn_retryable(restore.clone(), spec, async move {
             let _ = started_tx.send(());
             wait.await.map_err(|error| error.to_string())?;
             Ok(())
@@ -897,8 +951,22 @@ mod tests {
                 .unwrap()
                 .contains(spec.id)
         );
+        let deadline = scryer_application::RestoreDeadline::new();
+        let drain = restore.drain(&deadline);
+        tokio::pin!(drain);
+        assert!(
+            std::future::poll_fn(|context| {
+                std::task::Poll::Ready(drain.as_mut().poll(context).is_pending())
+            })
+            .await
+        );
         release.send(()).expect("release migration");
-        handle.await.expect("background migration task");
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            handle.await.expect("background migration task");
+            drain.await.expect("migration drained");
+        })
+        .await
+        .expect("migration completion must be bounded");
         assert!(
             migrator
                 .ledger
@@ -907,5 +975,91 @@ mod tests {
                 .unwrap()
                 .contains(spec.id)
         );
+    }
+
+    #[tokio::test]
+    async fn background_restore_migration_waits_for_readiness_and_cancels_before_start() {
+        let (temp, _settings, migrator) = test_migrator().await;
+        let restore = Arc::new(scryer_application::RestoreCoordinator::default());
+        restore
+            .start(
+                temp.path(),
+                "fixture",
+                scryer_application::RestoreJobKind::Apply,
+            )
+            .unwrap();
+        let (started, observed) = tokio::sync::oneshot::channel();
+        let completion = migrator.spawn_retryable(restore.clone(), MIGRATIONS[0], async move {
+            started.send(()).unwrap();
+            Ok(())
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            restore
+                .drain(&scryer_application::RestoreDeadline::new())
+                .await
+                .unwrap();
+            assert!(completion.await.is_err());
+            assert!(observed.await.is_err());
+        })
+        .await
+        .expect("queued migration must drain without starting");
+    }
+
+    #[tokio::test]
+    async fn background_restore_expired_budget_does_not_run_or_adopt_migrations() {
+        let (_temp, _settings, mut migrator) = test_migrator().await;
+        let expired = scryer_application::RestoreDeadline::with_budget(std::time::Duration::ZERO);
+        let mut executed = false;
+        expired
+            .scope(async {
+                migrator
+                    .run_retryable(MIGRATIONS[0], async {
+                        executed = true;
+                        Ok(())
+                    })
+                    .await;
+                assert!(migrator.adopt_legacy_completion_markers().await.is_err());
+            })
+            .await;
+        assert!(!executed);
+    }
+
+    #[tokio::test]
+    async fn background_restore_queued_cleanup_does_not_consume_its_claim() {
+        let (temp, _settings, mut migrator) = test_migrator().await;
+        let restore = Arc::new(scryer_application::RestoreCoordinator::default());
+        restore
+            .start(
+                temp.path(),
+                "fixture",
+                scryer_application::RestoreJobKind::Apply,
+            )
+            .unwrap();
+        migrator.queue_empty_duplicate_title_folder_cleanup(
+            restore.clone(),
+            Some("0.21.13"),
+            async { panic!("cleanup must wait for readiness") },
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            restore
+                .drain(&scryer_application::RestoreDeadline::new())
+                .await
+                .unwrap();
+            assert!(
+                !migrator
+                    .ledger
+                    .applied_ids()
+                    .await
+                    .unwrap()
+                    .contains(migration_0017::ID)
+            );
+            assert!(
+                migrator
+                    .claim_empty_duplicate_title_folder_cleanup(Some("0.21.13"))
+                    .await
+            );
+        })
+        .await
+        .expect("cancelled cleanup must preserve its claim");
     }
 }
