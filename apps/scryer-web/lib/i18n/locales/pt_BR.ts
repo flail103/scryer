@@ -2016,6 +2016,7 @@ const pt_BR: LocaleDictionary = {
   "history.seedingStarted": "Semeando",
   "history.seedingCompleted": "Semeadura concluída",
   "history.downloadIgnored": "Ignorado",
+  "history.downloadMissing": "Não visível no cliente",
   "history.facet": "Categoria",
   "history.actions": "Ações",
   "history.expandDetails": "Expandir detalhes do evento",

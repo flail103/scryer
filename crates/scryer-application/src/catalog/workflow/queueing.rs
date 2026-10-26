@@ -525,6 +525,7 @@ impl AppUseCase {
         let download_id = scryer_domain::download_identity::DownloadId::new();
         let job_result = self
             .submit_canonical_download(CanonicalDownloadSubmissionIntent {
+                automatic: false,
                 http_release,
                 request: DownloadClientAddRequest {
                     http: None,
@@ -602,6 +603,12 @@ impl AppUseCase {
                     },
                     reused_existing: true,
                 }));
+            }
+            Ok(CanonicalDownloadSubmissionOutcome::Deferred) => {
+                return Err(AppError::validation_refused(
+                    scryer_domain::download_reason::CLIENT_ITEM_MISSING,
+                    "Automatic acquisition is deferred while a recent download is missing",
+                ));
             }
             Ok(CanonicalDownloadSubmissionOutcome::Conflict(conflict)) => {
                 return Ok(QueueDownloadOutcome::Conflict(conflict));
@@ -737,6 +744,42 @@ impl AppUseCase {
             .with_scoring(crate::quality::grab_scoring::from_listing(
                 release_listing_json.as_deref(),
             ));
+        if !purpose.is_additional_file() {
+            let grabbed_at = Utc::now().to_rfc3339();
+            let grabbed_release = serde_json::json!({
+                "title": source_title_for_attempt,
+                "score": release_facts.scoring.as_ref().map(|scoring| scoring.candidate_score),
+                "grabbed_at": grabbed_at,
+                "download_id": grab.download_id.unwrap_or(download_id),
+                "source": "manual",
+                "source_provider": source_provider_name,
+                "release_listing_json": release_listing_json,
+            })
+            .to_string();
+            let episodes = self
+                .services
+                .catalog
+                .shows
+                .list_episodes_for_title(&title.id)
+                .await?;
+            let states = &self.services.workflow.acquisition_scope_states;
+            for (mut candidate, _) in
+                wanted_item_candidates_for_submission_scope(&title.id, &scope, &episodes)
+            {
+                candidate.id = Id::new().0;
+                candidate.created_at = grabbed_at.clone();
+                candidate.updated_at = grabbed_at.clone();
+                let id = states.ensure_acquisition_scope_state(&candidate).await?;
+                let existing = states.get_acquisition_scope_state_by_id(&id).await?;
+                states
+                    .transition_acquisition_scope_to_grabbed(&AcquisitionScopeGrabTransition {
+                        id,
+                        last_search_at: existing.and_then(|state| state.last_search_at),
+                        grabbed_release: grabbed_release.clone(),
+                    })
+                    .await?;
+            }
+        }
         tracing::debug!(
             title_id = %title.id,
             download_client_item_id = %grab.job_id,

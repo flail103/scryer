@@ -3177,6 +3177,7 @@ const zh_TW: LocaleDictionary = {
   "history.seedingStarted": "做種中",
   "history.seedingCompleted": "做種完成",
   "history.downloadIgnored": "已忽略",
+  "history.downloadMissing": "用戶端中不可見",
   "history.facet": "分類",
   "history.actions": "操作",
   "history.expandDetails": "展開事件詳情",

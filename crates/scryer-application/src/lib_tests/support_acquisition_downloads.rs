@@ -305,6 +305,7 @@ pub(super) async fn title_blocklist_entries(
 
 #[derive(Default, Clone)]
 pub(super) struct TrackingDownloadSubmissionRepo {
+    pub(super) presence_scopes: Arc<Mutex<Option<Arc<TrackingAcquisitionScopeStateRepo>>>>,
     pub(super) password_retry_recovery: Arc<Mutex<Vec<DownloadSubmission>>>,
     /// Calls to `list_password_retry_recovery_submissions`.
     pub(super) password_retry_recovery_reads: Arc<std::sync::atomic::AtomicUsize>,
@@ -872,6 +873,71 @@ impl TrackingDownloadSubmissionRepo {
 
 #[async_trait]
 impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
+    async fn transition_client_presence(
+        &self,
+        change: &crate::ClientPresenceTransition,
+    ) -> AppResult<bool> {
+        let previous = self
+            .get_identity_tracked_state_for_download(
+                Some(&change.download_id),
+                &change.identity,
+                Some(&change.source),
+            )
+            .await?;
+        let submission_state = self.get_tracked_state(&change.source).await?;
+        if previous != change.expected_state
+            || previous
+                .as_deref()
+                .is_some_and(|state| !matches!(state, "missing" | "downloading"))
+            || submission_state
+                .as_deref()
+                .is_some_and(|state| !matches!(state, "missing" | "downloading"))
+        {
+            return Ok(false);
+        }
+        let scopes = self.presence_scopes.lock().await.clone();
+        if !change.scopes.is_empty() && scopes.is_none() {
+            return Err(AppError::Repository(
+                "test presence scopes not linked".into(),
+            ));
+        }
+        self.upsert_identity_tracked_state_for_download_returning_previous(
+            crate::IdentityTrackedStateTarget {
+                canonical_download_id: Some(&change.download_id),
+                identity: &change.identity,
+                source_identity: Some(&change.source),
+            },
+            change.state.as_str(),
+            &[],
+            change.reason.as_deref(),
+            change.detail.as_deref(),
+        )
+        .await?;
+        self.update_tracked_state(&change.source, change.state.as_str())
+            .await?;
+        if let Some(scopes) = scopes {
+            for update in &change.scopes {
+                let current = scopes
+                    .get_acquisition_scope_state_by_id(&update.previous.id)
+                    .await?;
+                if current.as_ref().is_some_and(|row| {
+                    row.status == update.previous.status
+                        && row.grabbed_release == update.previous.grabbed_release
+                }) {
+                    scopes
+                        .update_acquisition_scope_status(
+                            &update.previous.id,
+                            update.status.as_str(),
+                            update.previous.last_search_at.as_deref(),
+                            Some(&update.grabbed_release),
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok(true)
+    }
+
     async fn list_password_retry_recovery_submissions(&self) -> AppResult<Vec<DownloadSubmission>> {
         self.password_retry_recovery_reads
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1302,6 +1368,20 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
             return Ok(None);
         };
         Ok(self.identity_state_details.lock().await.get(&key).cloned())
+    }
+
+    async fn get_identity_tracked_state_detail_for_download(
+        &self,
+        canonical_download_id: Option<&scryer_domain::download_identity::DownloadId>,
+        identity: &DownloadSubmissionIdentity,
+        source_identity: Option<&ClientJobLocator>,
+    ) -> AppResult<Option<String>> {
+        let mut identity = identity.clone();
+        if let Some(download_id) = canonical_download_id {
+            identity.download_id = Some(download_id.to_wire());
+        }
+        self.get_identity_tracked_state_detail(&identity, source_identity)
+            .await
     }
 
     async fn list_for_client_items(

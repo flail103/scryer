@@ -799,6 +799,99 @@ async fn walk_saved_movie_result(
     .await
 }
 
+#[tokio::test]
+async fn missing_grab_keeps_saved_candidates_until_expiry_or_explicit_search() {
+    use crate::acquisition::pending::{PendingGrabOutcome, PendingGrabTrigger};
+    use crate::acquisition_workflow::StandbyRecoveryOutcome;
+    for explicit_search in [false, true] {
+        let release = "Saved.Missing.Fixture.2024.1080p.WEB-DL-GRP";
+        let (app, _title, wanted, standby, client, pending) =
+            saved_movie_result_fixture("Saved Missing Fixture", release).await;
+        let now = Utc::now();
+        let history = |grabbed_at: chrono::DateTime<Utc>| {
+            serde_json::json!({
+                "title": release, "score": 100, "grabbed_at": grabbed_at,
+                "missing_download_id": scryer_domain::download_identity::DownloadId::new(),
+            })
+            .to_string()
+        };
+        app.services
+            .workflow
+            .acquisition_scope_states
+            .update_acquisition_scope_status(
+                &wanted.id,
+                "wanted",
+                wanted.last_search_at.as_deref(),
+                Some(&history(now - chrono::Duration::hours(1))),
+            )
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            assert!(matches!(
+                walk_saved_movie_result(&app, &wanted).await,
+                StandbyRecoveryOutcome::Deferred { .. }
+            ));
+        }
+        assert!(client.submitted_release_titles.lock().await.is_empty());
+        assert_eq!(
+            pending
+                .get_pending_release(&standby.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            PendingReleaseStatus::Standby
+        );
+        // Delay-expiry promotion goes through the same history admission.
+        assert_eq!(
+            app.try_grab_pending_release(
+                &wanted,
+                &standby,
+                &now,
+                PendingGrabTrigger::Automatic,
+                &crate::domain_events::DomainEventActor::system()
+            )
+            .await
+            .unwrap(),
+            PendingGrabOutcome::Deferred
+        );
+        let outcome = if explicit_search {
+            let snapshot = crate::acquisition_workflow::DownloadClientSnapshot::fetch(&app).await;
+            crate::acquisition_workflow::try_saved_candidates_with_trigger(
+                &app,
+                &wanted,
+                None,
+                None,
+                &snapshot,
+                &now,
+                &crate::domain_events::DomainEventActor::system(),
+                PendingGrabTrigger::InteractiveSearch,
+            )
+            .await
+        } else {
+            // Inject expired durable history, then run one ordinary scheduler
+            // step. No failure event or coverage invalidation wakes this grab.
+            app.services
+                .workflow
+                .acquisition_scope_states
+                .update_acquisition_scope_status(
+                    &wanted.id,
+                    "wanted",
+                    wanted.last_search_at.as_deref(),
+                    Some(&history(now - chrono::Duration::hours(13))),
+                )
+                .await
+                .unwrap();
+            walk_saved_movie_result(&app, &wanted).await
+        };
+        assert!(
+            matches!(outcome, StandbyRecoveryOutcome::Recovered { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(client.submitted_release_titles.lock().await.len(), 1);
+    }
+}
+
 /// A blocklisted saved result is skipped from reads alone, so repeating the
 /// walk while the block stands writes nothing. Lifting the block is a changed
 /// answer, and the row is claimed and grabbed.

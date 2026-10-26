@@ -1934,6 +1934,7 @@ const ko: LocaleDictionary = {
   "history.seedingStarted": "시딩 중",
   "history.seedingCompleted": "시딩 완료",
   "history.downloadIgnored": "무시됨",
+  "history.downloadMissing": "클라이언트에 표시되지 않음",
   "history.facet": "분류",
   "history.actions": "작업",
   "history.expandDetails": "이벤트 세부정보 펼치기",

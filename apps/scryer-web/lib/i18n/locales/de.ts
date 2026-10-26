@@ -2006,6 +2006,7 @@ const de: LocaleDictionary = {
   "history.seedingStarted": "Seedet",
   "history.seedingCompleted": "Seeding beendet",
   "history.downloadIgnored": "Ignoriert",
+  "history.downloadMissing": "Im Client nicht sichtbar",
   "history.facet": "Kategorie",
   "history.actions": "Aktionen",
   "history.expandDetails": "Ereignisdetails erweitern",

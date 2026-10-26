@@ -463,8 +463,10 @@ async fn queued_grab_claims_merge_same_release_episode_coverage() {
             &context,
             &[],
             &[],
+            true,
         )
-        .await;
+        .await
+        .expect("load recorded claims");
 
     assert_eq!(queued.len(), 1, "one release should have one queue entry");
     assert_eq!(
@@ -566,8 +568,16 @@ async fn a_ledger_claim_scores_with_the_listing_its_grab_froze() {
                 .await
                 .expect("seed grabbed scope");
             let claims = app
-                .grabbed_release_claims_for_scope(title, &membership.view(), context, &[], &[])
-                .await;
+                .grabbed_release_claims_for_scope(
+                    title,
+                    &membership.view(),
+                    context,
+                    &[],
+                    &[],
+                    true,
+                )
+                .await
+                .expect("grab claims load");
             assert_eq!(claims.len(), 1, "{claims:?}");
             assert!(claims[0].tier_index.is_some(), "the claim is re-derived");
             claims[0].score
@@ -18243,13 +18253,23 @@ async fn automatic_import_maps_a_double_episode_through_an_alternate_order_bridg
     );
 }
 
-/// Sonarr's `UpdateTrackable` drops a job the client stopped listing and never
-/// fails it (`TrackedDownloadService.cs:225-233`). The only durable trace is a
-/// `DownloadIgnored` history row. Absence must therefore end the binding, settle
-/// the submission on `ignored`, and leave nothing for blocklisting or retry to
-/// act on — and the released identity must be reusable at once.
+/// Absence is not an operator ignore or failure. The same attempt must be
+/// recoverable when the client lists the job again.
 #[tokio::test]
-async fn a_job_absent_from_an_authoritative_listing_is_dropped_not_failed() {
+async fn a_missing_download_keeps_its_identity_without_ignore_or_failure() {
+    exercise_missing_download_recovery(false).await;
+}
+
+#[tokio::test]
+async fn a_missing_download_delivers_failed_event_intent_before_recovery() {
+    exercise_missing_download_recovery(true).await;
+}
+
+async fn exercise_missing_download_recovery(fail_event_append: bool) {
+    let domain_events = Arc::new(MockDomainEventRepo::default());
+    domain_events
+        .fail_append
+        .store(fail_event_append, Ordering::SeqCst);
     let download_client = Arc::new(StubDownloadClient::default());
     let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     let pending_releases = Arc::new(TrackingPendingReleaseRepo::default());
@@ -18259,8 +18279,14 @@ async fn a_job_absent_from_an_authoritative_listing_is_dropped_not_failed() {
         pending_releases,
     );
     let registry = Arc::new(RecordingDownloadRegistry::default());
-    let app =
-        base_app.with_test_overrides(|services| services.with_download_registry(registry.clone()));
+    let scopes = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    *download_submissions.presence_scopes.lock().await = Some(scopes.clone());
+    let app = base_app.with_test_overrides(|services| {
+        services
+            .with_domain_events(domain_events.clone())
+            .with_download_registry(registry.clone())
+            .with_acquisition_scope_states(scopes.clone())
+    });
     let config =
         create_enabled_download_client_config(&app, &user, "Primary NZBGet", "nzbget").await;
     download_client
@@ -18293,38 +18319,251 @@ async fn a_job_absent_from_an_authoritative_listing_is_dropped_not_failed() {
         .await
         .expect("seed download submission");
 
+    let grabbed_at = Utc::now() - chrono::Duration::hours(1);
+    let grab_record = serde_json::json!({
+        "title": "Fixture.Vanished.2026.1080p.WEB-DL", "score": 100,
+        "grabbed_at": grabbed_at, "download_id": download_id,
+    });
+    let row = AcquisitionScopeState {
+        id: "missing-movie-scope".into(),
+        title_id: "title-vanished".into(),
+        title_name: None,
+        title_slug: None,
+        title_facet: None,
+        library_id: None,
+        library_name: None,
+        library_slug: None,
+        episode_id: None,
+        collection_id: None,
+        series_movie_link_id: None,
+        season_number: None,
+        episode_number: None,
+        media_type: "movie".into(),
+        last_search_at: Some(grabbed_at.to_rfc3339()),
+        status: AcquisitionScopeStatus::Grabbed,
+        grabbed_release: Some(grab_record.to_string()),
+        landed_bar: None,
+        latest_release_decision: None,
+        mismatch_recovery_eligible: false,
+        created_at: grabbed_at.to_rfc3339(),
+        updated_at: grabbed_at.to_rfc3339(),
+    };
+    scopes.upsert_acquisition_scope_state(&row).await.unwrap();
+
     crate::app_usecase_integration::drop_source_removed_from_client(&app, &source_identity).await;
 
     assert!(
-        registry.ended.lock().await.contains(&download_id),
-        "absence from an authoritative listing must end the binding"
+        !registry.ended.lock().await.contains(&download_id),
+        "absence must preserve the binding"
     );
     assert_eq!(
         download_submissions
             .get_tracked_state(&source_identity)
             .await
             .expect("tracked state should load"),
-        Some(TrackedDownloadState::Ignored.as_str().to_string()),
-        "a job removed from its client is ignored, never failed"
+        Some(TrackedDownloadState::Missing.as_str().to_string()),
+        "absence is a recoverable observation"
     );
+
+    // Repeated successful empty polls heal partial work but emit once.
+    crate::app_usecase_integration::drop_source_removed_from_client(&app, &source_identity).await;
+    let events = app
+        .services
+        .events
+        .domain_events
+        .list(&scryer_domain::DomainEventFilter::default())
+        .await
+        .expect("events load");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event.payload,
+                scryer_domain::DomainEventPayload::DownloadMissing(_)
+            ))
+            .count(),
+        usize::from(!fail_event_append)
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event.payload,
+        scryer_domain::DomainEventPayload::DownloadIgnored(_)
+            | scryer_domain::DomainEventPayload::DownloadFailed(_)
+    )));
+
+    let reopened = scopes
+        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(reopened.status, AcquisitionScopeStatus::Wanted);
+    assert_eq!(
+        reopened.last_search_at, row.last_search_at,
+        "absence retains coverage facts"
+    );
+    let retained: serde_json::Value =
+        serde_json::from_str(reopened.grabbed_release.as_deref().unwrap()).unwrap();
+    assert_eq!(retained["grabbed_at"], grab_record["grabbed_at"]);
+    assert_eq!(retained["download_id"], grab_record["download_id"]);
+    let title = make_due_hydration_title("title-vanished", MediaFacet::Movie, 1);
+    let context = app
+        .resolve_canonical_scoring_context(&title, &crate::builtin_default_quality_profile())
+        .await;
+    let membership = app
+        .scope_membership_for(&title, &SubmissionScope::Title)
+        .await;
+    let automatic_claims = app
+        .grabbed_release_claims_for_scope(&title, &membership.view(), &context, &[], &[], true)
+        .await
+        .unwrap();
+    assert_eq!(automatic_claims.len(), 1);
+    assert!(
+        app.grabbed_release_claims_for_scope(&title, &membership.view(), &context, &[], &[], false)
+            .await
+            .unwrap()
+            .is_empty(),
+        "explicit search bypasses only the missing history"
+    );
+
+    let mut intent = crate::acquisition::submission::CanonicalDownloadSubmissionIntent {
+        automatic: true,
+        request: DownloadClientAddRequest {
+            title: title.clone(),
+            search_facet: None,
+            purpose: crate::DownloadSubmissionPurpose::Standard,
+            download_id: Some(scryer_domain::download_identity::DownloadId::new()),
+            source_hint: None,
+            staged_nzb: None,
+            resolved_download_artifact: None,
+            source_kind: None,
+            source_title: Some("Fixture.Vanished.2026.1080p.WEB-DL".into()),
+            source_password: None,
+            category: None,
+            queue_priority: None,
+            download_directory: None,
+            release_title: Some("Fixture.Vanished.2026.1080p.WEB-DL".into()),
+            indexer_name: None,
+            indexer_id: None,
+            info_hash_hint: None,
+            seed_goal_ratio: None,
+            seed_goal_seconds: None,
+            tracker_min_seed_ratio: None,
+            tracker_min_seed_time_minutes: None,
+            season_pack_seed_ratio: None,
+            season_pack_seed_time_minutes: None,
+            is_recent: None,
+            season_pack: None,
+            pinned_download_client_id: None,
+            http: None,
+        },
+        scope: SubmissionScope::Title,
+        conflict_policy: SubmissionConflictPolicy::Abort,
+        request_signature: None,
+        source_provider_name: None,
+        release_size_bytes: None,
+        release_listing_json: None,
+        http_release: None,
+    };
+    for release in [
+        "Fixture.Vanished.2026.1080p.WEB-DL",
+        "Fixture.Vanished.2026.720p.WEB-DL",
+    ] {
+        intent.request.release_title = Some(release.into());
+        assert!(
+            matches!(
+                app.submit_canonical_download(intent.clone()).await.unwrap(),
+                crate::acquisition::submission::CanonicalDownloadSubmissionOutcome::Deferred
+            ),
+            "final admission must reject equal or worse candidates even if earlier evaluation admitted them"
+        );
+    }
 
     let reobserved = registry
         .resolve_observation(&ObservedClientJob {
-            locator: source_identity,
+            locator: source_identity.clone(),
             wire_token: None,
             observed_name: Some("Fixture.Vanished.2026.1080p.WEB-DL".to_string()),
             observed_at: Utc::now(),
         })
         .await
-        .expect("re-observation should resolve after the binding was ended");
+        .expect("re-observation should reuse the binding");
     let ObservationResolution::Resolved {
         download_id: reobserved_download_id,
         ..
     } = reobserved
     else {
-        panic!("re-observation should resolve to a fresh identity");
+        panic!("re-observation should resolve to the same identity");
     };
-    assert_ne!(reobserved_download_id, download_id);
+    assert_eq!(reobserved_download_id, download_id);
+    // A fresh tracker models restart: no in-memory state may be needed to
+    // restore the same attempt or its scope claims.
+    let mut tracker = crate::tracked_downloads::TrackedDownloadService::new();
+    let mut item = foreign_client_history_item("vanished-job-1");
+    item.client_id = config.id.clone();
+    item.client_type = "nzbget".into();
+    item.title_name = "Fixture.Vanished.2026.1080p.WEB-DL".into();
+    item.state = DownloadQueueState::Downloading;
+    domain_events.fail_append.store(false, Ordering::SeqCst);
+    let recovered = tracker
+        .track(&app, item)
+        .await
+        .expect("missing attempt recovers");
+    assert_eq!(recovered.download_id, download_id);
+    assert_eq!(
+        domain_events
+            .events
+            .lock()
+            .await
+            .iter()
+            .filter(|event| matches!(
+                event.payload,
+                scryer_domain::DomainEventPayload::DownloadMissing(_)
+            ))
+            .count(),
+        1,
+        "recovery must deliver the durable missing event exactly once"
+    );
+    assert_eq!(
+        download_submissions
+            .get_tracked_state(&source_identity)
+            .await
+            .unwrap(),
+        Some("downloading".into())
+    );
+    let restored = scopes
+        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(restored.status, AcquisitionScopeStatus::Grabbed);
+    assert_eq!(restored.grabbed_release, reopened.grabbed_release);
+    crate::app_usecase_integration::drop_source_removed_from_client(&app, &source_identity).await;
+    let events = app
+        .services
+        .events
+        .domain_events
+        .list(&scryer_domain::DomainEventFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event.payload,
+                scryer_domain::DomainEventPayload::DownloadMissing(_)
+            ))
+            .count(),
+        2,
+        "reappearance followed by absence starts a new event episode"
+    );
+    let missing_again = scopes
+        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        missing_again.grabbed_release, reopened.grabbed_release,
+        "a new missing episode never refreshes the original protection deadline"
+    );
 }
 
 /// A download that already reached a terminal outcome keeps it: the client

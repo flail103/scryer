@@ -710,7 +710,13 @@ fn submission_blocks_search_for_wanted_item(
         return false;
     }
 
-    if tracked_state == Some(scryer_domain::TrackedDownloadState::Failed) {
+    if matches!(
+        tracked_state,
+        Some(
+            scryer_domain::TrackedDownloadState::Failed
+                | scryer_domain::TrackedDownloadState::Missing
+        )
+    ) {
         return false;
     }
 
@@ -1161,6 +1167,7 @@ async fn arbitrate_and_commit_title_grabs(
     stats: &mut TitleWalkStats,
     cancellation: &tokio_util::sync::CancellationToken,
     initiated_by: &DomainEventActor,
+    automatic: bool,
 ) -> (usize, usize) {
     if proposals.is_empty() {
         return (0, 0);
@@ -1208,6 +1215,7 @@ async fn arbitrate_and_commit_title_grabs(
             now,
             &mut failures,
             initiated_by,
+            automatic,
         )
         .await;
         stats.record_grab_failures(failures);
@@ -1236,6 +1244,7 @@ async fn commit_grab_proposal(
     now: &DateTime<Utc>,
     failures: &mut GrabFailureTally,
     initiated_by: &DomainEventActor,
+    automatic: bool,
 ) -> Vec<String> {
     let GrabProposal {
         stage,
@@ -1255,6 +1264,7 @@ async fn commit_grab_proposal(
                 dl_snapshot,
                 now,
                 initiated_by,
+                automatic,
             )
             .await
             {
@@ -1281,6 +1291,7 @@ async fn commit_grab_proposal(
                 now,
                 failures,
                 initiated_by,
+                automatic,
             )
             .await
             {
@@ -1314,6 +1325,7 @@ async fn commit_grab_proposal(
                 now,
                 failures,
                 initiated_by,
+                automatic,
             )
             .await
             {
@@ -1820,6 +1832,7 @@ async fn try_series_pack_for_title(
         dl_snapshot,
         now,
         &session.options.initiated_by,
+        !session.options.intent.is_interactive(),
     )
     .await?;
     Ok((!episode_ids.is_empty()).then_some(episode_ids))
@@ -1998,6 +2011,7 @@ async fn plan_series_pack_for_title(
         &owned_episode_ids,
         claimed_episode_ids,
         reads,
+        !session.options.intent.is_interactive(),
     )
     .await?;
     let session_finalized = app
@@ -2092,6 +2106,7 @@ async fn commit_series_pack_proposal(
     dl_snapshot: &DownloadClientSnapshot,
     now: &DateTime<Utc>,
     initiated_by: &DomainEventActor,
+    automatic: bool,
 ) -> AppResult<Vec<String>> {
     let SeriesPackCommit {
         anchors,
@@ -2159,7 +2174,7 @@ async fn commit_series_pack_proposal(
             restore_standby_releases(app, anchor, &preserved_standby).await;
             return Err(error);
         }
-        let outcome = try_saved_candidates(
+        let outcome = try_saved_candidates_with_trigger(
             app,
             anchor,
             None,
@@ -2167,6 +2182,11 @@ async fn commit_series_pack_proposal(
             dl_snapshot,
             now,
             initiated_by,
+            if automatic {
+                super::pending::PendingGrabTrigger::Automatic
+            } else {
+                super::pending::PendingGrabTrigger::InteractiveSearch
+            },
         )
         .await;
         let (scope, standby_start, recovered) = match outcome {
@@ -2232,6 +2252,7 @@ async fn commit_season_pack_proposal(
     now: &DateTime<Utc>,
     failures: &mut GrabFailureTally,
     initiated_by: &DomainEventActor,
+    automatic: bool,
 ) -> AppResult<Vec<String>> {
     let season_num = commit.season;
     let season_key = commit.season_key.clone();
@@ -2285,6 +2306,7 @@ async fn commit_season_pack_proposal(
             let release_listing_json = ReleaseListingSnapshot::json_for_candidate(best_pack, *now);
             let canonical_result = app
                 .submit_canonical_download(CanonicalDownloadSubmissionIntent {
+                    automatic,
                     http_release: best_pack.http.clone(),
                     request: DownloadClientAddRequest {
                         http: None,
@@ -2339,7 +2361,10 @@ async fn commit_season_pack_proposal(
 
             let canonical_submission = match canonical_result {
                 Ok(CanonicalDownloadSubmissionOutcome::Accepted(submission)) => Ok(submission),
-                Ok(CanonicalDownloadSubmissionOutcome::Conflict(_)) => {
+                Ok(
+                    CanonicalDownloadSubmissionOutcome::Conflict(_)
+                    | CanonicalDownloadSubmissionOutcome::Deferred,
+                ) => {
                     break 'season_pack_candidates;
                 }
                 Err(error) => Err(error),
@@ -2412,6 +2437,7 @@ async fn commit_season_pack_proposal(
                             .map(|decision| decision.preference_score)
                             .unwrap_or(0),
                         "grabbed_at": now.to_rfc3339(),
+                    "download_id": grab.download_id,
                         "season_pack": true,
                         "source_provider": best_pack.source.clone(),
                         "release_listing_json": release_listing_json,
@@ -2586,6 +2612,7 @@ async fn evaluate_series_pack_candidates(
     owned_episode_ids: &HashSet<String>,
     claimed_episode_ids: &HashSet<String>,
     reads: &crate::acquisition::title_reads::TitleCatalogReads,
+    automatic: bool,
 ) -> AppResult<(Vec<IndexerSearchResult>, HashSet<String>)> {
     let mut groups = HashMap::<Vec<String>, Vec<(usize, IndexerSearchResult)>>::new();
     let mut collection_ids = HashSet::new();
@@ -2643,12 +2670,13 @@ async fn evaluate_series_pack_candidates(
         let mut scoped_subject = title_subject.clone();
         scoped_subject.submission_scope = SubmissionScope::EpisodeSet { episode_ids };
         for candidate in app
-            .evaluate_search_results_for_subject_with_reads(
+            .evaluate_search_results_for_subject_with_missing_history(
                 title,
                 &scoped_subject,
                 candidates,
                 false,
                 reads,
+                automatic,
             )
             .await?
         {
@@ -3086,6 +3114,7 @@ where
         &mut stats,
         &session.options.cancellation,
         &session.options.initiated_by,
+        !session.options.intent.is_interactive(),
     )
     .await;
     session.stats = stats;
@@ -3601,6 +3630,7 @@ async fn process_single_target(
             episode.as_ref(),
             cycle,
             &mut session.proposals,
+            !session.options.intent.is_interactive(),
         )
         .await;
     }
@@ -3615,7 +3645,7 @@ async fn process_single_target(
     let stale_standby_indexer_ids = if item.status == AcquisitionScopeStatus::Wanted
         && !item.id.is_empty()
     {
-        match try_saved_candidates(
+        match try_saved_candidates_with_trigger(
             app,
             item,
             None,
@@ -3623,6 +3653,11 @@ async fn process_single_target(
             dl_snapshot,
             now,
             &session.options.initiated_by,
+            if session.options.intent.is_interactive() {
+                super::pending::PendingGrabTrigger::InteractiveSearch
+            } else {
+                super::pending::PendingGrabTrigger::Automatic
+            },
         )
         .await
         {
@@ -4264,12 +4299,13 @@ async fn process_single_target(
     // One evaluation over the union, so the merged rows are ranked by the same
     // comparator as the rest rather than appended past it.
     let results = app
-        .evaluate_search_results_for_subject_with_reads(
+        .evaluate_search_results_for_subject_with_missing_history(
             &search_title,
             &subject,
             scored,
             false,
             &context.reads,
+            !session.options.intent.is_interactive(),
         )
         .await?;
     // A finalize failure withholds coverage (the scope re-searches next cycle)
@@ -4719,6 +4755,7 @@ async fn process_single_target(
         now,
         &mut grab_failures,
         &session.options.initiated_by,
+        !session.options.intent.is_interactive(),
     )
     .await;
     // Counted before the `?`: a scope whose submissions failed is a failed work
@@ -4898,6 +4935,7 @@ async fn propose_covered_episode_evidence(
     episode: Option<&Episode>,
     cycle: &BackgroundAcquisitionCycleCoordinator,
     proposals: &mut Vec<GrabProposal>,
+    automatic: bool,
 ) -> AppResult<()> {
     let title = &context.title;
     let Some(season) = episode
@@ -4920,12 +4958,13 @@ async fn propose_covered_episode_evidence(
     // One evaluation, the same one the live path runs, so a pack and an episode
     // are compared on scores produced by the same comparator.
     let results = app
-        .evaluate_search_results_for_subject_with_reads(
+        .evaluate_search_results_for_subject_with_missing_history(
             &search_title,
             &subject,
             extras,
             false,
             &context.reads,
+            automatic,
         )
         .await?;
 
@@ -5025,6 +5064,7 @@ async fn commit_scope_grab(
     now: &DateTime<Utc>,
     failures: &mut GrabFailureTally,
     initiated_by: &DomainEventActor,
+    automatic: bool,
 ) -> AppResult<ScopeGrabOutcome> {
     // A proposal built from in-hand evidence never reached the inline
     // `ensure_acquisition_scope_state`, and a grab needs its anchor row.
@@ -5184,6 +5224,7 @@ async fn commit_scope_grab(
         let release_listing_json = ReleaseListingSnapshot::json_for_candidate(candidate, *now);
         let canonical_result = app
             .submit_canonical_download(CanonicalDownloadSubmissionIntent {
+                automatic,
                 http_release: candidate.http.clone(),
                 request: DownloadClientAddRequest {
                     http: None,
@@ -5239,6 +5280,9 @@ async fn commit_scope_grab(
 
         let canonical_submission = match canonical_result {
             Ok(CanonicalDownloadSubmissionOutcome::Accepted(submission)) => Ok(submission),
+            Ok(CanonicalDownloadSubmissionOutcome::Deferred) => {
+                return Ok(ScopeGrabOutcome::Exhausted);
+            }
             Ok(CanonicalDownloadSubmissionOutcome::Conflict(_)) => {
                 // A submission for this release already exists: the scope is
                 // spoken for, and its saved list was handled when that grab ran.
@@ -5283,6 +5327,7 @@ async fn commit_scope_grab(
                     "title": candidate.title,
                     "score": candidate_score,
                     "grabbed_at": now.to_rfc3339(),
+                    "download_id": grab.download_id,
                     "source_provider": candidate.source.clone(),
                     "release_listing_json": release_listing_json,
                 })

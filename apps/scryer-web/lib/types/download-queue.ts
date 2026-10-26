@@ -38,6 +38,7 @@ export type DownloadQueueDeleteStatus =
   | "FAILED";
 
 export type TrackedDownloadState =
+  | "MISSING"
   | "DOWNLOADING"
   | "IMPORT_PENDING"
   | "IMPORTING"

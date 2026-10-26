@@ -1862,6 +1862,7 @@ const zh_CN: LocaleDictionary = {
   "history.seedingStarted": "做种中",
   "history.seedingCompleted": "做种完成",
   "history.downloadIgnored": "已忽略",
+  "history.downloadMissing": "客户端中不可见",
   "history.facet": "分类",
   "history.actions": "操作",
   "history.expandDetails": "展开事件详情",

@@ -3984,6 +3984,7 @@ const en: LocaleDictionary = {
   "history.seedingStarted": "Seeding",
   "history.seedingCompleted": "Seeding done",
   "history.downloadIgnored": "Ignored",
+  "history.downloadMissing": "Not visible in client",
   "history.facet": "Facet",
   "history.actions": "Actions",
   "history.expandDetails": "Expand event details",

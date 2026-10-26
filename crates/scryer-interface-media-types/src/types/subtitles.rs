@@ -241,6 +241,7 @@ pub enum TitleHistoryEventTypeValue {
     TitleMoved,
     /// Download was ignored.
     DownloadIgnored,
+    DownloadMissing,
     /// Title or file was rematched.
     Rematched,
     /// Torrent was imported and its client entry retained while it seeds.
@@ -268,6 +269,7 @@ impl TitleHistoryEventTypeValue {
             Self::FileRenamed => TitleHistoryEventType::FileRenamed,
             Self::TitleMoved => TitleHistoryEventType::TitleMoved,
             Self::DownloadIgnored => TitleHistoryEventType::DownloadIgnored,
+            Self::DownloadMissing => TitleHistoryEventType::DownloadMissing,
             Self::Rematched => TitleHistoryEventType::Rematched,
             Self::SeedingStarted => TitleHistoryEventType::SeedingStarted,
             Self::SeedingCompleted => TitleHistoryEventType::SeedingCompleted,

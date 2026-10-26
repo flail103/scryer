@@ -36,8 +36,8 @@ test("download ignored is a first-class history event, not the unknown fallback"
 test("Activity History lists ignored downloads by default", () => {
   // The Activity History page sends this set as its event-type filter whenever
   // no chip is active, so an event missing from it is invisible there even
-  // though the product recorded it. An ignored download is the only durable
-  // trace of a job that left the queue without importing.
+  // though the product recorded it. Explicit ignores retain their own history
+  // separately from client disappearance.
   assert.ok(
     (WANTED_HISTORY_FILTERS as readonly string[]).includes("download_ignored"),
     "download_ignored must be in the default Activity History query",
@@ -86,6 +86,7 @@ test("every history filter maps to the domain events that produce it", () => {
   assert.deepEqual(domainEventTypesForHistoryEvents([...WANTED_HISTORY_FILTERS]), [
     "DOWNLOAD_FAILED",
     "DOWNLOAD_IGNORED",
+    "DOWNLOAD_MISSING",
     "IMPORT_COMPLETED",
     "IMPORT_REJECTED",
     "RELEASE_BLOCKLISTED",

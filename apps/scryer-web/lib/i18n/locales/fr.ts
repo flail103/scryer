@@ -2035,6 +2035,7 @@ const fr: LocaleDictionary = {
   "history.seedingStarted": "Partage",
   "history.seedingCompleted": "Partage terminé",
   "history.downloadIgnored": "Ignoré",
+  "history.downloadMissing": "Invisible dans le client",
   "history.facet": "Catégorie",
   "history.actions": "Actions",
   "history.expandDetails": "Afficher les détails de l'événement",

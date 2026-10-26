@@ -2015,6 +2015,7 @@ const it: LocaleDictionary = {
   "history.seedingStarted": "In seeding",
   "history.seedingCompleted": "Seeding completato",
   "history.downloadIgnored": "Ignorato",
+  "history.downloadMissing": "Non visibile nel client",
   "history.facet": "Categoria",
   "history.actions": "Azioni",
   "history.expandDetails": "Espandi i dettagli dell'evento",

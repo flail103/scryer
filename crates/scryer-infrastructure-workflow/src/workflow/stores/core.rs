@@ -1339,6 +1339,12 @@ pub fn build_title_history_filter_sql(
                             DomainEventType::SeedingCompleted.as_str().into(),
                         ));
                     }
+                    TitleHistoryEventType::DownloadMissing => {
+                        parts.push("event_type = {}".to_string());
+                        args.push(SqlArg::Text(
+                            DomainEventType::DownloadMissing.as_str().into(),
+                        ));
+                    }
                     TitleHistoryEventType::DownloadIgnored => {
                         parts.push("event_type = {}".to_string());
                         args.push(SqlArg::Text(
@@ -1462,6 +1468,7 @@ pub const TITLE_HISTORY_PAGE_DOMAIN_EVENT_TYPES: &[DomainEventType] = &[
     DomainEventType::ImportRejected,
     DomainEventType::DownloadFailed,
     DomainEventType::DownloadIgnored,
+    DomainEventType::DownloadMissing,
     DomainEventType::ReleaseBlocklisted,
     DomainEventType::MediaFileAnalyzed,
     DomainEventType::MediaFileUpgraded,

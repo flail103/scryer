@@ -1977,6 +1977,7 @@ const ja: LocaleDictionary = {
   "history.seedingStarted": "シード中",
   "history.seedingCompleted": "シード完了",
   "history.downloadIgnored": "無視",
+  "history.downloadMissing": "クライアントに表示されていません",
   "history.facet": "カテゴリ",
   "history.actions": "操作",
   "history.expandDetails": "イベント詳細を展開",

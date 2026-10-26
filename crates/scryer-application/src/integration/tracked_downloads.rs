@@ -587,6 +587,134 @@ impl TrackedDownloadService {
             .catalog
             .catalog_generation
             .load(std::sync::atomic::Ordering::Relaxed);
+        // A positive observation recovers the same canonical attempt. Clear
+        // only Missing: terminal/import states must survive reappearance.
+        let repository = &app.services.workflow.download_submissions;
+        let identity = observed_queue_item_identity(&client_item);
+        let source = queue_item_source_identity(&client_item);
+        let recovered = match repository
+            .get_identity_tracked_state_for_download(Some(&download_id), &identity, Some(&source))
+            .await
+        {
+            Ok(state) => state.as_deref() == Some("missing"),
+            Err(_) => return None,
+        };
+        if recovered {
+            let submission = match repository
+                .find_by_client_item_id_for_download(Some(&download_id), &source)
+                .await
+            {
+                Ok(Some(submission)) => submission,
+                _ => return None,
+            };
+            let _title_guard = app
+                .runtime
+                .acquisition
+                .download_submission_guards
+                .acquire_title(&submission.title_id)
+                .await;
+            if repository
+                .get_identity_tracked_state_for_download(
+                    Some(&download_id),
+                    &identity,
+                    Some(&source),
+                )
+                .await
+                .ok()
+                .flatten()
+                .as_deref()
+                != Some("missing")
+            {
+                return None;
+            }
+            // Deliver a committed missing intent before recovery clears it.
+            // A failed event append followed immediately by reappearance must
+            // not erase the only durable evidence of the missing episode.
+            let event = match repository
+                .get_identity_tracked_state_detail_for_download(
+                    Some(&download_id),
+                    &identity,
+                    Some(&source),
+                )
+                .await
+            {
+                Ok(Some(detail)) => {
+                    match serde_json::from_str::<scryer_domain::NewDomainEvent>(&detail) {
+                        Ok(event) => event,
+                        Err(_) => return None,
+                    }
+                }
+                _ => return None,
+            };
+            if app
+                .services
+                .events
+                .domain_events
+                .append_once(event)
+                .await
+                .is_err()
+            {
+                return None;
+            }
+            let rows = match app
+                .services
+                .workflow
+                .acquisition_scope_states
+                .list_acquisition_scope_states_for_title_ids(std::slice::from_ref(
+                    &submission.title_id,
+                ))
+                .await
+            {
+                Ok(rows) => rows,
+                Err(_) => return None,
+            };
+            let scopes = rows
+                .into_iter()
+                .filter_map(|row| {
+                    let owns_missing_claim = row.status == crate::AcquisitionScopeStatus::Wanted
+                        && row
+                            .grabbed_release
+                            .as_deref()
+                            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                            .and_then(|value| value.get("missing_download_id").cloned())
+                            == Some(serde_json::json!(download_id));
+                    owns_missing_claim.then(|| crate::ClientPresenceScopeUpdate {
+                        grabbed_release: row
+                            .grabbed_release
+                            .clone()
+                            .expect("owned claim has grab facts"),
+                        previous: row,
+                        status: crate::AcquisitionScopeStatus::Grabbed,
+                    })
+                })
+                .collect();
+            // Identity, submission and claims change together. A concurrent
+            // terminal/import outcome rejects the entire stale observation.
+            if !matches!(
+                repository
+                    .transition_client_presence(&crate::ClientPresenceTransition {
+                        download_id,
+                        source: source.clone(),
+                        identity,
+                        expected_state: Some("missing".into()),
+                        state: TrackedDownloadState::Downloading,
+                        reason: None,
+                        detail: None,
+                        scopes,
+                    })
+                    .await,
+                Ok(true)
+            ) {
+                return None;
+            }
+            if let Some(existing) = self.cache.get_mut(&download_id) {
+                existing.state = TrackedDownloadState::Downloading;
+            }
+            app.runtime
+                .acquisition
+                .download_submission_guards
+                .invalidate_client_snapshots();
+        }
         let existing = self.cache.get_mut(&download_id);
 
         if let Some(existing) = existing {

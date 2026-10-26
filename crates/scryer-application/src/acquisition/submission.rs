@@ -9,6 +9,8 @@ use crate::services::{CanonicalSubmissionTitleState, UncertainDownloadSubmission
 
 #[derive(Clone)]
 pub(crate) struct CanonicalDownloadSubmissionIntent {
+    /// Automatic submissions must recheck recent missing-download history under the title lock.
+    pub automatic: bool,
     pub request: DownloadClientAddRequest,
     pub scope: SubmissionScope,
     pub conflict_policy: SubmissionConflictPolicy,
@@ -25,6 +27,8 @@ pub(crate) struct CanonicalDownloadSubmissionIntent {
 pub(crate) enum CanonicalDownloadSubmissionOutcome {
     Accepted(CanonicalDownloadSubmission),
     Conflict(SubmissionScopeConflict),
+    /// Admission could not establish that another automatic grab is safe.
+    Deferred,
 }
 
 pub(crate) struct CanonicalDownloadSubmission {
@@ -342,6 +346,14 @@ impl AppUseCase {
             .download_submission_guards
             .acquire_title(&title_id)
             .await;
+
+        if intent.automatic
+            && let Err(error) = self.require_recent_missing_grab_admission(&intent).await
+        {
+            tracing::warn!(title_id = %title_id, reason = ?error.validation_reason(), error = %error,
+                "automatic submission deferred by recent-grab admission");
+            return Ok(CanonicalDownloadSubmissionOutcome::Deferred);
+        }
 
         let _location_guard = self
             .acquire_location_title_mutation(
@@ -946,7 +958,10 @@ impl AppUseCase {
 
         Ok(CanonicalDownloadSubmissionOutcome::Accepted(
             CanonicalDownloadSubmission {
-                grab,
+                grab: DownloadGrabResult {
+                    download_id: Some(download_id),
+                    ..grab
+                },
                 newly_submitted: true,
             },
         ))
@@ -1141,6 +1156,7 @@ fn grab_submission_result_label(
             }
         }
         Ok(CanonicalDownloadSubmissionOutcome::Conflict(_)) => RESULT_CONFLICT,
+        Ok(CanonicalDownloadSubmissionOutcome::Deferred) => RESULT_DEFERRED,
         Err(err) => grab_error_result_label(err),
     }
 }

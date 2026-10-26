@@ -99,6 +99,10 @@ type HistoryEventDetailEntry = {
   value: string;
 };
 
+const DOWNLOAD_REASON_KEYS: Readonly<Record<string, string>> = {
+  DOWNLOAD_CLIENT_ITEM_MISSING: "history.downloadMissing",
+};
+
 export function buildHistoryEventDetail(event: TitleHistoryEvent): {
   structuredDetails: HistoryEventDetailEntry[];
   rawDetails: Array<[string, unknown]>;
@@ -176,7 +180,9 @@ export function HistoryEventDetailContent({ event }: { event: TitleHistoryEvent 
         <div key={key} className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-xs @min-[28rem]/history-detail:grid-cols-[max-content_minmax(0,1fr)]">
           <span className="text-muted-foreground">{formatKey(key)}</span>
           <span className={cn("min-w-0 text-foreground", key.endsWith("_path") && "font-[var(--font-code)]")}>
-            {formatValue(value, key)}
+            {key === "reason" && DOWNLOAD_REASON_KEYS[value]
+              ? t(DOWNLOAD_REASON_KEYS[value])
+              : formatValue(value, key)}
           </span>
         </div>
       ))}

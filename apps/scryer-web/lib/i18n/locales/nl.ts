@@ -3348,6 +3348,7 @@ const nl: LocaleDictionary = {
   "history.seedingStarted": "Seeden",
   "history.seedingCompleted": "Seeden voltooid",
   "history.downloadIgnored": "Genegeerd",
+  "history.downloadMissing": "Niet zichtbaar in client",
   "history.facet": "Facet",
   "history.actions": "Acties",
   "history.expandDetails": "Gebeurtenisdetails uitklappen",

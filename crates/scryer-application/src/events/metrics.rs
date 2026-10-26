@@ -291,6 +291,7 @@ fn payload_title(payload: &DomainEventPayload) -> Option<&TitleContextSnapshot> 
         DomainEventPayload::SubtitleDownloaded(data) => Some(&data.title),
         DomainEventPayload::SubtitleSearchFailed(data) => Some(&data.title),
         DomainEventPayload::DownloadIgnored(data) => data.title.as_ref(),
+        DomainEventPayload::DownloadMissing(data) => data.title.as_ref(),
         DomainEventPayload::SeedingStarted(data) => data.title.as_ref(),
         DomainEventPayload::SeedingCompleted(data) => data.title.as_ref(),
         DomainEventPayload::ListTitleAdded(data) => Some(&data.title),

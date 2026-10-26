@@ -327,6 +327,7 @@ pub const SUPPORTED_TITLE_HISTORY_EVENT_TYPES: &[TitleHistoryEventType] = &[
     TitleHistoryEventType::FileRenamed,
     TitleHistoryEventType::TitleMoved,
     TitleHistoryEventType::DownloadIgnored,
+    TitleHistoryEventType::DownloadMissing,
     TitleHistoryEventType::Rematched,
     TitleHistoryEventType::SeedingStarted,
     TitleHistoryEventType::SeedingCompleted,
@@ -348,6 +349,7 @@ const TITLE_HISTORY_DOMAIN_EVENT_TYPES: &[DomainEventType] = &[
     DomainEventType::MediaFileRenamed,
     DomainEventType::MediaRequestSubmitted,
     DomainEventType::DownloadIgnored,
+    DomainEventType::DownloadMissing,
     DomainEventType::SeedingStarted,
     DomainEventType::SeedingCompleted,
 ];

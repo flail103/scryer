@@ -107,6 +107,7 @@ pub use ports::{
     AnimeSearchNumberingContext, CatalogOwnedExternalIdRecord, CatalogOwnedTitleRecord,
     IndexerSearchNumberingContext, TitleOptionsPatch,
 };
+pub use ports::{ClientPresenceScopeUpdate, ClientPresenceTransition};
 pub use ports::{
     DOWNLOAD_PASSWORD_AMBIGUOUS_REASON, DOWNLOAD_PASSWORD_REQUIRED_REASON,
     DOWNLOAD_PASSWORD_RETRY_DISPATCH_TIMEOUT, DOWNLOAD_PASSWORD_RETRY_REASON,

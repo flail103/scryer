@@ -379,6 +379,24 @@ impl DownloadSubmissionGuardTable {
         self.invalidate_client_snapshots();
     }
 
+    /// A missing submission keeps its identity, but no longer claims an
+    /// accepted client job. Preserve other submissions accepted for this title.
+    pub(crate) fn release_missing_claim(
+        &self,
+        title_id: &str,
+        download_id: scryer_domain::download_identity::DownloadId,
+    ) {
+        if let Some(state) = self
+            .title_states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(title_id)
+        {
+            state.accepted_download_ids.remove(&download_id);
+        }
+        self.invalidate_client_snapshots();
+    }
+
     /// Both client-state caches stop describing the clients: a grab was just
     /// submitted, or a download settled. The next reader re-asks.
     ///
@@ -601,5 +619,27 @@ impl PluginOperationGuardTable {
         };
 
         lock.lock_owned().await
+    }
+}
+
+#[cfg(test)]
+mod missing_claim_tests {
+    use super::*;
+
+    #[test]
+    fn missing_claim_releases_only_its_own_accepted_job() {
+        let guards = DownloadSubmissionGuardTable::default();
+        let missing = scryer_domain::download_identity::DownloadId::new();
+        let other = scryer_domain::download_identity::DownloadId::new();
+        let mut state = CanonicalSubmissionTitleState::new(Vec::new(), Vec::new());
+        state.accepted_download_ids.extend([missing, other]);
+        guards.store_title_state("title", state);
+        guards.release_missing_claim("title", missing);
+        guards.release_missing_claim("title", missing);
+        let states = guards.title_states.lock().unwrap();
+        assert_eq!(
+            states["title"].accepted_download_ids,
+            HashSet::from([other])
+        );
     }
 }

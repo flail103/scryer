@@ -205,7 +205,10 @@ impl DownloadRegistryRepository for DownloadRegistryStore {
                AND b.native_item_id IS NOT NULL
                AND b.created_at < {}
                AND d.origin = 'scryer_submission'
-               AND d.first_observed_at IS NULL
+               AND (d.first_observed_at IS NULL OR EXISTS (
+                   SELECT 1 FROM download_identity_states st
+                   WHERE st.canonical_download_id = d.id AND st.tracked_state = 'missing'
+               ))
                AND d.terminal_at IS NULL
              ORDER BY b.created_at, b.download_id",
             &[SqlArg::Timestamp(created_before)],
@@ -245,8 +248,8 @@ impl DownloadRegistryRepository for DownloadRegistryStore {
     ///
     /// Every caller reaches here because Scryer is *done* with the download: a
     /// completed queue or history delete
-    /// (`integration::download_queue_commands`), a download removed from its
-    /// client and recorded as ignored (`integration::workflow::tracked_commands`),
+    /// (`integration::download_queue_commands`), an explicit operator ignore
+    /// (`integration::workflow::tracked_commands`),
     /// or a stale binding proven by a completed delete
     /// (`download_identity::heal_binding_after_completed_delete`). So the
     /// download is marked terminal in the same transaction.
@@ -1117,6 +1120,7 @@ mod tests {
              CREATE TABLE download_identity_states (
                  id TEXT,
                  canonical_download_id TEXT,
+                 tracked_state TEXT,
                  reason TEXT
              );
              CREATE TABLE download_clients (
@@ -1540,6 +1544,25 @@ mod tests {
                 .map(|binding| binding.download_id.to_string())
                 .collect::<Vec<_>>(),
             vec![FIRST_ID.to_string()]
+        );
+
+        // A previously observed missing attempt remains recoverable after a
+        // restart, including retries of partially persisted scope transitions.
+        SqlRuntime::execute(store.datastore.read_exec(),
+            "INSERT INTO download_identity_states (canonical_download_id, tracked_state) VALUES ({}, {})",
+            &[SqlArg::Text(SECOND_ID.into()), SqlArg::Text("missing".into())])
+            .await.unwrap();
+        let mut recovering = store
+            .list_never_observed_submission_bindings(after_creation)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|binding| binding.download_id.to_string())
+            .collect::<Vec<_>>();
+        recovering.sort();
+        assert_eq!(
+            recovering,
+            vec![FIRST_ID.to_string(), SECOND_ID.to_string()]
         );
 
         // Still inside the grace window: the cutoff precedes the submission.

@@ -1864,7 +1864,10 @@ async fn release_unconfirmed_grab_intent(
         UnconfirmedGrabAge::PastGrace => format!(
             "the download client never confirmed this grab (Scryer restarted or the client answered ambiguously); released after {UNCONFIRMED_GRAB_RELEASE_GRACE_MINUTES} minutes"
         ),
-        UnconfirmedGrabAge::BeforeRestart => "the download client never confirmed this grab before Scryer restarted; released".to_string(),
+        UnconfirmedGrabAge::BeforeRestart => {
+            "the download client never confirmed this grab before Scryer restarted; released"
+                .to_string()
+        }
     };
     let failure_reason = if wanted_items.is_empty() {
         unconfirmed
@@ -2028,6 +2031,7 @@ async fn prune_standby_candidates(app: &AppUseCase) {
 /// claimed or judged, so a covered scope costs one judged row per cycle; a
 /// row reaching beyond every covered scope (a pack with members still
 /// missing) is judged as usual.
+#[cfg(test)]
 pub(crate) async fn try_saved_candidates(
     app: &AppUseCase,
     item: &AcquisitionScopeState,
@@ -2036,6 +2040,29 @@ pub(crate) async fn try_saved_candidates(
     dl_snapshot: &DownloadClientSnapshot,
     now: &DateTime<Utc>,
     initiated_by: &DomainEventActor,
+) -> StandbyRecoveryOutcome {
+    try_saved_candidates_with_trigger(
+        app,
+        item,
+        failed_release_title,
+        excluded_episode_ids,
+        dl_snapshot,
+        now,
+        initiated_by,
+        super::pending::PendingGrabTrigger::Automatic,
+    )
+    .await
+}
+
+pub(crate) async fn try_saved_candidates_with_trigger(
+    app: &AppUseCase,
+    item: &AcquisitionScopeState,
+    failed_release_title: Option<&str>,
+    excluded_episode_ids: Option<&HashSet<String>>,
+    dl_snapshot: &DownloadClientSnapshot,
+    now: &DateTime<Utc>,
+    initiated_by: &DomainEventActor,
+    trigger: super::pending::PendingGrabTrigger,
 ) -> StandbyRecoveryOutcome {
     // A waiting row is already the chosen best candidate. Never claim a
     // lower-ranked standby release while the delay-promotion lane owns it.
@@ -2297,12 +2324,7 @@ pub(crate) async fn try_saved_candidates(
             }
             if !blind_queue || route_pinned {
                 let judgement = app
-                    .judge_pending_release(
-                        &effective_wanted,
-                        &standby,
-                        now,
-                        super::pending::PendingGrabTrigger::Automatic,
-                    )
+                    .judge_pending_release(&effective_wanted, &standby, now, trigger)
                     .await;
                 if let Ok(super::pending::PendingJudgement::Decided(
                     super::pending::PendingGrabOutcome::QueueCovered {
@@ -2407,7 +2429,7 @@ pub(crate) async fn try_saved_candidates(
                     &effective_wanted,
                     &standby,
                     now,
-                    super::pending::PendingGrabTrigger::Automatic,
+                    trigger,
                     *admitted,
                     initiated_by,
                 )
@@ -2419,7 +2441,7 @@ pub(crate) async fn try_saved_candidates(
                     &effective_wanted,
                     &standby,
                     now,
-                    super::pending::PendingGrabTrigger::Automatic,
+                    trigger,
                     initiated_by,
                 )
                 .await
@@ -2876,8 +2898,18 @@ mod client_snapshot_tests {
         assert_eq!(row.status, PendingReleaseStatus::Standby);
         assert_eq!(row.http_release, Some(release));
 
-        let plain = IndexerSearchResult { http: None, ..candidate };
-        let row = standby_row("wanted", "title", &plain, "https://x.invalid/a.nzb".into(), 0, &Utc::now());
+        let plain = IndexerSearchResult {
+            http: None,
+            ..candidate
+        };
+        let row = standby_row(
+            "wanted",
+            "title",
+            &plain,
+            "https://x.invalid/a.nzb".into(),
+            0,
+            &Utc::now(),
+        );
         assert_eq!(row.http_release, None);
     }
 

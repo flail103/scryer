@@ -1740,6 +1740,67 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
         Ok(None)
     }
 
+    async fn transition_client_presence(
+        &self,
+        transition: &scryer_application::ClientPresenceTransition,
+    ) -> AppResult<bool> {
+        let transition = transition.clone();
+        SqlRuntime::run_in_transaction(&self.datastore, "transition_client_presence", move |tx| {
+            let transition = transition.clone();
+            Box::pin(async move {
+                let id = transition.download_id.to_string();
+                super::import_store::guard_import_retry_tx(tx, &id).await?;
+                let previous = SqlRuntime::fetch_optional(SqlExec::Tx(tx),
+                    "SELECT tracked_state FROM download_identity_states WHERE canonical_download_id = {} ORDER BY updated_at DESC, id DESC LIMIT 1",
+                    &[SqlArg::Text(id.clone())]).await?
+                    .map(|row| row.text("tracked_state")).transpose()?;
+                if previous != transition.expected_state
+                    || previous.as_deref().is_some_and(|state| !matches!(state, "missing" | "downloading")) {
+                    return Ok(false);
+                }
+                let submission = SqlRuntime::fetch_optional(SqlExec::Tx(tx),
+                    "SELECT tracked_state FROM download_submissions WHERE id = {}",
+                    &[SqlArg::Text(id.clone())]).await?;
+                let Some(submission) = submission else { return Ok(false); };
+                if submission.opt_text("tracked_state")?.as_deref()
+                    .is_some_and(|state| !matches!(state, "missing" | "downloading")) {
+                    return Ok(false);
+                }
+                if !matches!(transition.state, TrackedDownloadState::Missing | TrackedDownloadState::Downloading) {
+                    return Err(AppError::Repository("invalid client presence transition".into()));
+                }
+                let now = Utc::now();
+                let state = transition.state.as_str().to_string();
+                SqlRuntime::execute(SqlExec::Tx(tx),
+                    "INSERT INTO download_identity_states
+                     (id, identity_key, canonical_download_id, download_id, client_id, client_type,
+                      download_client_item_id, tracked_state, reason, detail, created_at, updated_at)
+                     VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+                     ON CONFLICT(identity_key) DO UPDATE SET tracked_state = excluded.tracked_state,
+                     reason = excluded.reason, detail = excluded.detail, updated_at = excluded.updated_at",
+                    &[SqlArg::Text(Id::new().0), SqlArg::Text(canonical_tracked_state_key(&transition.download_id)),
+                      SqlArg::Text(id.clone()), SqlArg::OptText(transition.identity.download_id),
+                      SqlArg::Text(normalize_download_client_id(transition.source.client_id.as_deref())),
+                      SqlArg::Text(transition.source.client_type), SqlArg::Text(transition.source.item_id),
+                      SqlArg::Text(state.clone()), SqlArg::OptText(transition.reason), SqlArg::OptText(transition.detail),
+                      SqlArg::Timestamp(now), SqlArg::Timestamp(now)]).await?;
+                SqlRuntime::execute(SqlExec::Tx(tx),
+                    "UPDATE download_submissions SET tracked_state = {}, tracked_state_at = {} WHERE id = {}",
+                    &[SqlArg::Text(state), SqlArg::Timestamp(now), SqlArg::Text(id)]).await?;
+                for change in transition.scopes {
+                    SqlRuntime::execute(SqlExec::Tx(tx),
+                        "UPDATE wanted_items SET status = {}, grabbed_release = {}, updated_at = {}
+                         WHERE id = {} AND status = {} AND COALESCE(grabbed_release, '') = {}",
+                        &[SqlArg::Text(change.status.as_str().into()),
+                          SqlArg::Text(change.grabbed_release), SqlArg::Timestamp(now), SqlArg::Text(change.previous.id),
+                          SqlArg::Text(change.previous.status.as_str().into()),
+                          SqlArg::Text(change.previous.grabbed_release.unwrap_or_default())]).await?;
+                }
+                Ok(true)
+            })
+        }).await
+    }
+
     async fn upsert_identity_tracked_state_for_download_returning_previous(
         &self,
         target: IdentityTrackedStateTarget<'_>,
@@ -5481,6 +5542,145 @@ mod seed_goal_tests {
             row.opt_text("download_id").expect("legacy download id"),
             Some("legacy-failure-id".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn client_presence_transition_is_atomic_and_preserves_superseding_outcomes() {
+        use scryer_application::{
+            AcquisitionScopeState, AcquisitionScopeStatus, ClientPresenceScopeUpdate,
+            ClientPresenceTransition,
+        };
+        let store = store().await;
+        let id = DownloadId::new();
+        let submission = submission(id, "presence-job", "title-1");
+        store.record_submission(submission.clone()).await.unwrap();
+        SqlRuntime::execute(store.datastore.read_exec(),
+            "CREATE TABLE wanted_items (id TEXT PRIMARY KEY, status TEXT, grabbed_release TEXT CHECK(grabbed_release != 'reject'), updated_at TEXT)", &[]).await.unwrap();
+        SqlRuntime::execute(store.datastore.read_exec(),
+            "INSERT INTO wanted_items (id, status, grabbed_release) VALUES ('scope-1', 'grabbed', 'original')", &[]).await.unwrap();
+        let previous = AcquisitionScopeState {
+            id: "scope-1".into(),
+            title_id: "title-1".into(),
+            title_name: None,
+            title_slug: None,
+            title_facet: None,
+            library_id: None,
+            library_name: None,
+            library_slug: None,
+            episode_id: None,
+            collection_id: None,
+            series_movie_link_id: None,
+            season_number: None,
+            episode_number: None,
+            media_type: "movie".into(),
+            status: AcquisitionScopeStatus::Grabbed,
+            last_search_at: None,
+            grabbed_release: Some("original".into()),
+            landed_bar: None,
+            latest_release_decision: None,
+            mismatch_recovery_eligible: false,
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+        let mut transition = ClientPresenceTransition {
+            download_id: id,
+            source: ClientJobLocator::from_submission(&submission),
+            identity: DownloadSubmissionIdentity::default(),
+            expected_state: None,
+            state: TrackedDownloadState::Missing,
+            reason: Some("DOWNLOAD_CLIENT_ITEM_MISSING".into()),
+            detail: Some("durable-event-intent".into()),
+            scopes: vec![ClientPresenceScopeUpdate {
+                previous,
+                status: AcquisitionScopeStatus::Wanted,
+                grabbed_release: "reject".into(),
+            }],
+        };
+        // A failed scope write cannot leave the canonical marker or submission half transitioned.
+        assert!(store.transition_client_presence(&transition).await.is_err());
+        assert_eq!(
+            store
+                .get_identity_tracked_state_for_download(
+                    Some(&id),
+                    &transition.identity,
+                    Some(&transition.source)
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store.get_tracked_state(&transition.source).await.unwrap(),
+            None
+        );
+        transition.scopes[0].grabbed_release = "retained".into();
+        assert!(store.transition_client_presence(&transition).await.unwrap());
+        assert_eq!(
+            store
+                .get_tracked_state(&transition.source)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("missing")
+        );
+        let scope = SqlRuntime::fetch_optional(
+            store.datastore.read_exec(),
+            "SELECT status, grabbed_release FROM wanted_items WHERE id = 'scope-1'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(scope.text("status").unwrap(), "wanted");
+        assert_eq!(scope.text("grabbed_release").unwrap(), "retained");
+        transition.expected_state = Some("missing".into());
+        transition.state = TrackedDownloadState::Downloading;
+        transition.scopes[0].previous.status = AcquisitionScopeStatus::Wanted;
+        transition.scopes[0].previous.grabbed_release = Some("retained".into());
+        transition.scopes[0].status = AcquisitionScopeStatus::Grabbed;
+        for protected in [
+            "ignored",
+            "imported",
+            "failed",
+            "import_pending",
+            "importing",
+            "import_blocked",
+            "imported_seeding",
+        ] {
+            // An outcome wins after the observer read Missing, before it writes.
+            store
+                .record_identity_tracked_state_for_download(
+                    Some(&id),
+                    &transition.identity,
+                    Some(&transition.source),
+                    protected,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(
+                !store.transition_client_presence(&transition).await.unwrap(),
+                "{protected}"
+            );
+            let scope = SqlRuntime::fetch_optional(
+                store.datastore.read_exec(),
+                "SELECT status FROM wanted_items WHERE id = 'scope-1'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(scope.text("status").unwrap(), "wanted");
+            assert_eq!(
+                store
+                    .get_tracked_state(&transition.source)
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("missing")
+            );
+        }
     }
 
     #[tokio::test]

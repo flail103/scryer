@@ -119,6 +119,19 @@ pub(crate) fn activity_event_from_domain_event(event: &DomainEvent) -> Option<Ac
                 })
                 .unwrap_or_else(|| "Blocklisted a release.".to_string()),
         ),
+        DomainEventPayload::DownloadMissing(data) => (
+            ActivityKind::SystemNotice,
+            ActivitySeverity::Warning,
+            data.title
+                .as_ref()
+                .map(|title| {
+                    format!(
+                        "Download for '{}' is not visible in its client.",
+                        title.title_name
+                    )
+                })
+                .unwrap_or_else(|| "Download is not visible in its client.".to_string()),
+        ),
         DomainEventPayload::DownloadIgnored(data) => (
             ActivityKind::SystemNotice,
             ActivitySeverity::Info,
@@ -661,6 +674,27 @@ pub(crate) fn title_history_record_from_domain_event(
             None,
             data.source_path.clone(),
             data.dest_path.clone(),
+        ),
+        DomainEventPayload::DownloadMissing(data) => (
+            data.title.as_ref().map(|title| title.title_name.clone()),
+            data.title.as_ref().map(|title| title.facet.clone()),
+            TitleHistoryEventType::DownloadMissing,
+            data.source_title.clone(),
+            data.source_title.clone(),
+            None,
+            None,
+            None,
+            None,
+            Some(data.download_client_item_id.clone()),
+            data.client_id.clone(),
+            data.client_type.clone(),
+            None,
+            None,
+            false,
+            Some(data.reason.clone()),
+            None,
+            None,
+            None,
         ),
         DomainEventPayload::DownloadIgnored(data) => (
             data.title.as_ref().map(|title| title.title_name.clone()),

@@ -674,6 +674,7 @@ pub enum DomainEventTypeValue {
     DownloadFailed,
     /// A download was ignored.
     DownloadIgnored,
+    DownloadMissing,
     /// A release was blocklisted.
     ReleaseBlocklisted,
     /// An import completed.
@@ -778,6 +779,7 @@ impl DomainEventTypeValue {
             DomainEventType::ReleaseGrabbed => Self::ReleaseGrabbed,
             DomainEventType::DownloadFailed => Self::DownloadFailed,
             DomainEventType::DownloadIgnored => Self::DownloadIgnored,
+            DomainEventType::DownloadMissing => Self::DownloadMissing,
             DomainEventType::ReleaseBlocklisted => Self::ReleaseBlocklisted,
             DomainEventType::ImportCompleted => Self::ImportCompleted,
             DomainEventType::ImportRejected => Self::ImportRejected,
@@ -842,6 +844,7 @@ impl DomainEventTypeValue {
             Self::ReleaseGrabbed => DomainEventType::ReleaseGrabbed,
             Self::DownloadFailed => DomainEventType::DownloadFailed,
             Self::DownloadIgnored => DomainEventType::DownloadIgnored,
+            Self::DownloadMissing => DomainEventType::DownloadMissing,
             Self::ReleaseBlocklisted => DomainEventType::ReleaseBlocklisted,
             Self::ImportCompleted => DomainEventType::ImportCompleted,
             Self::ImportRejected => DomainEventType::ImportRejected,
@@ -890,6 +893,8 @@ impl DomainEventTypeValue {
 #[derive(Enum, Copy, Clone, Eq, PartialEq)]
 #[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
 pub enum TrackedDownloadStateValue {
+    /// Accepted download is absent from a successful client listing.
+    Missing,
     /// Download is in progress.
     Downloading,
     /// Download awaits import.
@@ -915,6 +920,7 @@ impl TrackedDownloadStateValue {
     pub fn from_domain(value: TrackedDownloadState) -> Self {
         match value {
             TrackedDownloadState::Downloading => Self::Downloading,
+            TrackedDownloadState::Missing => Self::Missing,
             TrackedDownloadState::ImportPending => Self::ImportPending,
             TrackedDownloadState::Importing => Self::Importing,
             TrackedDownloadState::Imported => Self::Imported,

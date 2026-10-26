@@ -2645,6 +2645,26 @@ pub enum DownloadQueueState {
 
 // ── TrackedDownloads ──────────────────────────────────────────────
 
+pub mod download_reason {
+    /// A successful client listing omitted an accepted download.
+    pub const CLIENT_ITEM_MISSING: &str = "DOWNLOAD_CLIENT_ITEM_MISSING";
+    pub const ALL: &[&str] = &[CLIENT_ITEM_MISSING];
+
+    #[test]
+    fn reasons_are_distinct_and_prefixed() {
+        let unique: std::collections::HashSet<_> = ALL.iter().collect();
+        assert_eq!(unique.len(), ALL.len());
+        for reason in ALL {
+            assert!(reason.starts_with("DOWNLOAD_"));
+            assert!(
+                reason
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+            );
+        }
+    }
+}
+
 /// Scryer's internal workflow state for a download, independent of the
 /// download client's reported status.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -2652,6 +2672,8 @@ pub enum DownloadQueueState {
 pub enum TrackedDownloadState {
     /// Download in progress (queued, downloading, verifying, repairing, extracting).
     Downloading,
+    /// Accepted by the client but absent from its successful listing; not a failure.
+    Missing,
     /// Client reports completed; scryer validated path + title; queued for import.
     ImportPending,
     /// Import actively running.
@@ -2675,6 +2697,7 @@ impl TrackedDownloadState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Downloading => "downloading",
+            Self::Missing => "missing",
             Self::ImportPending => "import_pending",
             Self::Importing => "importing",
             Self::Imported => "imported",
@@ -2689,6 +2712,7 @@ impl TrackedDownloadState {
     pub fn from_str_opt(s: &str) -> Option<Self> {
         match s {
             "downloading" => Some(Self::Downloading),
+            "missing" => Some(Self::Missing),
             "import_pending" => Some(Self::ImportPending),
             "importing" => Some(Self::Importing),
             "imported" => Some(Self::Imported),
@@ -3880,6 +3904,7 @@ pub enum TitleHistoryEventType {
     FileRenamed,
     TitleMoved,
     DownloadIgnored,
+    DownloadMissing,
     Rematched,
     /// A torrent was imported and its client entry is being retained while it
     /// seeds. Opens the seeding-retention window; recorded once per torrent.
@@ -3909,6 +3934,7 @@ impl TitleHistoryEventType {
             Self::FileRenamed => "file_renamed",
             Self::TitleMoved => "title_moved",
             Self::DownloadIgnored => "download_ignored",
+            Self::DownloadMissing => "download_missing",
             Self::Rematched => "rematched",
             Self::SeedingStarted => "seeding_started",
             Self::SeedingCompleted => "seeding_completed",
@@ -3934,6 +3960,7 @@ impl TitleHistoryEventType {
             "file_renamed" => Some(Self::FileRenamed),
             "title_moved" => Some(Self::TitleMoved),
             "download_ignored" => Some(Self::DownloadIgnored),
+            "download_missing" => Some(Self::DownloadMissing),
             "rematched" => Some(Self::Rematched),
             "seeding_started" => Some(Self::SeedingStarted),
             "seeding_completed" => Some(Self::SeedingCompleted),
@@ -3959,6 +3986,7 @@ impl TitleHistoryEventType {
         Self::FileRenamed,
         Self::TitleMoved,
         Self::DownloadIgnored,
+        Self::DownloadMissing,
         Self::Rematched,
         Self::SeedingStarted,
         Self::SeedingCompleted,
@@ -4220,6 +4248,7 @@ pub enum DomainEventType {
     DownloadQueueItemUpserted,
     DownloadQueueItemRemoved,
     DownloadIgnored,
+    DownloadMissing,
     SeedingStarted,
     SeedingCompleted,
     ListTitleAdded,
@@ -4284,6 +4313,7 @@ impl DomainEventType {
             Self::DownloadQueueItemUpserted => "download_queue_item_upserted",
             Self::DownloadQueueItemRemoved => "download_queue_item_removed",
             Self::DownloadIgnored => "download_ignored",
+            Self::DownloadMissing => "download_missing",
             Self::SeedingStarted => "seeding_started",
             Self::SeedingCompleted => "seeding_completed",
             Self::ListTitleAdded => "list_title_added",
@@ -4348,6 +4378,7 @@ impl DomainEventType {
             "download_queue_item_upserted" => Some(Self::DownloadQueueItemUpserted),
             "download_queue_item_removed" => Some(Self::DownloadQueueItemRemoved),
             "download_ignored" => Some(Self::DownloadIgnored),
+            "download_missing" => Some(Self::DownloadMissing),
             "seeding_started" => Some(Self::SeedingStarted),
             "seeding_completed" => Some(Self::SeedingCompleted),
             "list_title_added" => Some(Self::ListTitleAdded),
@@ -5142,6 +5173,19 @@ pub struct DownloadQueueItemRemovedEventData {
     pub client_type: Option<String>,
 }
 
+/// A successful client listing omitted an accepted download.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DownloadMissingEventData {
+    pub title: Option<TitleContextSnapshot>,
+    pub download_id: download_identity::DownloadId,
+    pub download_client_item_id: String,
+    pub client_id: Option<String>,
+    pub client_type: Option<String>,
+    pub source_title: Option<String>,
+    pub grabbed_at: DateTime<Utc>,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DownloadIgnoredEventData {
     pub title: Option<TitleContextSnapshot>,
@@ -5257,6 +5301,7 @@ pub enum DomainEventPayload {
     DownloadQueueItemUpserted(Box<DownloadQueueItemUpsertedEventData>),
     DownloadQueueItemRemoved(DownloadQueueItemRemovedEventData),
     DownloadIgnored(DownloadIgnoredEventData),
+    DownloadMissing(DownloadMissingEventData),
     SeedingStarted(SeedingStartedEventData),
     SeedingCompleted(SeedingCompletedEventData),
     ListTitleAdded(ListTitleAddedEventData),
@@ -5323,6 +5368,7 @@ impl DomainEventPayload {
             Self::DownloadQueueItemUpserted(_) => DomainEventType::DownloadQueueItemUpserted,
             Self::DownloadQueueItemRemoved(_) => DomainEventType::DownloadQueueItemRemoved,
             Self::DownloadIgnored(_) => DomainEventType::DownloadIgnored,
+            Self::DownloadMissing(_) => DomainEventType::DownloadMissing,
             Self::SeedingStarted(_) => DomainEventType::SeedingStarted,
             Self::SeedingCompleted(_) => DomainEventType::SeedingCompleted,
             Self::ListTitleAdded(_) => DomainEventType::ListTitleAdded,

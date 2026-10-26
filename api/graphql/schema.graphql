@@ -4777,6 +4777,7 @@ enum DomainEventTypeValue {
 	A download was ignored.
 	"""
 	DOWNLOAD_IGNORED
+	DOWNLOAD_MISSING
 	"""
 	A release was blocklisted.
 	"""
@@ -30418,6 +30419,7 @@ enum TitleHistoryEventTypeValue {
 	Download was ignored.
 	"""
 	DOWNLOAD_IGNORED
+	DOWNLOAD_MISSING
 	"""
 	Title or file was rematched.
 	"""
@@ -31475,6 +31477,10 @@ input TotpVerifyInput {
 Lifecycle state of a tracked download.
 """
 enum TrackedDownloadStateValue {
+	"""
+	Accepted download is absent from a successful client listing.
+	"""
+	MISSING
 	"""
 	Download is in progress.
 	"""

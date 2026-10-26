@@ -3158,7 +3158,7 @@ impl AppUseCase {
         // The ledger's own record of the last grab claims the scope too, so a
         // job the client is post-processing (or has not surfaced yet) cannot
         // read as "nothing in flight" and be fetched again.
-        let queued = self
+        let Ok(queued) = self
             .queued_releases_with_grabbed_claims(
                 queued,
                 title,
@@ -3166,8 +3166,12 @@ impl AppUseCase {
                 &scoring_context,
                 &catalog_episodes,
                 &catalog_collections,
+                true,
             )
-            .await;
+            .await
+        else {
+            return;
+        };
         admission = admission.with_queued(queued);
 
         let title_pending = self
@@ -3221,7 +3225,7 @@ impl AppUseCase {
                 } else {
                     Vec::new()
                 };
-                let queued = self
+                let Ok(queued) = self
                     .queued_releases_with_grabbed_claims(
                         queued,
                         title,
@@ -3229,8 +3233,12 @@ impl AppUseCase {
                         &scoring_context,
                         &catalog_episodes,
                         &catalog_collections,
+                        true,
                     )
-                    .await;
+                    .await
+                else {
+                    return;
+                };
                 self.admission_subject_for_scope_with_reads(
                     title,
                     scope,
@@ -3699,6 +3707,7 @@ impl AppUseCase {
         grabbed_episode_ids.dedup();
         let canonical_result = self
             .submit_canonical_download(CanonicalDownloadSubmissionIntent {
+                automatic: true,
                 http_release: best.http.clone(),
                 request: DownloadClientAddRequest {
                     http: None,
@@ -3750,6 +3759,7 @@ impl AppUseCase {
 
         let canonical_submission = match canonical_result {
             Ok(CanonicalDownloadSubmissionOutcome::Accepted(submission)) => Ok(submission),
+            Ok(CanonicalDownloadSubmissionOutcome::Deferred) => return,
             Ok(CanonicalDownloadSubmissionOutcome::Conflict(_)) => {
                 if let Some(outcome) = report.external_outcome.as_mut() {
                     outcome.reasons = vec!["An active download already covers this release".into()];
@@ -3810,6 +3820,7 @@ impl AppUseCase {
                     "title": best.title,
                     "score": candidate_score,
                     "grabbed_at": now.to_rfc3339(),
+                    "download_id": canonical_submission.grab.download_id,
                     "source": if best.extra.contains_key("external_announcement") { "external_release" } else { "rss_sync" },
                     "release_listing_json": release_listing_json,
                 })

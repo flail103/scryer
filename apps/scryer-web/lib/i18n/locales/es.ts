@@ -2033,6 +2033,7 @@ const es: LocaleDictionary = {
   "history.seedingStarted": "Compartiendo",
   "history.seedingCompleted": "Compartición completa",
   "history.downloadIgnored": "Ignorado",
+  "history.downloadMissing": "No visible en el cliente",
   "history.facet": "Categoría",
   "history.actions": "Acciones",
   "history.expandDetails": "Expandir detalles del evento",

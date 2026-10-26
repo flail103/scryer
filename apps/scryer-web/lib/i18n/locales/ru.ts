@@ -4604,6 +4604,7 @@ const ru: LocaleDictionary = {
     "history.rematched": "Повторно сопоставлено",
 
     "history.downloadIgnored": "Проигнорировано",
+    "history.downloadMissing": "Не видна в клиенте",
 
     "history.facet": "Тип",
 

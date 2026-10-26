@@ -5575,12 +5575,14 @@ pub trait DownloadRegistryRepository: Send + Sync {
     }
 
     /// Active bindings Scryer created by submitting a grab, created before
-    /// `created_before`, whose download no client listing has ever carried.
+    /// `created_before`, whose download has never been listed or is durably missing.
     ///
     /// The absence prune works from the in-memory tracker, and only a listed
     /// job is ever tracked. A job its client dropped before the first listing
     /// therefore never reaches the prune; this is the durable side of the same
-    /// question, so the poller can ask it of a client that answered.
+    /// question, so the poller can ask it of a client that answered. Previously
+    /// observed missing attempts also return here so partial transitions can
+    /// finish after restart without relying on the in-memory tracker.
     ///
     /// The default is empty so repositories with no durable bindings (the null
     /// repository, test fakes) need not implement it.
@@ -5622,6 +5624,27 @@ pub struct IdentityTrackedStateTarget<'a> {
     pub canonical_download_id: Option<&'a DownloadId>,
     pub identity: &'a DownloadSubmissionIdentity,
     pub source_identity: Option<&'a ClientJobLocator>,
+}
+
+/// An observation transition and its scope claims, committed under the canonical
+/// download lock. Expected values prevent stale observations reviving outcomes.
+#[derive(Clone)]
+pub struct ClientPresenceTransition {
+    pub download_id: DownloadId,
+    pub source: ClientJobLocator,
+    pub identity: DownloadSubmissionIdentity,
+    pub expected_state: Option<String>,
+    pub state: scryer_domain::TrackedDownloadState,
+    pub reason: Option<String>,
+    pub detail: Option<String>,
+    pub scopes: Vec<ClientPresenceScopeUpdate>,
+}
+
+#[derive(Clone)]
+pub struct ClientPresenceScopeUpdate {
+    pub previous: AcquisitionScopeState,
+    pub status: AcquisitionScopeStatus,
+    pub grabbed_release: String,
 }
 
 pub const DOWNLOAD_PASSWORD_RETRY_REASON: &str = "download_password_retry";
@@ -6067,6 +6090,17 @@ pub trait DownloadSubmissionRepository: Send + Sync {
         )
         .await?;
         Ok(previous)
+    }
+
+    /// Atomically apply a missing/reappearance observation, including scope CAS
+    /// updates. False means another workflow outcome superseded the observation.
+    async fn transition_client_presence(
+        &self,
+        _transition: &ClientPresenceTransition,
+    ) -> AppResult<bool> {
+        Err(AppError::Repository(
+            "client presence transitions are unsupported by this repository".into(),
+        ))
     }
 
     /// Canonical-aware variant of the durable tracked-state upsert.

@@ -2572,9 +2572,29 @@ impl AppUseCase {
         &self,
         title: &Title,
         subject: &ResolvedReleaseSearchSubject,
+        results: Vec<IndexerSearchResult>,
+        user_invoked: bool,
+        reads: &crate::acquisition::title_reads::TitleCatalogReads,
+    ) -> AppResult<Vec<IndexerSearchResult>> {
+        self.evaluate_search_results_for_subject_with_missing_history(
+            title,
+            subject,
+            results,
+            user_invoked,
+            reads,
+            !user_invoked,
+        )
+        .await
+    }
+
+    pub(crate) async fn evaluate_search_results_for_subject_with_missing_history(
+        &self,
+        title: &Title,
+        subject: &ResolvedReleaseSearchSubject,
         mut results: Vec<IndexerSearchResult>,
         user_invoked: bool,
         reads: &crate::acquisition::title_reads::TitleCatalogReads,
+        include_recent_missing: bool,
     ) -> AppResult<Vec<IndexerSearchResult>> {
         let fresh;
         let reads = if reads.covers(&title.id) {
@@ -2740,8 +2760,9 @@ impl AppUseCase {
                 &scoring_context,
                 &catalog_episodes,
                 &catalog_collections,
+                include_recent_missing,
             )
-            .await;
+            .await?;
         admission = admission.with_queued(queued);
         let has_active_pending_overlap = if user_invoked {
             false
@@ -2872,8 +2893,9 @@ impl AppUseCase {
                         &scoring_context,
                         &catalog_episodes,
                         &catalog_collections,
+                        include_recent_missing,
                     )
-                    .await;
+                    .await?;
                 self.admission_subject_for_scope_with_reads(
                     title,
                     scope,
