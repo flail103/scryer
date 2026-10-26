@@ -6744,7 +6744,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     config.name.as_str(),
                     IndexerSkipReason::NoSupportedIds,
                 );
-                info!(
+                debug!(
                     indexer = config.name.as_str(),
                     facet, "skipping indexer: no supported IDs for facet and no freetext"
                 );
@@ -7088,7 +7088,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     config.name.as_str(),
                     IndexerSkipReason::NoSupportedIds,
                 );
-                info!(
+                debug!(
                     indexer = config.name.as_str(),
                     facet, "skipping indexer: no supported IDs for facet and no freetext"
                 );
