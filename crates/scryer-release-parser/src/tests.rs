@@ -9,6 +9,29 @@ use crate::{
 };
 
 #[test]
+fn slash_separated_anime_titles_keep_standard_episode_title_evidence() {
+    let mut target = context(ContextFacetHint::Anime, "Battle Through the Heavens");
+    target.aliases = vec![
+        ContextAlias {
+            name: "斗破苍穹".into(),
+        },
+        ContextAlias {
+            name: "Doupo Cangqiong".into(),
+        },
+    ];
+    let raw =
+        "[Shridhuu][1080p HBR] Battle Through the Heavens / 斗破苍穹 / Doupo Cangqiong - S05E215";
+    let analysis = analyze_release_for_target(raw, &target);
+    let candidate = analysis.best_candidate().expect("candidate");
+    assert_eq!(
+        candidate.projected.normalized_title, "BATTLE THROUGH THE HEAVENS",
+        "{candidate:?}"
+    );
+    assert!(!candidate.zones.title_zones.is_empty(), "{candidate:?}");
+    assert_eq!(candidate.context_title_matches.len(), 3, "{candidate:?}");
+}
+
+#[test]
 fn standard_episode_revision_suffix_preserves_episode_coordinates() {
     for facet in [ContextFacetHint::Anime, ContextFacetHint::Series] {
         let target = context(facet, "Hero Academy");

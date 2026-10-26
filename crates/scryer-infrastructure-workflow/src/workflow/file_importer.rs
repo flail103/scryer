@@ -1568,6 +1568,39 @@ struct ImportCopyAttempt<'a> {
     cancellation: Option<&'a scryer_application::ImportCancellation>,
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn finish_macos_import_sync(
+    full_sync: io::Result<()>,
+    fallback: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    match full_sync {
+        Err(error) if error.kind() == io::ErrorKind::Unsupported => fallback(),
+        result => result,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sync_import_destination(file: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    finish_macos_import_sync(file.sync_all(), || {
+        loop {
+            if unsafe { libc::fsync(file.as_raw_fd()) } == 0 {
+                return Ok(());
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sync_import_destination(file: &std::fs::File) -> io::Result<()> {
+    file.sync_all()
+}
+
 fn copy_regular_source_to_destination_once(
     attempt_context: ImportCopyAttempt<'_>,
     options: ImportFileOptions,
@@ -1645,8 +1678,7 @@ fn copy_regular_source_to_destination_once(
     temp_file
         .flush()
         .map_err(|error| ImportCopyAttemptError::new("flush", error))?;
-    temp_file
-        .sync_all()
+    sync_import_destination(&temp_file)
         .map_err(|error| ImportCopyAttemptError::new("sync", error))?;
     drop(temp_file);
 
@@ -3838,6 +3870,37 @@ impl FsFileImporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_import_sync_falls_back_only_when_full_sync_is_unsupported() {
+        finish_macos_import_sync(Err(io::ErrorKind::Unsupported.into()), || Ok(()))
+            .expect("ordinary fsync succeeds when full sync is unsupported");
+        finish_macos_import_sync(Ok(()), || panic!("successful full sync needs no fallback"))
+            .expect("full sync succeeds");
+        let error = finish_macos_import_sync(Err(io::ErrorKind::PermissionDenied.into()), || {
+            panic!("real sync errors must not fall back")
+        })
+        .expect_err("permission failure must propagate");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let error = finish_macos_import_sync(Err(io::ErrorKind::Unsupported.into()), || {
+            Err(io::ErrorKind::Other.into())
+        })
+        .expect_err("fallback sync failure must propagate");
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn import_destination_sync_preserves_file_contents() {
+        let directory = tempfile::tempdir().expect("temporary destination");
+        let path = directory.path().join("copied-video.mkv");
+        let mut file = std::fs::File::create(&path).expect("create destination");
+        file.write_all(b"verified-copy").expect("write destination");
+        sync_import_destination(&file).expect("sync destination");
+        assert_eq!(
+            std::fs::read(path).expect("read destination"),
+            b"verified-copy"
+        );
+    }
 
     fn round_trip_worker_error(error: AppError) -> AppError {
         let event = ImportFileWorkerEvent::Error {

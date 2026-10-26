@@ -1887,6 +1887,25 @@ fn expand_state(
     alias_oracle: &AliasOracle,
     leading_release_group: Option<TokenRange>,
 ) -> Vec<ParseState> {
+    let mut prefix_state;
+    let state = if state.phase == ParsePhase::Metadata
+        && state.title_token_indices.is_empty()
+        && !has_identity(&state.identity)
+        && tokens
+            .get(state.cursor)
+            .is_some_and(|token| token.bracket_depth == 0)
+        && !state.metadata.token_indices.is_empty()
+        && state.metadata.token_indices.iter().all(|index| {
+            tokens
+                .get(*index)
+                .is_some_and(|token| token.bracket_depth > 0)
+        }) {
+        prefix_state = state.clone();
+        prefix_state.phase = ParsePhase::Prefix;
+        &prefix_state
+    } else {
+        state
+    };
     let Some(units) = units_by_start.get(state.cursor) else {
         return Vec::new();
     };

@@ -808,7 +808,6 @@ pub(crate) fn context_free_identity_anchor_keys(raw_title: &str) -> Vec<String> 
         // tokens cannot prove exact identity for an accented release.
         extracted = crate::title_matching::relaxed::neutral_spelling_anchors(raw_title).0;
     }
-
     // Year tokens in the raw name re-attach to the extraction: a boundary
     // heuristic reads `Signal.Runner.2049.2160p` as title `Signal Runner`, but
     // the subject's key is `signal runner 2049`.
@@ -3838,6 +3837,27 @@ mod tests {
             crate::import_title_resolution::MonitoredTitleMatcher::over_titles(library.to_vec());
         canonical_title_evidence(title)
             .with_ambiguity(matcher.evidence_ambiguity(title).await.expect("ambiguity"))
+    }
+
+    #[tokio::test]
+    async fn slash_separated_anime_titles_match_with_standard_episode_markers() {
+        let mut title = spelling_title("Battle Through the Heavens", "eng");
+        title.facet = MediaFacet::Anime;
+        title.year = None;
+        title.imdb_id = None;
+        title.aliases = vec!["斗破苍穹".into(), "Doupo Cangqiong".into()];
+        let evidence = spelling_evidence(&title, std::slice::from_ref(&title)).await;
+        for marker in ["S05E215", "EP215", "215"] {
+            let raw = format!(
+                "[Shridhuu][1080p HBR] Battle Through the Heavens / 斗破苍穹 / Doupo Cangqiong - {marker}"
+            );
+            assert!(
+                candidate_title_match(&make_candidate(&raw, None), &evidence).is_some(),
+                "{raw}"
+            );
+        }
+        let wrong = "[Group] Different Show / Other Name / Unrelated Alias - S05E215";
+        assert!(candidate_title_match(&make_candidate(wrong, None), &evidence).is_none());
     }
 
     #[tokio::test]

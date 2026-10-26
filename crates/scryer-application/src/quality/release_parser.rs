@@ -553,6 +553,12 @@ fn looks_like_standard_episode_token(token: &str) -> bool {
     normalized.contains('E')
         && normalized.starts_with('S')
         && normalized.chars().any(|ch| ch.is_ascii_digit())
+        || normalized
+            .strip_prefix("EPISODE")
+            .or_else(|| normalized.strip_prefix("EP"))
+            .is_some_and(|episode| {
+                !episode.is_empty() && episode.chars().all(|character| character.is_ascii_digit())
+            })
         || normalized.split_once('X').is_some_and(|(left, right)| {
             !left.is_empty()
                 && !right.is_empty()

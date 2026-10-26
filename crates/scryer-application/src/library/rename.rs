@@ -2347,7 +2347,7 @@ impl AppUseCase {
             .list_media_files_for_title(&title.id)
             .await?
             .into_iter()
-            .filter(|file| file.role.is_primary())
+            .filter(|file| title.facet != MediaFacet::Movie || file.role.is_primary())
             .collect::<Vec<_>>();
         if let Some(error) = rendering_error {
             tracing::warn!(title_id = %title.id, %error, "title skipped by rename template validation");

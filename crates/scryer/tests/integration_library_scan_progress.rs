@@ -200,6 +200,13 @@ async fn active_library_scans_query_returns_progress_snapshot() {
     let series_root = tempdir.path().join("series");
     std::fs::create_dir_all(series_root.join("Unknown Show (2020)"))
         .expect("create unknown series folder");
+    std::fs::write(
+        series_root
+            .join("Unknown Show (2020)")
+            .join("Unknown.Show.S01E01.mkv"),
+        b"synthetic media",
+    )
+    .expect("write discovery media");
     set_media_path(&ctx, "series.path", series_root.to_string_lossy().as_ref()).await;
 
     let gate = mount_gated_title_match(&ctx).await;
@@ -396,7 +403,6 @@ async fn graphql_allows_concurrent_scans_for_distinct_libraries_in_same_facet() 
     )
     .await;
     assert!(duplicate.get("errors").is_some());
-    release_gate(&gate);
 
     ctx.app
         .cancel_library_scan(&admin, &first_session_id)
@@ -406,6 +412,7 @@ async fn graphql_allows_concurrent_scans_for_distinct_libraries_in_same_facet() 
         .cancel_library_scan(&admin, &second_session_id)
         .await
         .expect("cancel second concurrent scan");
+    release_gate(&gate);
 }
 
 #[tokio::test]
@@ -517,6 +524,13 @@ async fn cancel_library_scan_mutation_marks_active_full_scan_canceled() {
     let series_root = tempdir.path().join("series");
     std::fs::create_dir_all(series_root.join("Unknown Show (2020)"))
         .expect("create unknown series folder");
+    std::fs::write(
+        series_root
+            .join("Unknown Show (2020)")
+            .join("Unknown.Show.S01E01.mkv"),
+        b"synthetic media",
+    )
+    .expect("write discovery media");
     set_media_path(&ctx, "series.path", series_root.to_string_lossy().as_ref()).await;
 
     let gate = mount_gated_title_match(&ctx).await;

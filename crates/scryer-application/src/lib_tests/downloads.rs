@@ -5783,6 +5783,74 @@ async fn build_fail_closed_pack_fixture(
     )
 }
 
+#[tokio::test]
+async fn episode_rename_preview_includes_additional_files() {
+    let FailClosedPackFixture {
+        app,
+        user,
+        title,
+        episode,
+        library_dir,
+        ..
+    } = fail_closed_pack_fixture().await;
+    let folder = library_dir.path().join("Fail Closed Pack");
+    std::fs::create_dir_all(&folder).expect("create title folder");
+    let mut expected_ids = Vec::new();
+    for (name, role) in [
+        ("Original.S01E01.1080p.mkv", crate::MediaFileRole::Primary),
+        ("Extra.S01E01.720p.mkv", crate::MediaFileRole::Additional),
+    ] {
+        let path = folder.join(name);
+        std::fs::write(&path, b"synthetic episode").expect("write episode");
+        let id = app
+            .services
+            .library
+            .media_files
+            .insert_media_file(&crate::InsertMediaFileInput {
+                title_id: title.id.clone(),
+                file_path: crate::stored_paths::path_to_stored_string(&path),
+                size_bytes: 17,
+                role,
+                ..Default::default()
+            })
+            .await
+            .expect("insert episode file");
+        app.services
+            .library
+            .media_files
+            .link_file_to_episode(&id, &episode.id)
+            .await
+            .expect("link episode file");
+        if role.is_primary() {
+            app.services
+                .library
+                .media_files
+                .set_media_file_roles_for_episode(&title.id, &episode.id, &id, &[])
+                .await
+                .expect("select primary episode file");
+        }
+        expected_ids.push(id);
+    }
+    let preview = app
+        .preview_rename_for_title(&user, &title.id, MediaFacet::Series)
+        .await
+        .expect("preview episode rename");
+    let mut actual_ids = preview
+        .items
+        .iter()
+        .filter_map(|item| item.media_file_id.clone())
+        .collect::<Vec<_>>();
+    actual_ids.sort();
+    expected_ids.sort();
+    assert_eq!(actual_ids, expected_ids, "{preview:?}");
+    let targets = preview
+        .items
+        .iter()
+        .filter_map(|item| item.proposed_path.as_ref())
+        .collect::<HashSet<_>>();
+    assert_eq!(targets.len(), 2, "{preview:?}");
+}
+
 /// Sparse stand-in episode file, sized like a real episode.
 ///
 /// It used to be 51 MiB, one megabyte over the import sample threshold — the
