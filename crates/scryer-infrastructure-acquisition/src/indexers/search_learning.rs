@@ -5,11 +5,11 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use scryer_application::{
     AppError, AppResult, BackgroundIndexerSearchStrategyState, HashDomain,
     IndexerFacetLearningPolicy, IndexerFacetLearningState, IndexerFacetSearchOutcome,
-    IndexerFacetTransition, IndexerSearchCandidateWrite, IndexerSearchLearningKey,
-    IndexerSearchLearningRecord, IndexerSearchLearningRepository, IndexerSearchListing,
-    IndexerSearchListingClaim, IndexerSearchListingReader, IndexerSearchListingScope,
-    IndexerSearchListingStrategy, IndexerSearchRunWrite, NormalizedIndexerSearchCandidate,
-    ReusableIndexerSearchCandidate,
+    IndexerFacetTransition, IndexerSearchCandidateWrite, IndexerSearchLearningBatch,
+    IndexerSearchLearningKey, IndexerSearchLearningRecord, IndexerSearchLearningRepository,
+    IndexerSearchListing, IndexerSearchListingClaim, IndexerSearchListingReader,
+    IndexerSearchListingScope, IndexerSearchListingStrategy, IndexerSearchRunWrite,
+    NormalizedIndexerSearchCandidate, ReusableIndexerSearchCandidate,
     ReusableIndexerSearchCandidatePage, ReusableIndexerSearchStrategy, SEARCH_STRATEGY_CONTAINED,
     SEARCH_STRATEGY_CONVERGED, blake3_identity_hex,
 };
@@ -257,142 +257,108 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
         rows.iter().map(row_to_learning_record).collect()
     }
 
+    async fn list_for_title_by_indexer(
+        &self,
+        indexer_ids: &[String],
+        title_id: &str,
+        facet: &str,
+    ) -> AppResult<HashMap<String, Vec<IndexerSearchLearningRecord>>> {
+        let mut records = indexer_ids
+            .iter()
+            .map(|indexer_id| (indexer_id.clone(), Vec::new()))
+            .collect::<HashMap<_, _>>();
+        if indexer_ids.is_empty() {
+            return Ok(records);
+        }
+        let placeholders = std::iter::repeat_n("{}", indexer_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut args = vec![
+            SqlArg::Text(title_id.to_string()),
+            SqlArg::Text(facet.to_string()),
+        ];
+        args.extend(indexer_ids.iter().cloned().map(SqlArg::Text));
+        let rows = SqlRuntime::fetch_all(
+            self.datastore.read_exec(),
+            &format!(
+                "SELECT indexer_id, title_id, facet, strategy_key, attempts, empty_successes,
+                        usable_successes, last_attempt_at, last_usable_at, suppressed, updated_at
+                   FROM indexer_search_learning
+                  WHERE title_id = {{}} AND facet = {{}} AND indexer_id IN ({placeholders})"
+            ),
+            &args,
+        )
+        .await?;
+        for row in &rows {
+            let record = row_to_learning_record(row)?;
+            records
+                .entry(record.key.indexer_id.clone())
+                .or_default()
+                .push(record);
+        }
+        Ok(records)
+    }
+
+    async fn record_learning_batch(
+        &self,
+        batch: &IndexerSearchLearningBatch,
+    ) -> AppResult<Vec<IndexerFacetTransition>> {
+        if batch.is_empty() {
+            return Ok(Vec::new());
+        }
+        let batch = batch.clone();
+        SqlRuntime::run_in_transaction(
+            &self.datastore,
+            "record_indexer_search_learning_batch",
+            move |tx| {
+                let batch = batch.clone();
+                Box::pin(async move {
+                    for (strategy_key, usable_hits) in &batch.strategy_outcomes {
+                        let key = IndexerSearchLearningKey {
+                            indexer_id: batch.indexer_id.clone(),
+                            title_id: batch.title_id.clone(),
+                            facet: batch.facet.clone(),
+                            strategy_key: strategy_key.clone(),
+                        };
+                        record_learning_outcome_in_tx(tx, &key, *usable_hits).await?;
+                    }
+                    for strategy_key in &batch.suppress {
+                        SqlRuntime::execute(
+                            SqlExec::Tx(tx),
+                            SET_LEARNING_SUPPRESSED_SQL,
+                            &[
+                                SqlArg::Bool(true),
+                                SqlArg::Timestamp(Utc::now()),
+                                SqlArg::Text(batch.indexer_id.clone()),
+                                SqlArg::Text(batch.title_id.clone()),
+                                SqlArg::Text(batch.facet.clone()),
+                                SqlArg::Text(strategy_key.clone()),
+                            ],
+                        )
+                        .await?;
+                    }
+                    apply_facet_outcomes_in_tx(tx, &batch).await
+                })
+            },
+        )
+        .await
+    }
+
     async fn record_outcome(
         &self,
         key: &IndexerSearchLearningKey,
         usable_hits: u32,
     ) -> AppResult<IndexerSearchLearningRecord> {
-        match &self.datastore {
-            StoreDatastore::Sqlite { .. } => {
-                let key = key.clone();
-                SqlRuntime::run_serialized_sqlite(
-                    &self.datastore,
-                    "record_indexer_search_learning_outcome",
-                    move |pool| {
-                        let key = key.clone();
-                        async move {
-                            let mut tx = pool.begin().await.map_err(repo_err)?;
-                            sqlx::query(
-                                "INSERT INTO indexer_search_learning (
-                                    indexer_id, title_id, facet, strategy_key, attempts,
-                                    empty_successes, usable_successes, last_attempt_at,
-                                    last_usable_at, suppressed, updated_at
-                                 )
-                                 VALUES (
-                                    ?, ?, ?, ?, 1,
-                                    CASE WHEN ? = 0 THEN 1 ELSE 0 END,
-                                    CASE WHEN ? > 0 THEN 1 ELSE 0 END,
-                                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                                    CASE WHEN ? > 0 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
-                                    0,
-                                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                                 )
-                                 ON CONFLICT(indexer_id, title_id, facet, strategy_key)
-                                 DO UPDATE SET
-                                    attempts = indexer_search_learning.attempts + 1,
-                                    empty_successes = indexer_search_learning.empty_successes
-                                        + CASE WHEN excluded.usable_successes = 0 THEN 1 ELSE 0 END,
-                                    usable_successes = indexer_search_learning.usable_successes
-                                        + CASE WHEN excluded.usable_successes > 0 THEN 1 ELSE 0 END,
-                                    last_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                                    last_usable_at = CASE
-                                        WHEN excluded.usable_successes > 0 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                                        ELSE indexer_search_learning.last_usable_at
-                                    END,
-                                    suppressed = CASE
-                                        WHEN excluded.usable_successes > 0 THEN 0
-                                        ELSE indexer_search_learning.suppressed
-                                    END,
-                                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                            )
-                            .bind(&key.indexer_id)
-                            .bind(&key.title_id)
-                            .bind(&key.facet)
-                            .bind(&key.strategy_key)
-                            .bind(usable_hits as i64)
-                            .bind(usable_hits as i64)
-                            .bind(usable_hits as i64)
-                            .execute(&mut *tx)
-                            .await
-                            .map_err(repo_err)?;
-                            if key.strategy_key.starts_with(FREETEXT_LEARNING_KEY_PREFIX) {
-                                sqlx::query(SQLITE_EVICT_FREETEXT_LEARNING_SQL)
-                                    .bind(&key.indexer_id)
-                                    .bind(&key.title_id)
-                                    .bind(&key.facet)
-                                    .bind(&key.indexer_id)
-                                    .bind(&key.title_id)
-                                    .bind(&key.facet)
-                                    .bind(&key.strategy_key)
-                                    .bind(FREETEXT_LEARNING_ROWS_PER_TITLE)
-                                    .execute(&mut *tx)
-                                    .await
-                                    .map_err(repo_err)?;
-                            }
-                            tx.commit().await.map_err(repo_err)?;
-                            Ok(())
-                        }
-                    },
-                )
-                .await?;
-            }
-            StoreDatastore::Postgres { pool } => {
-                let mut tx = pool.begin().await.map_err(repo_err)?;
-                sqlx::query(
-                    "INSERT INTO indexer_search_learning (
-                        indexer_id, title_id, facet, strategy_key, attempts,
-                        empty_successes, usable_successes, last_attempt_at,
-                        last_usable_at, suppressed, updated_at
-                     )
-                     VALUES (
-                        $1, $2, $3, $4, 1,
-                        CASE WHEN $5 = 0 THEN 1 ELSE 0 END,
-                        CASE WHEN $5 > 0 THEN 1 ELSE 0 END,
-                        NOW(),
-                        CASE WHEN $5 > 0 THEN NOW() ELSE NULL END,
-                        FALSE,
-                        NOW()
-                     )
-                     ON CONFLICT(indexer_id, title_id, facet, strategy_key)
-                     DO UPDATE SET
-                        attempts = indexer_search_learning.attempts + 1,
-                        empty_successes = indexer_search_learning.empty_successes
-                            + CASE WHEN EXCLUDED.usable_successes = 0 THEN 1 ELSE 0 END,
-                        usable_successes = indexer_search_learning.usable_successes
-                            + CASE WHEN EXCLUDED.usable_successes > 0 THEN 1 ELSE 0 END,
-                        last_attempt_at = NOW(),
-                        last_usable_at = CASE
-                            WHEN EXCLUDED.usable_successes > 0 THEN NOW()
-                            ELSE indexer_search_learning.last_usable_at
-                        END,
-                        suppressed = CASE
-                            WHEN EXCLUDED.usable_successes > 0 THEN FALSE
-                            ELSE indexer_search_learning.suppressed
-                        END,
-                        updated_at = NOW()",
-                )
-                .bind(&key.indexer_id)
-                .bind(&key.title_id)
-                .bind(&key.facet)
-                .bind(&key.strategy_key)
-                .bind(usable_hits as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(repo_err)?;
-                if key.strategy_key.starts_with(FREETEXT_LEARNING_KEY_PREFIX) {
-                    sqlx::query(POSTGRES_EVICT_FREETEXT_LEARNING_SQL)
-                        .bind(&key.indexer_id)
-                        .bind(&key.title_id)
-                        .bind(&key.facet)
-                        .bind(&key.strategy_key)
-                        .bind(FREETEXT_LEARNING_ROWS_PER_TITLE)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(repo_err)?;
-                }
-                tx.commit().await.map_err(repo_err)?;
-            }
-        }
+        let outcome_key = key.clone();
+        SqlRuntime::run_in_transaction(
+            &self.datastore,
+            "record_indexer_search_learning_outcome",
+            move |tx| {
+                let key = outcome_key.clone();
+                Box::pin(async move { record_learning_outcome_in_tx(tx, &key, usable_hits).await })
+            },
+        )
+        .await?;
 
         self.get_record(key).await?.ok_or_else(|| {
             AppError::Repository("indexer search learning outcome was not persisted".to_string())
@@ -1685,9 +1651,7 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
         SqlRuntime::execute_write(
             &self.datastore,
             "set_indexer_search_learning_suppressed",
-            "UPDATE indexer_search_learning
-             SET suppressed = {}, updated_at = {}
-             WHERE indexer_id = {} AND title_id = {} AND facet = {} AND strategy_key = {}",
+            SET_LEARNING_SUPPRESSED_SQL,
             vec![
                 SqlArg::Bool(suppressed),
                 SqlArg::Timestamp(Utc::now()),
@@ -1856,9 +1820,7 @@ impl IndexerSearchLearningStore {
     ) -> AppResult<Option<IndexerFacetLearningState>> {
         let row = SqlRuntime::fetch_optional(
             self.datastore.read_exec(),
-            "SELECT empty_title_ids, suppressed_until, reprobe_claimed_at, revision
-               FROM indexer_facet_learning
-              WHERE indexer_id = {} AND facet = {}",
+            FACET_LEARNING_STATE_SQL,
             &[
                 SqlArg::Text(indexer_id.to_string()),
                 SqlArg::Text(facet.to_string()),
@@ -1878,53 +1840,13 @@ impl IndexerSearchLearningStore {
         next: &IndexerFacetLearningState,
         now: DateTime<Utc>,
     ) -> AppResult<bool> {
-        let empty_title_ids = serde_json::to_string(&next.empty_title_ids).map_err(|error| {
-            AppError::Repository(format!("failed to encode facet learning titles: {error}"))
-        })?;
-        let rows = match current {
-            None => {
-                SqlRuntime::execute_write(
-                    &self.datastore,
-                    "insert_indexer_facet_learning",
-                    "INSERT INTO indexer_facet_learning (
-                        indexer_id, facet, empty_title_ids, suppressed_until,
-                        reprobe_claimed_at, revision, updated_at
-                     )
-                     VALUES ({}, {}, {}, {}, {}, 1, {})
-                     ON CONFLICT (indexer_id, facet) DO NOTHING",
-                    vec![
-                        SqlArg::Text(indexer_id.to_string()),
-                        SqlArg::Text(facet.to_string()),
-                        SqlArg::Text(empty_title_ids),
-                        SqlArg::OptTimestamp(next.suppressed_until),
-                        SqlArg::OptTimestamp(next.reprobe_claimed_at),
-                        SqlArg::Timestamp(now),
-                    ],
-                )
-                .await?
-            }
-            Some(current) => {
-                SqlRuntime::execute_write(
-                    &self.datastore,
-                    "update_indexer_facet_learning",
-                    "UPDATE indexer_facet_learning
-                        SET empty_title_ids = {}, suppressed_until = {},
-                            reprobe_claimed_at = {}, revision = revision + 1,
-                            updated_at = {}
-                      WHERE indexer_id = {} AND facet = {} AND revision = {}",
-                    vec![
-                        SqlArg::Text(empty_title_ids),
-                        SqlArg::OptTimestamp(next.suppressed_until),
-                        SqlArg::OptTimestamp(next.reprobe_claimed_at),
-                        SqlArg::Timestamp(now),
-                        SqlArg::Text(indexer_id.to_string()),
-                        SqlArg::Text(facet.to_string()),
-                        SqlArg::I64(current.revision),
-                    ],
-                )
-                .await?
-            }
+        let (template, args) = facet_learning_write(indexer_id, facet, current, next, now)?;
+        let op_name = if current.is_some() {
+            "update_indexer_facet_learning"
+        } else {
+            "insert_indexer_facet_learning"
         };
+        let rows = SqlRuntime::execute_write(&self.datastore, op_name, template, args).await?;
         Ok(rows > 0)
     }
 }
@@ -1941,6 +1863,243 @@ fn row_to_facet_learning_state(row: &SqlRow) -> AppResult<IndexerFacetLearningSt
         suppressed_until: row.opt_timestamp("suppressed_until")?,
         reprobe_claimed_at: row.opt_timestamp("reprobe_claimed_at")?,
         revision: row.i64("revision")?,
+    })
+}
+
+const SET_LEARNING_SUPPRESSED_SQL: &str = "UPDATE indexer_search_learning
+             SET suppressed = {}, updated_at = {}
+             WHERE indexer_id = {} AND title_id = {} AND facet = {} AND strategy_key = {}";
+
+const SQLITE_RECORD_LEARNING_OUTCOME_SQL: &str = "INSERT INTO indexer_search_learning (
+        indexer_id, title_id, facet, strategy_key, attempts,
+        empty_successes, usable_successes, last_attempt_at,
+        last_usable_at, suppressed, updated_at
+     )
+     VALUES (
+        ?, ?, ?, ?, 1,
+        CASE WHEN ? = 0 THEN 1 ELSE 0 END,
+        CASE WHEN ? > 0 THEN 1 ELSE 0 END,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        CASE WHEN ? > 0 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
+        0,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     )
+     ON CONFLICT(indexer_id, title_id, facet, strategy_key)
+     DO UPDATE SET
+        attempts = indexer_search_learning.attempts + 1,
+        empty_successes = indexer_search_learning.empty_successes
+            + CASE WHEN excluded.usable_successes = 0 THEN 1 ELSE 0 END,
+        usable_successes = indexer_search_learning.usable_successes
+            + CASE WHEN excluded.usable_successes > 0 THEN 1 ELSE 0 END,
+        last_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        last_usable_at = CASE
+            WHEN excluded.usable_successes > 0 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            ELSE indexer_search_learning.last_usable_at
+        END,
+        suppressed = CASE
+            WHEN excluded.usable_successes > 0 THEN 0
+            ELSE indexer_search_learning.suppressed
+        END,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+
+const POSTGRES_RECORD_LEARNING_OUTCOME_SQL: &str = "INSERT INTO indexer_search_learning (
+        indexer_id, title_id, facet, strategy_key, attempts,
+        empty_successes, usable_successes, last_attempt_at,
+        last_usable_at, suppressed, updated_at
+     )
+     VALUES (
+        $1, $2, $3, $4, 1,
+        CASE WHEN $5 = 0 THEN 1 ELSE 0 END,
+        CASE WHEN $5 > 0 THEN 1 ELSE 0 END,
+        NOW(),
+        CASE WHEN $5 > 0 THEN NOW() ELSE NULL END,
+        FALSE,
+        NOW()
+     )
+     ON CONFLICT(indexer_id, title_id, facet, strategy_key)
+     DO UPDATE SET
+        attempts = indexer_search_learning.attempts + 1,
+        empty_successes = indexer_search_learning.empty_successes
+            + CASE WHEN EXCLUDED.usable_successes = 0 THEN 1 ELSE 0 END,
+        usable_successes = indexer_search_learning.usable_successes
+            + CASE WHEN EXCLUDED.usable_successes > 0 THEN 1 ELSE 0 END,
+        last_attempt_at = NOW(),
+        last_usable_at = CASE
+            WHEN EXCLUDED.usable_successes > 0 THEN NOW()
+            ELSE indexer_search_learning.last_usable_at
+        END,
+        suppressed = CASE
+            WHEN EXCLUDED.usable_successes > 0 THEN FALSE
+            ELSE indexer_search_learning.suppressed
+        END,
+        updated_at = NOW()";
+
+/// Counts one strategy outcome into its learning row and keeps the title's
+/// text rows within [`FREETEXT_LEARNING_ROWS_PER_TITLE`].
+async fn record_learning_outcome_in_tx(
+    tx: &mut SqlTx<'_>,
+    key: &IndexerSearchLearningKey,
+    usable_hits: u32,
+) -> AppResult<()> {
+    let evicts_text = key.strategy_key.starts_with(FREETEXT_LEARNING_KEY_PREFIX);
+    match tx {
+        SqlTx::Sqlite(tx) => {
+            sqlx::query(SQLITE_RECORD_LEARNING_OUTCOME_SQL)
+                .bind(&key.indexer_id)
+                .bind(&key.title_id)
+                .bind(&key.facet)
+                .bind(&key.strategy_key)
+                .bind(usable_hits as i64)
+                .bind(usable_hits as i64)
+                .bind(usable_hits as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(repo_err)?;
+            if evicts_text {
+                sqlx::query(SQLITE_EVICT_FREETEXT_LEARNING_SQL)
+                    .bind(&key.indexer_id)
+                    .bind(&key.title_id)
+                    .bind(&key.facet)
+                    .bind(&key.indexer_id)
+                    .bind(&key.title_id)
+                    .bind(&key.facet)
+                    .bind(&key.strategy_key)
+                    .bind(FREETEXT_LEARNING_ROWS_PER_TITLE)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(repo_err)?;
+            }
+        }
+        SqlTx::Postgres(tx) => {
+            sqlx::query(POSTGRES_RECORD_LEARNING_OUTCOME_SQL)
+                .bind(&key.indexer_id)
+                .bind(&key.title_id)
+                .bind(&key.facet)
+                .bind(&key.strategy_key)
+                .bind(usable_hits as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(repo_err)?;
+            if evicts_text {
+                sqlx::query(POSTGRES_EVICT_FREETEXT_LEARNING_SQL)
+                    .bind(&key.indexer_id)
+                    .bind(&key.title_id)
+                    .bind(&key.facet)
+                    .bind(&key.strategy_key)
+                    .bind(FREETEXT_LEARNING_ROWS_PER_TITLE)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(repo_err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Applies a batch's facet outcomes in order to the indexer's facet state in
+/// one compare-and-set, as one-by-one writes with no other writer between
+/// them would leave it.
+async fn apply_facet_outcomes_in_tx(
+    tx: &mut SqlTx<'_>,
+    batch: &IndexerSearchLearningBatch,
+) -> AppResult<Vec<IndexerFacetTransition>> {
+    if batch.facet_outcomes.is_empty() {
+        return Ok(Vec::new());
+    }
+    for _ in 0..FACET_LEARNING_WRITE_ATTEMPTS {
+        let current = SqlRuntime::fetch_optional(
+            SqlExec::Tx(tx),
+            FACET_LEARNING_STATE_SQL,
+            &[
+                SqlArg::Text(batch.indexer_id.clone()),
+                SqlArg::Text(batch.facet.clone()),
+            ],
+        )
+        .await?
+        .as_ref()
+        .map(row_to_facet_learning_state)
+        .transpose()?;
+        let mut state = current.clone().unwrap_or_default();
+        let mut changed = false;
+        let mut transitions = Vec::with_capacity(batch.facet_outcomes.len());
+        for outcome in &batch.facet_outcomes {
+            let (next, transition) =
+                state.apply_outcome(&batch.title_id, *outcome, batch.now, batch.facet_policy);
+            transitions.push(transition);
+            if let Some(next) = next {
+                state = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(transitions);
+        }
+        let (template, args) = facet_learning_write(
+            &batch.indexer_id,
+            &batch.facet,
+            current.as_ref(),
+            &state,
+            batch.now,
+        )?;
+        if SqlRuntime::execute(SqlExec::Tx(tx), template, &args).await? > 0 {
+            return Ok(transitions);
+        }
+    }
+    Err(AppError::Repository(
+        "indexer facet learning kept changing under a concurrent writer".to_string(),
+    ))
+}
+
+const FACET_LEARNING_STATE_SQL: &str =
+    "SELECT empty_title_ids, suppressed_until, reprobe_claimed_at, revision
+       FROM indexer_facet_learning
+      WHERE indexer_id = {} AND facet = {}";
+
+/// The compare-and-set write of `next` over `current` (`None`: the row is
+/// still absent).
+fn facet_learning_write(
+    indexer_id: &str,
+    facet: &str,
+    current: Option<&IndexerFacetLearningState>,
+    next: &IndexerFacetLearningState,
+    now: DateTime<Utc>,
+) -> AppResult<(&'static str, Vec<SqlArg>)> {
+    let empty_title_ids = serde_json::to_string(&next.empty_title_ids).map_err(|error| {
+        AppError::Repository(format!("failed to encode facet learning titles: {error}"))
+    })?;
+    Ok(match current {
+        None => (
+            "INSERT INTO indexer_facet_learning (
+                indexer_id, facet, empty_title_ids, suppressed_until,
+                reprobe_claimed_at, revision, updated_at
+             )
+             VALUES ({}, {}, {}, {}, {}, 1, {})
+             ON CONFLICT (indexer_id, facet) DO NOTHING",
+            vec![
+                SqlArg::Text(indexer_id.to_string()),
+                SqlArg::Text(facet.to_string()),
+                SqlArg::Text(empty_title_ids),
+                SqlArg::OptTimestamp(next.suppressed_until),
+                SqlArg::OptTimestamp(next.reprobe_claimed_at),
+                SqlArg::Timestamp(now),
+            ],
+        ),
+        Some(current) => (
+            "UPDATE indexer_facet_learning
+                SET empty_title_ids = {}, suppressed_until = {},
+                    reprobe_claimed_at = {}, revision = revision + 1,
+                    updated_at = {}
+              WHERE indexer_id = {} AND facet = {} AND revision = {}",
+            vec![
+                SqlArg::Text(empty_title_ids),
+                SqlArg::OptTimestamp(next.suppressed_until),
+                SqlArg::OptTimestamp(next.reprobe_claimed_at),
+                SqlArg::Timestamp(now),
+                SqlArg::Text(indexer_id.to_string()),
+                SqlArg::Text(facet.to_string()),
+                SqlArg::I64(current.revision),
+            ],
+        ),
     })
 }
 
@@ -2366,6 +2525,136 @@ pub(crate) mod tests {
         );
 
         (store, pool)
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_learning_batch_lands_as_the_same_outcomes_one_by_one() {
+        let (store, _pool) = sqlite_store().await;
+        let now = Utc::now();
+        let text_key = format!("{FREETEXT_LEARNING_KEY_PREFIX}digest-1");
+        let strategy_outcomes = vec![
+            ("v2:ids_sxex".to_string(), 2),
+            ("v2:ids_abs".to_string(), 0),
+            (text_key.clone(), 0),
+            ("v2:ids_abs".to_string(), 0),
+            ("v2:ids_sxex".to_string(), 0),
+        ];
+        let facet_outcomes = vec![
+            IndexerFacetSearchOutcome::Empty,
+            IndexerFacetSearchOutcome::Empty,
+            IndexerFacetSearchOutcome::Usable,
+            IndexerFacetSearchOutcome::Empty,
+        ];
+        let suppress = vec!["v2:ids_abs".to_string()];
+
+        let one_by_one = "idx-sequential";
+        let mut sequential_transitions = Vec::new();
+        for (strategy_key, usable_hits) in &strategy_outcomes {
+            store
+                .record_outcome(
+                    &IndexerSearchLearningKey {
+                        indexer_id: one_by_one.into(),
+                        title_id: "title-1".into(),
+                        facet: "anime".into(),
+                        strategy_key: strategy_key.clone(),
+                    },
+                    *usable_hits,
+                )
+                .await
+                .expect("outcome");
+        }
+        for strategy_key in &suppress {
+            store
+                .set_suppressed(
+                    &IndexerSearchLearningKey {
+                        indexer_id: one_by_one.into(),
+                        title_id: "title-1".into(),
+                        facet: "anime".into(),
+                        strategy_key: strategy_key.clone(),
+                    },
+                    true,
+                )
+                .await
+                .expect("suppression");
+        }
+        for outcome in &facet_outcomes {
+            sequential_transitions.push(
+                store
+                    .record_facet_search_outcome(
+                        one_by_one,
+                        "anime",
+                        "title-1",
+                        *outcome,
+                        now,
+                        FACET_POLICY,
+                    )
+                    .await
+                    .expect("facet outcome"),
+            );
+        }
+
+        let batched = "idx-batched";
+        let batch_transitions = store
+            .record_learning_batch(&IndexerSearchLearningBatch {
+                indexer_id: batched.into(),
+                title_id: "title-1".into(),
+                facet: "anime".into(),
+                strategy_outcomes: strategy_outcomes.clone(),
+                suppress: suppress.clone(),
+                facet_outcomes: facet_outcomes.clone(),
+                now,
+                facet_policy: FACET_POLICY,
+            })
+            .await
+            .expect("batch should land");
+        assert_eq!(batch_transitions, sequential_transitions);
+
+        let by_indexer = store
+            .list_for_title_by_indexer(
+                &[
+                    one_by_one.to_string(),
+                    batched.to_string(),
+                    "idx-unseen".to_string(),
+                ],
+                "title-1",
+                "anime",
+            )
+            .await
+            .expect("one read for every indexer");
+        assert_eq!(by_indexer.get("idx-unseen"), Some(&Vec::new()));
+        let counts = |indexer_id: &str| {
+            let mut rows = by_indexer[indexer_id]
+                .iter()
+                .map(|record| {
+                    (
+                        record.key.strategy_key.clone(),
+                        record.attempts,
+                        record.empty_successes,
+                        record.usable_successes,
+                        record.suppressed,
+                        record.last_usable_at.is_some(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            rows.sort();
+            rows
+        };
+        assert_eq!(counts(batched), counts(one_by_one));
+        assert_eq!(counts(batched).len(), 3);
+
+        let facets = store
+            .facet_learning_states("anime", &[one_by_one.to_string(), batched.to_string()])
+            .await
+            .expect("facet states");
+        let shape = |state: &IndexerFacetLearningState| {
+            (
+                state.empty_title_ids.clone(),
+                state.suppressed_until,
+                state.reprobe_claimed_at,
+            )
+        };
+        assert_eq!(shape(&facets[batched]), shape(&facets[one_by_one]));
+        assert_eq!(facets[batched].empty_title_ids, vec!["title-1".to_string()]);
     }
 
     #[tokio::test]

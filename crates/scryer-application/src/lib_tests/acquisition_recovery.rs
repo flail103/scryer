@@ -17697,3 +17697,275 @@ async fn an_rss_cycle_past_its_budget_leaves_the_remaining_titles_to_the_next_cy
         .collect::<HashSet<_>>();
     assert_eq!(grabbed_titles, HashSet::from([alpha.id, beta.id]));
 }
+
+/// Answers each RSS poll with the next feed in line, and with an empty feed
+/// once the line runs out.
+struct SequencedFeedRssIndexerClient {
+    feeds: std::sync::Mutex<std::collections::VecDeque<Vec<IndexerSearchResult>>>,
+}
+
+impl SequencedFeedRssIndexerClient {
+    fn new(feeds: Vec<Vec<IndexerSearchResult>>) -> Self {
+        Self {
+            feeds: std::sync::Mutex::new(feeds.into()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl IndexerClient for SequencedFeedRssIndexerClient {
+    async fn search(
+        &self,
+        _query: String,
+        _ids: std::collections::HashMap<String, String>,
+        _category: Option<String>,
+        _facet: Option<String>,
+        _id_search_facet: Option<String>,
+        _newznab_categories: Option<Vec<String>>,
+        _indexer_routing: Option<IndexerRoutingPlan>,
+        _mode: SearchMode,
+        _operation: IndexerErrorOperation,
+        _season: Option<u32>,
+        _episode: Option<u32>,
+        _absolute_episode: Option<u32>,
+        _year: Option<i32>,
+        _tagged_aliases: Vec<TaggedAlias>,
+        _learning_context: Option<crate::IndexerSearchLearningContext>,
+        _cancel_token: tokio_util::sync::CancellationToken,
+    ) -> AppResult<IndexerSearchResponse> {
+        let results = self
+            .feeds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .unwrap_or_default();
+        Ok(IndexerSearchResponse {
+            next_cursor: None,
+            completion: crate::IndexerSearchCompletion::Complete,
+            indexer_outcomes: Vec::new(),
+            results,
+            api_current: None,
+            api_max: None,
+            grab_current: None,
+            grab_max: None,
+        })
+    }
+}
+
+/// A synthetic movie for the carry-over tests, with the feed item that
+/// matches it.
+struct CarryOverFixtureTitle {
+    id: String,
+    release: IndexerSearchResult,
+}
+
+/// Seed one wanted movie per name and return them in title-id order, which
+/// is the order a cycle takes fresh titles up in.
+async fn seed_carry_over_titles(
+    app: &AppUseCase,
+    user: &User,
+    wanted_items: &Arc<TrackingAcquisitionScopeStateRepo>,
+    names: &[&str],
+) -> Vec<CarryOverFixtureTitle> {
+    let mut titles = Vec::with_capacity(names.len());
+    for name in names {
+        let (title, _) =
+            seed_movie_wanted_for_acquisition(app, user, wanted_items, name, 2024).await;
+        let release_name = format!("{}.2024.1080p.WEB-DL-GRP", name.replace(' ', "."));
+        let guid = format!("carry-guid-{}", name.replace(' ', "-").to_lowercase());
+        titles.push(CarryOverFixtureTitle {
+            id: title.id,
+            release: streamed_rss_result("indexer-a", &guid, &release_name),
+        });
+    }
+    titles.sort_by(|left, right| left.id.cmp(&right.id));
+    titles
+}
+
+/// The title ids the durable carry-over record holds.
+async fn persisted_rss_carry_over(app: &AppUseCase) -> Vec<String> {
+    app.services
+        .config
+        .settings
+        .get_setting_json_explicit(
+            SETTINGS_SCOPE_SYSTEM,
+            crate::acquisition::rss::RSS_CARRY_OVER_TITLE_IDS_KEY,
+            None,
+        )
+        .await
+        .expect("read the carry-over record")
+        .and_then(|value| serde_json::from_str::<Option<Vec<String>>>(&value).ok())
+        .flatten()
+        .unwrap_or_default()
+}
+
+/// The title of the one download a cycle submitted.
+async fn the_title_one_cycle_grabbed(
+    submissions: &TrackingDownloadSubmissionRepo,
+    before: usize,
+) -> String {
+    let store = submissions.store.lock().await;
+    assert_eq!(store.len(), before + 1, "the cycle grabs exactly one title");
+    store[before].title_id.clone()
+}
+
+/// A cycle that runs out of budget keeps its carry-over durably, and a new
+/// process takes the carried title up before a fresh one that sorts ahead of
+/// it, even though the restart emptied the seen set and the releases with it.
+#[tokio::test(start_paused = true)]
+async fn an_rss_carry_over_survives_a_restart_and_keeps_its_turn() {
+    let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let feeds = Arc::new(SequencedFeedRssIndexerClient::new(Vec::new()));
+    let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default()),
+        download_submissions.clone(),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+        wanted_items.clone(),
+        feeds.clone(),
+    );
+    let titles = seed_carry_over_titles(
+        &app,
+        &user,
+        &wanted_items,
+        &[
+            "Synthetic Amber Quay",
+            "Synthetic Birch Quay",
+            "Synthetic Cedar Quay",
+        ],
+    )
+    .await;
+    let (first, middle, last) = (&titles[0], &titles[1], &titles[2]);
+    feeds.feeds.lock().unwrap().extend([
+        vec![first.release.clone(), last.release.clone()],
+        // The first poll after a restart sees the carried title's item again,
+        // next to a fresh title that would otherwise sort ahead of it.
+        vec![middle.release.clone(), last.release.clone()],
+    ]);
+
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 0).await,
+        first.id
+    );
+    assert_eq!(persisted_rss_carry_over(&app).await, vec![last.id.clone()]);
+
+    // A new process: fresh coordination over the same durable stores.
+    let restarted = AppUseCase {
+        runtime: crate::services::AppRuntimeState::default(),
+        ..app.clone()
+    };
+    restarted
+        .run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle after the restart");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 1).await,
+        last.id,
+        "the restored title takes its turn ahead of the fresh one"
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&restarted).await,
+        vec![middle.id.clone()]
+    );
+
+    // The feed is quiet now; the title the restarted cycle left is still
+    // taken up, and a cycle that reaches every title clears the record.
+    restarted
+        .run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("second RSS cycle after the restart");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 2).await,
+        middle.id
+    );
+    assert!(persisted_rss_carry_over(&restarted).await.is_empty());
+    assert!(
+        restarted
+            .runtime
+            .acquisition
+            .rss_unprocessed_titles
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Carried titles that alone would fill every cycle do not hold a fresh title
+/// back: the cycle after a budget overrun gives the fresh lane the first
+/// turn, and the carried titles follow in the order they were left.
+#[tokio::test(start_paused = true)]
+async fn a_fresh_rss_title_gets_a_turn_while_carried_titles_fill_the_budget() {
+    let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let feeds = Arc::new(SequencedFeedRssIndexerClient::new(Vec::new()));
+    let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default()),
+        download_submissions.clone(),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+        wanted_items.clone(),
+        feeds.clone(),
+    );
+    let carried = seed_carry_over_titles(
+        &app,
+        &user,
+        &wanted_items,
+        &[
+            "Synthetic Alder Reach",
+            "Synthetic Basalt Reach",
+            "Synthetic Cobalt Reach",
+        ],
+    )
+    .await;
+    let fresh = seed_carry_over_titles(&app, &user, &wanted_items, &["Synthetic Dune Reach"])
+        .await
+        .remove(0);
+    feeds.feeds.lock().unwrap().extend([
+        carried
+            .iter()
+            .map(|title| title.release.clone())
+            .collect::<Vec<_>>(),
+        vec![fresh.release.clone()],
+    ]);
+
+    // A spent budget processes one title per cycle, so the two carried
+    // titles alone would fill the next two cycles.
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 0).await,
+        carried[0].id
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&app).await,
+        vec![carried[1].id.clone(), carried[2].id.clone()]
+    );
+
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("second RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 1).await,
+        fresh.id,
+        "the fresh title is not queued behind every carried one"
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&app).await,
+        vec![carried[1].id.clone(), carried[2].id.clone()],
+        "the carried titles keep their order"
+    );
+
+    for (cycle, expected) in [(2, &carried[1].id), (3, &carried[2].id)] {
+        app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+            .await
+            .expect("carried RSS cycle");
+        assert_eq!(
+            &the_title_one_cycle_grabbed(&download_submissions, cycle).await,
+            expected
+        );
+    }
+    assert!(persisted_rss_carry_over(&app).await.is_empty());
+}
