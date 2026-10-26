@@ -34,6 +34,9 @@ pub(crate) async fn check_with_lookup(
     if waiting_for_completed_history_retry {
         td.state = TrackedDownloadState::Downloading;
     }
+    if td.path_missing_since.is_some() && td.import_retry_deferred(Utc::now()) {
+        return;
+    }
 
     // Don't re-evaluate a post-import block. Import already ran and returned
     // Skipped/Failed — stay blocked until the user explicitly retries. The

@@ -968,7 +968,7 @@ async fn apply_result_keeps_ambiguous_obfuscated_episode_blocked_with_actionable
 }
 
 #[tokio::test]
-async fn apply_result_backs_off_no_video_import_before_blocking() {
+async fn apply_result_keeps_retrying_no_video_import_after_unchanged_checks() {
     let app = build_app(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut td = build_tracked_download("title-1", "series", "Show.S01E01.1080p.WEB-DL");
     let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1009,15 +1009,14 @@ async fn apply_result_backs_off_no_video_import_before_blocking() {
     assert_eq!(td.status, TrackedDownloadStatus::Warning);
     assert_eq!(td.no_video_import_retry.as_ref().unwrap().attempts, 2);
 
-    assert!(!apply_import_result(&app, &mut td, result, 0).await);
-    assert_eq!(td.state, TrackedDownloadState::ImportBlocked);
-    assert_eq!(td.status, TrackedDownloadStatus::Warning);
-    assert!(td.no_video_import_retry.is_none());
-    assert!(
-        td.status_messages[0]
-            .text
-            .contains("Manual review required")
-    );
+    for attempt in 3..=5 {
+        let before = Utc::now();
+        assert!(!apply_import_result(&app, &mut td, result.clone(), 0).await);
+        assert_eq!(td.state, TrackedDownloadState::ImportPending);
+        let retry = td.no_video_import_retry.as_ref().expect("automatic retry");
+        assert_eq!(retry.attempts, attempt);
+        assert!(retry.next_retry_at >= before + Duration::minutes(15));
+    }
 }
 
 #[tokio::test]
