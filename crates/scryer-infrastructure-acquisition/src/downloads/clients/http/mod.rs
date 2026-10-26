@@ -380,13 +380,15 @@ impl DownloadClient for HttpDownloadClient {
         if let Some(kind) = request.source_kind
             && kind != DownloadSourceKind::HttpResource
         {
-            return Err(AppError::Validation(format!(
-                "the HTTP downloader only accepts HTTP resources, not {kind:?}"
-            )));
+            return Err(AppError::validation_refused(
+                scryer_application::http_release_refusal::UNSUPPORTED_TRANSPORT,
+                format!("the HTTP downloader only accepts HTTP resources, not {kind:?}"),
+            ));
         }
         let source = request.http.as_ref().ok_or_else(|| {
-            AppError::Validation(
-                "the HTTP downloader needs the release's HTTP resources; none were sent".into(),
+            AppError::validation_refused(
+                scryer_application::http_release_refusal::DETAILS_UNAVAILABLE,
+                "the HTTP downloader needs the release's HTTP resources; none were sent",
             )
         })?;
         check_download_dir(&self.engine.download_dir).await?;
@@ -396,23 +398,29 @@ impl DownloadClient for HttpDownloadClient {
             mut media_fallbacks,
         } = selection::plan_download(source, &self.engine.download_dir)?;
         if let Some(file) = planned.iter().find(|file| file.resource.auth_ref.is_some()) {
-            return Err(AppError::Validation(format!(
-                "unsupported_auth: {} needs the provider's own sign-in, which the HTTP downloader cannot supply",
-                file.final_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            )));
+            return Err(AppError::validation_refused(
+                scryer_application::http_release_refusal::UNSUPPORTED_AUTH,
+                format!(
+                    "{} needs the provider's own sign-in, which the HTTP downloader cannot supply",
+                    file.final_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                ),
+            ));
         }
         for file in &planned {
             if tokio::fs::try_exists(&file.final_path)
                 .await
                 .unwrap_or(false)
             {
-                return Err(AppError::Validation(format!(
-                    "{} already exists; the HTTP downloader does not overwrite files",
-                    file.final_path.display()
-                )));
+                return Err(AppError::validation_refused(
+                    scryer_application::http_release_refusal::DESTINATION_EXISTS,
+                    format!(
+                        "{} already exists; the HTTP downloader does not overwrite files",
+                        file.final_path.display()
+                    ),
+                ));
             }
         }
 
@@ -457,6 +465,8 @@ impl DownloadClient for HttpDownloadClient {
                     role: file.role,
                     resource: file.resource,
                     final_path: file.final_path,
+                    partial_path: None,
+                    publication: None,
                     attempt: 1,
                     bytes_done: 0,
                     total_bytes: None,
@@ -465,10 +475,12 @@ impl DownloadClient for HttpDownloadClient {
                     language: file.language,
                     forbidden_answers: 0,
                     skipped_error: None,
+                    skipped_reason: None,
                 })
                 .collect(),
             state: HttpJobState::Queued,
             error: None,
+            error_reason: None,
             expected_size_bytes: source.policy.expected_size_bytes,
             expected_duration_seconds: source.policy.expected_duration_seconds,
             verify: source.policy.verify.clone(),
@@ -657,7 +669,11 @@ fn job_to_queue_item(job: &HttpJob, live: Option<LiveSnapshot>) -> DownloadQueue
         queued_at: Some(job.queued_at.to_rfc3339()),
         last_updated_at: Some(job.updated_at.to_rfc3339()),
         attention_required: failed,
-        attention_reason: if failed { job.error.clone() } else { None },
+        attention_reason: if failed {
+            job.error_reason.clone().or_else(|| job.error.clone())
+        } else {
+            None
+        },
         download_client_item_id: job.id.clone(),
         download_id: job.download_id.clone(),
         import_status: None,
@@ -671,7 +687,11 @@ fn job_to_queue_item(job: &HttpJob, live: Option<LiveSnapshot>) -> DownloadQueue
         source_provider: None,
         tracked_state: None,
         tracked_status: None,
-        tracked_status_messages: Vec::new(),
+        tracked_status_messages: if failed && job.error_reason.is_some() {
+            job.error.iter().cloned().collect()
+        } else {
+            Vec::new()
+        },
         tracked_match_type: None,
         seeding: None,
     }

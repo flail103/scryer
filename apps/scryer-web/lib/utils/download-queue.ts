@@ -5,6 +5,7 @@ import type {
   DownloadQueueItem,
 } from "@/lib/types";
 import type { Translate } from "@/components/root/types";
+import { HTTP_RELEASE_REFUSAL_KEYS } from "./http-release-error-message.ts";
 
 export function importRetrySucceeded(
   result: { decision?: string; skipReason?: string | null } | null | undefined,
@@ -452,6 +453,7 @@ export function mergeAuthoritativeQueueItems(
 }
 
 const QUEUE_ATTENTION_REASON_KEYS: Readonly<Record<string, string>> = {
+  ...HTTP_RELEASE_REFUSAL_KEYS,
   download_password_retry: "queue.attention.downloadPasswordRetry",
 };
 
@@ -463,7 +465,8 @@ export function buildQueueStatusDetail(
   const key = reason && Object.hasOwn(QUEUE_ATTENTION_REASON_KEYS, reason)
     ? QUEUE_ATTENTION_REASON_KEYS[reason] : null;
   const messages = [
-    ...(queueItem.trackedStatusMessages ?? []),
+    ...(reason && t && Object.hasOwn(HTTP_RELEASE_REFUSAL_KEYS, reason)
+      ? [] : queueItem.trackedStatusMessages ?? []),
     key && t ? t(key) : reason,
     queueItem.deleteErrorMessage,
     queueItem.importErrorMessage,

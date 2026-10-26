@@ -17,6 +17,12 @@ export const HTTP_RELEASE_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   HTTP_RELEASE_SEPARATE_TRACKS: "httpRelease.refusal.separateTracks",
   HTTP_RELEASE_NO_MEDIA_RESOURCE: "httpRelease.refusal.noMediaResource",
   HTTP_RELEASE_NO_SUBTITLE_RESOURCE: "httpRelease.refusal.noSubtitleResource",
+  HTTP_RELEASE_NO_AUDIO_RESOURCE: "httpRelease.refusal.noAudioResource",
+  HTTP_RELEASE_UNSUPPORTED_AUTH: "httpRelease.refusal.unsupportedAuth",
+  HTTP_RELEASE_UNKNOWN_CONTAINER: "httpRelease.refusal.unknownContainer",
+  HTTP_RELEASE_DESTINATION_EXISTS: "httpRelease.refusal.destinationExists",
+  HTTP_RELEASE_PUBLICATION_FAILED: "httpRelease.refusal.publicationFailed",
+  HTTP_RELEASE_RECOVERY_UNVERIFIED: "httpRelease.refusal.recoveryUnverified",
 };
 
 /** The translation key for an HTTP release refusal, if the error is one this client knows. */

@@ -406,14 +406,12 @@ impl TerminalDownloadCleanup {
             return CleanupSettlement::EntryRemoved;
         }
         match (self.payload, self.client_payload) {
-            (Some(HostPayloadDisposition::Removed), _) => {
-                CleanupSettlement::PayloadAndEntryRemoved
+            (Some(HostPayloadDisposition::Removed), _) => CleanupSettlement::PayloadAndEntryRemoved,
+            (Some(HostPayloadDisposition::PartiallyRetained), _) => {
+                CleanupSettlement::EntryRemovedPayloadPartiallyRetained
             }
             (_, ClientPayloadDeletion::Requested) => {
                 CleanupSettlement::EntryAndPayloadRemovedByClient
-            }
-            (Some(HostPayloadDisposition::PartiallyRetained), _) => {
-                CleanupSettlement::EntryRemovedPayloadPartiallyRetained
             }
             _ => CleanupSettlement::EntryRemovedPayloadUnverified,
         }
@@ -817,12 +815,12 @@ pub(crate) async fn reconcile_terminal_download_cleanup_for_tracked(
         Ok(crate::DownloadCleanupClaim::Deferred) => {
             TerminalDownloadCleanup::bare(TerminalDownloadCleanupOutcome::RetryableFailure)
         }
-        Ok(crate::DownloadCleanupClaim::Settled { outcome }) => TerminalDownloadCleanup::bare(
-            CleanupSettlement::parse(&outcome).map_or(
+        Ok(crate::DownloadCleanupClaim::Settled { outcome }) => {
+            TerminalDownloadCleanup::bare(CleanupSettlement::parse(&outcome).map_or(
                 TerminalDownloadCleanupOutcome::RetryableFailure,
                 CleanupSettlement::settled_outcome,
-            ),
-        ),
+            ))
+        }
         Err(error) => {
             tracing::warn!(download_id = %tracked.download_id, error = %error, "failed to claim terminal cleanup");
             TerminalDownloadCleanup::bare(TerminalDownloadCleanupOutcome::RetryableFailure)
@@ -1402,4 +1400,46 @@ const SAMPLE_SIZE_THRESHOLD: u64 = 50 * 1024 * 1024;
 
 fn non_empty_string(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(test)]
+mod settlement_tests {
+    use super::*;
+
+    // Sonarr 465b5192, Download/DownloadEventHub.cs distinguishes a removal
+    // request from its outcome. A host observation of retained files wins.
+    #[test]
+    fn cleanup_partial_retention_outranks_client_request() {
+        for client_payload in [
+            ClientPayloadDeletion::NotRequested,
+            ClientPayloadDeletion::Requested,
+        ] {
+            let cleanup = TerminalDownloadCleanup {
+                payload: Some(HostPayloadDisposition::PartiallyRetained),
+                payload_requested: true,
+                client_payload,
+                ..TerminalDownloadCleanup::bare(TerminalDownloadCleanupOutcome::Removed)
+            };
+            assert_eq!(
+                cleanup.removed_settlement(),
+                CleanupSettlement::EntryRemovedPayloadPartiallyRetained
+            );
+            let entry_only = TerminalDownloadCleanup {
+                payload_requested: false,
+                ..cleanup
+            };
+            assert_eq!(
+                entry_only.removed_settlement(),
+                CleanupSettlement::EntryRemoved
+            );
+            let removed = TerminalDownloadCleanup {
+                payload: Some(HostPayloadDisposition::Removed),
+                ..cleanup
+            };
+            assert_eq!(
+                removed.removed_settlement(),
+                CleanupSettlement::PayloadAndEntryRemoved
+            );
+        }
+    }
 }

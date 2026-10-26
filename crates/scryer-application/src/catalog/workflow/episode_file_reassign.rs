@@ -98,6 +98,21 @@ impl AppUseCase {
                 ))
             })?;
 
+        // Different files can displace each other's primary episode links.
+        // Keep compensation inside the same title-wide critical section.
+        let _title_guard = self
+            .runtime
+            .jobs
+            .interactive_operation_guards
+            .try_acquire(&format!("episode-file-reassign:{}", title.id))
+            .await
+            .ok_or_else(|| {
+                AppError::LocationOperationBusy(format!(
+                    "another operation is already reassigning files for title {}",
+                    title.id
+                ))
+            })?;
+
         let outcome = self
             .services
             .library
