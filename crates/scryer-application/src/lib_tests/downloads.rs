@@ -5792,6 +5792,134 @@ fn series_pack_completed_download(
     completed
 }
 
+#[tokio::test]
+async fn regrab_import_records_a_visible_result_for_each_attempt() {
+    let (fixture, _) = build_fail_closed_pack_fixture(FailClosedPackFixtureOptions {
+        series_root_at_library_dir: true,
+        ..Default::default()
+    })
+    .await;
+    let FailClosedPackFixture {
+        app,
+        user,
+        title,
+        library_dir: _library_dir,
+        import_artifacts,
+        ..
+    } = fixture;
+    let source = tempfile::tempdir().unwrap();
+    let filename = "Fail.Closed.Pack.S01E01.1080p.WEB-DL.mkv";
+    let payload = write_pack_video(source.path(), filename);
+    let unrelated = source.path().join("unrelated.txt");
+    std::fs::write(&unrelated, b"preserve me").unwrap();
+    let mut completed = series_pack_completed_download(
+        "shared-regrab-hash",
+        &title.id,
+        "Fail.Closed.Pack.S01E01.1080p.WEB-DL",
+        source.path(),
+    );
+    let mut import_ids: Vec<String> = Vec::new();
+    for attempt in 0..3 {
+        let download_id = scryer_domain::download_identity::DownloadId::new();
+        completed.download_id = Some(download_id.to_wire());
+        let result = {
+            let _probe = probe_agrees_with_the_name(1920, 1080);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                crate::import::import::import_completed_download(&app, &user, &completed),
+            )
+            .await
+            .expect("import completes")
+            .expect("import returns an outcome")
+        };
+        assert_eq!(
+            result.decision,
+            if attempt == 1 {
+                scryer_domain::ImportDecision::Skipped
+            } else {
+                scryer_domain::ImportDecision::Imported
+            },
+            "attempt {attempt}: {result:?}"
+        );
+        if attempt == 1 {
+            assert_eq!(result.skip_reason, Some(ImportSkipReason::AlreadyImported));
+        }
+        let events = app
+            .services
+            .events
+            .domain_events
+            .list(&DomainEventFilter {
+                title_id: Some(title.id.clone()),
+                limit: 100,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let import_id = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                DomainEventPayload::ImportCompleted(data) if attempt != 1 => data
+                    .import_id
+                    .as_ref()
+                    .filter(|id| !import_ids.contains(*id))
+                    .cloned(),
+                DomainEventPayload::ImportRejected(data) if attempt == 1 => {
+                    assert_eq!(data.skip_reason, Some(ImportSkipReason::AlreadyImported));
+                    data.import_id.clone()
+                }
+                _ => None,
+            })
+            .expect("each attempt has its own visible import outcome");
+        let record = app
+            .services
+            .workflow
+            .imports
+            .get_import_by_id(&import_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record
+                .download_id
+                .as_deref()
+                .and_then(scryer_domain::download_identity::DownloadId::from_wire),
+            Some(download_id)
+        );
+        assert!(!import_ids.contains(&import_id));
+        import_ids.push(import_id);
+        assert!(payload.exists());
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"preserve me");
+        if attempt == 1 {
+            // Model a missing library file already reconciled out of the
+            // catalog; the retained completed payload is available to restore.
+            for file in app
+                .services
+                .library
+                .media_files
+                .list_media_files_for_title(&title.id)
+                .await
+                .unwrap()
+            {
+                std::fs::remove_file(&file.file_path).unwrap();
+                app.services
+                    .library
+                    .media_files
+                    .delete_media_file(&file.id)
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+    let artifacts = import_artifacts
+        .artifacts_for_file(&filename.to_ascii_lowercase())
+        .await;
+    assert_eq!(
+        artifacts.len(),
+        3,
+        "each attempt keeps its artifact: {artifacts:?}"
+    );
+}
+
 /// A verified better library copy satisfies a foreign episode download without
 /// burning its release. A later accepted upgrade still replaces that copy.
 #[tokio::test]

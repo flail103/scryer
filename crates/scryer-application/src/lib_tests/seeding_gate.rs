@@ -153,6 +153,84 @@ fn tracked_for(
     }
 }
 
+/// A retained torrent can have multiple canonical attempts, even for one
+/// title. Cleanup may settle its own attempt but cannot settle the regrab.
+#[tokio::test]
+async fn regrab_reconciliation_preserves_independent_attempts() {
+    let client = Arc::new(StubDownloadClient::default());
+    let (app, user, _) = bootstrap_with_torrent_clients(client.clone());
+    let config = create_enabled_download_client_config(&app, &user, "qBit", "qbittorrent").await;
+    let title = movie_title(&app, &user, "Regrab Fixture").await;
+
+    for previous_state in [
+        TrackedDownloadState::Imported,
+        TrackedDownloadState::Failed,
+        TrackedDownloadState::Ignored,
+    ] {
+        for live_state in [
+            TrackedDownloadState::Downloading,
+            TrackedDownloadState::ImportPending,
+            TrackedDownloadState::Importing,
+            TrackedDownloadState::ImportedSeeding,
+        ] {
+            for (previous_title, previous_client) in [
+                (Some(title.id.as_str()), config.id.as_str()),
+                (Some("other-title"), config.id.as_str()),
+                (None, config.id.as_str()),
+                (Some(title.id.as_str()), "other-client"),
+            ] {
+                let mut tracker = crate::tracked_downloads::TrackedDownloadService::new();
+                let mut previous = tracked_for(
+                    &config.id,
+                    "qbittorrent",
+                    "shared-hash",
+                    &title,
+                    previous_state,
+                    true,
+                );
+                previous.title_id = previous_title.map(str::to_owned);
+                previous.client_id = previous_client.to_owned();
+                previous.client_item.client_id = previous_client.to_owned();
+                previous.retained_in_client_after_cleanup = true;
+                let previous_id = tracker.insert_for_tests(previous);
+                let mut live = tracked_for(
+                    &config.id,
+                    "qbittorrent",
+                    "shared-hash",
+                    &title,
+                    live_state,
+                    true,
+                );
+                // A retained seeding row has already passed through the gate.
+                live.retained_in_client_after_cleanup =
+                    live_state == TrackedDownloadState::ImportedSeeding;
+                let live_id = tracker.insert_for_tests(live);
+                for _ in 0..2 {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        crate::app_usecase_integration::reconcile_terminal_tracked_downloads(
+                            &app,
+                            &mut tracker,
+                        ),
+                    )
+                    .await
+                    .expect("reconciliation completes");
+                    assert_eq!(
+                        tracker.get_by_download_id(live_id).unwrap().state,
+                        live_state
+                    );
+                    assert_eq!(
+                        tracker.get_by_download_id(previous_id).unwrap().state,
+                        previous_state
+                    );
+                }
+                assert_eq!(tracker.get_all().len(), 2);
+            }
+        }
+    }
+    assert!(client.deleted_requests.lock().await.is_empty());
+}
+
 #[tokio::test]
 async fn an_imported_torrent_is_held_instead_of_removed_when_seeding_cannot_be_proven_done() {
     let download_client = Arc::new(StubDownloadClient::default());

@@ -3889,12 +3889,9 @@ pub(crate) async fn reconcile_terminal_tracked_downloads(
     app: &AppUseCase,
     tracker: &mut crate::tracked_downloads::TrackedDownloadService,
 ) {
-    // Memory only. Persisting would write a durable terminal marker for the
-    // duplicate's own download, and the durable cleanup tick selects exactly
-    // those markers. The reconcile cannot loop without it: a settled row is
-    // never collected as an update again.
-    reconcile_duplicate_terminal_source_states(tracker);
-
+    // Canonical DownloadId is the attempt boundary. A retained client item can
+    // be grabbed again for the same title; its earlier attempt must never
+    // settle the new one. Repeated observations already share one cache row.
     if app
         .services
         .workflow
@@ -4044,106 +4041,6 @@ pub(crate) async fn reconcile_terminal_tracked_downloads(
     }
 }
 
-/// Settle a live row whose client item a sibling row of the **same title**
-/// already finished, and return the `(DownloadId, state)` pairs it applied.
-///
-/// Memory only; see `reconcile_terminal_tracked_downloads`.
-fn reconcile_duplicate_terminal_source_states(
-    tracker: &mut crate::tracked_downloads::TrackedDownloadService,
-) -> Vec<(
-    scryer_domain::download_identity::DownloadId,
-    TrackedDownloadState,
-)> {
-    // Keyed by client item *and* title. One client item can carry rows of two
-    // titles: a title is deleted and the same torrent is grabbed again for its
-    // replacement, and the deleted title's settled row must never settle the
-    // new grab. A row without a title speaks for nothing and is spoken for by
-    // nothing. Within a key the strongest terminal state wins.
-    let updates: Vec<(
-        scryer_domain::download_identity::DownloadId,
-        TrackedDownloadState,
-    )> = {
-        let mut terminal_source_states: HashMap<
-            (crate::ClientJobLocator, &str),
-            TrackedDownloadState,
-        > = HashMap::new();
-        for tracked in tracker.get_all() {
-            if !tracked.state.is_terminal() {
-                continue;
-            }
-            let Some(key) = reconcile_source_title_key(tracked) else {
-                continue;
-            };
-            match terminal_source_states.entry(key) {
-                std::collections::hash_map::Entry::Occupied(mut existing) => {
-                    if terminal_state_precedence(tracked.state)
-                        > terminal_state_precedence(*existing.get())
-                    {
-                        existing.insert(tracked.state);
-                    }
-                }
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(tracked.state);
-                }
-            }
-        }
-
-        if terminal_source_states.is_empty() {
-            return Vec::new();
-        }
-
-        // `is_import_settled` rather than `is_terminal`: a row already parked in
-        // `ImportedSeeding` has been through the gate, and flipping it back to a
-        // sibling's `Imported` would only send it straight back through on the
-        // next poll.
-        tracker
-            .get_all()
-            .into_iter()
-            .filter(|tracked| !tracked.state.is_import_settled())
-            .filter_map(|tracked| {
-                let key = reconcile_source_title_key(tracked)?;
-                terminal_source_states
-                    .get(&key)
-                    .copied()
-                    .map(|state| (tracked.download_id, state))
-            })
-            .collect()
-    };
-
-    // Applied by cache key: the id string is shared by every row of one
-    // torrent, so resolving it again could mutate the sibling instead of the
-    // row that was collected.
-    let mut applied = Vec::with_capacity(updates.len());
-    for (download_id, state) in updates {
-        let Some(tracked) = tracker.get_mut_by_download_id(download_id) else {
-            continue;
-        };
-        tracing::info!(
-            id = %tracked.id,
-            download_id = %download_id,
-            client_id = tracked.client_id.as_str(),
-            client_type = tracked.client_type.as_str(),
-            download_client_item_id = tracked.client_item.download_client_item_id.as_str(),
-            from = ?tracked.state,
-            to = ?state,
-            "tracked: reconciling duplicate terminal source state"
-        );
-        apply_reconciled_terminal_state(tracked, state);
-        applied.push((download_id, state));
-    }
-    applied
-}
-
-fn reconcile_source_title_key(
-    tracked: &TrackedDownload,
-) -> Option<(crate::ClientJobLocator, &str)> {
-    let title_id = tracked
-        .title_id
-        .as_deref()
-        .filter(|title_id| !title_id.trim().is_empty())?;
-    Some((tracked_download_source_identity(tracked)?, title_id))
-}
-
 fn tracked_download_source_identity(tracked: &TrackedDownload) -> Option<crate::ClientJobLocator> {
     let client_type = tracked.client_type.trim();
     let item_id = tracked.client_item.download_client_item_id.trim();
@@ -4155,29 +4052,6 @@ fn tracked_download_source_identity(tracked: &TrackedDownload) -> Option<crate::
         client_type,
         item_id,
     ))
-}
-
-fn terminal_state_precedence(state: TrackedDownloadState) -> u8 {
-    match state {
-        TrackedDownloadState::Imported => 3,
-        TrackedDownloadState::Failed => 2,
-        TrackedDownloadState::Ignored => 1,
-        _ => 0,
-    }
-}
-
-fn apply_reconciled_terminal_state(tracked: &mut TrackedDownload, state: TrackedDownloadState) {
-    tracked.state = state;
-    match state {
-        TrackedDownloadState::Imported => {
-            tracked.status = TrackedDownloadStatus::Ok;
-            tracked.status_messages.clear();
-        }
-        TrackedDownloadState::Failed => {
-            tracked.status = TrackedDownloadStatus::Error;
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

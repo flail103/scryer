@@ -5424,6 +5424,90 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn regrab_restart_restores_only_its_own_state_and_deduplicates_observations() {
+        let shared_item_id = "0123456789abcdef";
+        let submission_for = |download_id: DownloadId, title_id: &str| crate::DownloadSubmission {
+            download_id,
+            title_id: title_id.to_string(),
+            purpose: crate::DownloadSubmissionPurpose::Standard,
+            facet: "series".to_string(),
+            download_client_id: Some("client-1".to_string()),
+            download_client_type: "qbittorrent".to_string(),
+            download_client_item_id: shared_item_id.to_string(),
+            source_hint: None,
+            source_provider_id: None,
+            source_provider_name: None,
+            source_kind: None,
+            source_title: Some(format!("Synthetic.Show.S01E01.{title_id}")),
+            info_hash: None,
+            release_size_bytes: None,
+            request_signature: None,
+            scope: crate::SubmissionScope::Title,
+            release_listing_json: None,
+        };
+        let imported_download_id = DownloadId::new();
+        let regrab_download_id = DownloadId::new();
+        let imported = submission_for(imported_download_id, "title-same");
+        let regrab = submission_for(regrab_download_id, "title-same");
+        let identity_for = |download_id: DownloadId| crate::DownloadSubmissionIdentity {
+            download_id: Some(download_id.to_wire()),
+        };
+        let download_submissions = Arc::new(TestDownloadSubmissionRepo {
+            // A shared locator alone cannot distinguish historical attempts.
+            submission: Some(imported.clone()),
+            download_id_submissions: Arc::new(Mutex::new(vec![
+                (imported, identity_for(imported_download_id)),
+                (regrab, identity_for(regrab_download_id)),
+            ])),
+            canonical_identity_tracked_states: Arc::new(Mutex::new(HashMap::from([(
+                imported_download_id,
+                "imported".to_owned(),
+            )]))),
+            ..Default::default()
+        });
+        let app = build_app(download_submissions, Arc::new(TestImportRepo::default()))
+            .with_test_overrides(|services| {
+                services.with_download_registry(Arc::new(WireTokenDownloadRegistry))
+            });
+        // Rebuilding the tracker models restart: only durable per-download
+        // state may be restored, independent of observation order.
+        for order in [
+            [imported_download_id, regrab_download_id],
+            [regrab_download_id, imported_download_id],
+        ] {
+            let mut tracker = TrackedDownloadService::new();
+            for download_id in order {
+                let mut item = build_client_item();
+                item.client_type = "qbittorrent".to_owned();
+                item.download_client_item_id = shared_item_id.to_owned();
+                // Plugin observations have no wire token, so the tracked
+                // string stays the shared locator. This fixture registry
+                // resolves the canonical identity from the observed name.
+                item.download_id = None;
+                item.title_name = download_id.to_wire();
+                for first_observation in [true, false] {
+                    let outcome = tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        tracker.track(&app, item.clone()),
+                    )
+                    .await
+                    .expect("tracking completes")
+                    .expect("item is tracked");
+                    assert_eq!(outcome.download_id, download_id);
+                    assert_eq!(outcome.newly_tracked, first_observation);
+                }
+            }
+            assert_eq!(tracker.get_all().len(), 2);
+            let imported = tracker.get_by_download_id(imported_download_id).unwrap();
+            assert_eq!(imported.state, TrackedDownloadState::Imported);
+            let regrab = tracker.get_by_download_id(regrab_download_id).unwrap();
+            assert_eq!(regrab.title_id.as_deref(), Some("title-same"));
+            assert_eq!(regrab.state, TrackedDownloadState::Downloading);
+            assert_eq!(imported.id, regrab.id);
+        }
+    }
+
     /// Two rows of one torrent sharing an id string, cached with the given
     /// states and no poller mapping yet.
     fn shared_string_siblings(
