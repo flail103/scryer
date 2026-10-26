@@ -1090,6 +1090,14 @@ pub(crate) fn service_setting_seeds() -> &'static [ServiceSettingSeed] {
             default_value_json: "null",
             is_sensitive: false,
         },
+        ServiceSettingSeed {
+            category: SETTINGS_CATEGORY_ACQUISITION,
+            scope: SETTINGS_SCOPE_SYSTEM,
+            key_name: "acquisition.rss_carry_over_title_ids",
+            data_type: "json",
+            default_value_json: "null",
+            is_sensitive: false,
+        },
         // NFO sidecar writing on import
         ServiceSettingSeed {
             category: SETTINGS_CATEGORY_MEDIA,
@@ -2245,6 +2253,7 @@ mod tests {
             "acquisition.convergence_seeded_at",
             "acquisition.convergence_resume_after",
             "acquisition.convergence_hot_resume_after",
+            "acquisition.rss_carry_over_title_ids",
         ] {
             let seed = seeds
                 .iter()
