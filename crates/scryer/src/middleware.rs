@@ -1556,13 +1556,33 @@ pub(crate) struct AuthState {
     pub(crate) authless_web_client_proof: AuthlessWebClientProofState,
 }
 
-/// GraphQL handler that returns a streaming response body.
-///
-/// When the client disconnects (e.g. via `AbortController.abort()` in the browser),
-/// hyper stops polling this body stream, which drops the `execute_batch` future.
-/// This cancels the entire resolver chain — including any outbound reqwest call to
-/// SMG — so the cancellation propagates all the way through to the database query.
-fn restore_control_request(request: &GraphQLRequest) -> Option<bool> {
+/// Which kinds of top-level fields one GraphQL request selects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RestoreRequestShape {
+    /// Selects restore control or sign-in fields, which bypass ordinary admission.
+    control: bool,
+    /// Selects ordinary application fields, which hold an admission lease.
+    ordinary: bool,
+    /// Selects the compatibility apply operation, which waits in-request for
+    /// a drain that itself waits for every ordinary admission lease.
+    waits_for_drain: bool,
+}
+
+impl RestoreRequestShape {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            control: self.control || other.control,
+            ordinary: self.ordinary || other.ordinary,
+            waits_for_drain: self.waits_for_drain || other.waits_for_drain,
+        }
+    }
+}
+
+/// Classifies the selected operation's top-level fields through aliases and
+/// fragments. `None` means the request cannot be classified (it does not
+/// parse, names no single operation, or exceeds the analysis bounds); the
+/// schema refuses such requests itself when they reach normal execution.
+fn restore_control_request(request: &GraphQLRequest) -> Option<RestoreRequestShape> {
     use async_graphql::parser::types::{OperationType, Selection, SelectionSet};
     let document = async_graphql::parser::parse_query(&request.query).ok()?;
     let selected = match request.operation_name.as_deref() {
@@ -1581,35 +1601,46 @@ fn restore_control_request(request: &GraphQLRequest) -> Option<bool> {
     };
     let (_, operation) = selected?;
     if operation.node.ty == OperationType::Subscription {
-        return Some(false);
+        return Some(RestoreRequestShape {
+            ordinary: true,
+            ..RestoreRequestShape::default()
+        });
     }
     fn allowed(
         set: &SelectionSet,
         document: &async_graphql::parser::types::ExecutableDocument,
         depth: usize,
         remaining: &mut usize,
-    ) -> Option<bool> {
+    ) -> Option<RestoreRequestShape> {
         if depth > 32 || set.items.is_empty() {
             return None;
         }
-        let mut classification = None;
+        let mut shape = RestoreRequestShape::default();
         for item in &set.items {
             *remaining = remaining.checked_sub(1)?;
             let current = match &item.node {
-                Selection::Field(field) => Some(matches!(
-                    field.node.name.node.as_str(),
-                    "restoreStatus"
-                        | "startInspectRestoreBundle"
-                        | "startApplyRestoreBundle"
-                        | "inspectRestoreBundle"
-                        | "applyRestoreBundle"
-                        | "login"
-                        | "webauthnAuthenticateStart"
-                        | "webauthnAuthenticateComplete"
-                        | "loginVerificationPasskeyStart"
-                        | "loginVerificationPasskeyComplete"
-                        | "loginVerificationTotpComplete"
-                )),
+                Selection::Field(field) => {
+                    let name = field.node.name.node.as_str();
+                    let control = matches!(
+                        name,
+                        "restoreStatus"
+                            | "startInspectRestoreBundle"
+                            | "startApplyRestoreBundle"
+                            | "inspectRestoreBundle"
+                            | "applyRestoreBundle"
+                            | "login"
+                            | "webauthnAuthenticateStart"
+                            | "webauthnAuthenticateComplete"
+                            | "loginVerificationPasskeyStart"
+                            | "loginVerificationPasskeyComplete"
+                            | "loginVerificationTotpComplete"
+                    );
+                    Some(RestoreRequestShape {
+                        control,
+                        ordinary: !control,
+                        waits_for_drain: name == "applyRestoreBundle",
+                    })
+                }
                 Selection::InlineFragment(fragment) => allowed(
                     &fragment.node.selection_set.node,
                     document,
@@ -1628,12 +1659,9 @@ fn restore_control_request(request: &GraphQLRequest) -> Option<bool> {
                         )
                     }),
             }?;
-            if classification.is_some_and(|previous| previous != current) {
-                return None;
-            }
-            classification = Some(current);
+            shape = shape.merge(current);
         }
-        classification
+        Some(shape)
     }
     allowed(&operation.node.selection_set.node, &document, 0, &mut 1024)
 }
@@ -1641,6 +1669,17 @@ fn restore_control_request(request: &GraphQLRequest) -> Option<bool> {
 #[cfg(test)]
 mod restore_admission_tests {
     use super::*;
+
+    const CONTROL: RestoreRequestShape = RestoreRequestShape {
+        control: true,
+        ordinary: false,
+        waits_for_drain: false,
+    };
+    const ORDINARY: RestoreRequestShape = RestoreRequestShape {
+        control: false,
+        ordinary: true,
+        waits_for_drain: false,
+    };
 
     #[test]
     fn background_restore_admission_checks_fields_through_aliases_and_fragments() {
@@ -1651,20 +1690,34 @@ mod restore_admission_tests {
         ] {
             assert_eq!(
                 restore_control_request(&GraphQLRequest::new(query)),
-                Some(true)
+                Some(CONTROL)
             );
         }
         assert_eq!(
             restore_control_request(&GraphQLRequest::new(
                 "query restoreStatus { titles { id } }"
             )),
-            Some(false)
+            Some(ORDINARY)
         );
         assert_eq!(
             restore_control_request(&GraphQLRequest::new(
                 "query { restoreStatus { id } titles { id } }"
             )),
-            None
+            Some(RestoreRequestShape {
+                control: true,
+                ordinary: true,
+                waits_for_drain: false,
+            })
+        );
+        assert_eq!(
+            restore_control_request(&GraphQLRequest::new(
+                "mutation { ... on Mutation { renamed: applyRestoreBundle(uploadId: \"x\") { summary { totalRows } } } }"
+            )),
+            Some(RestoreRequestShape {
+                control: true,
+                ordinary: false,
+                waits_for_drain: true,
+            })
         );
         assert_eq!(
             restore_control_request(&GraphQLRequest::new(
@@ -1676,7 +1729,7 @@ mod restore_admission_tests {
             restore_control_request(&GraphQLRequest::new(
                 "subscription { restoreStatus { id } }"
             )),
-            Some(false)
+            Some(ORDINARY)
         );
     }
 
@@ -1686,11 +1739,11 @@ mod restore_admission_tests {
         assert_eq!(restore_control_request(&GraphQLRequest::new(query)), None);
         assert_eq!(
             restore_control_request(&GraphQLRequest::new(query).operation_name("Status")),
-            Some(true)
+            Some(CONTROL)
         );
         assert_eq!(
             restore_control_request(&GraphQLRequest::new(query).operation_name("Normal")),
-            Some(false)
+            Some(ORDINARY)
         );
     }
 
@@ -1738,6 +1791,12 @@ fn restore_control_refusal(maintenance_active: bool) -> Response {
     }))).into_response()
 }
 
+/// GraphQL handler that returns a streaming response body.
+///
+/// When the client disconnects (e.g. via `AbortController.abort()` in the browser),
+/// hyper stops polling this body stream, which drops the `execute_batch` future.
+/// This cancels the entire resolver chain — including any outbound reqwest call to
+/// SMG — so the cancellation propagates all the way through to the database query.
 pub(crate) async fn graphql_handler(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -1750,20 +1809,23 @@ pub(crate) async fn graphql_handler(
     if batch.iter().count() > GRAPHQL_MAX_BATCH_OPERATIONS {
         return graphql_batch_limit_response(GRAPHQL_MAX_BATCH_OPERATIONS);
     }
-    // A mixed batch holds ordinary admission; restore control must never wait
-    // for its own request lease while draining the application.
-    let classifications = batch
+    // Only a pure restore control request bypasses ordinary admission; while
+    // restore owns the application, admission refuses everything else.
+    // Outside restore, unclassifiable and mixed requests take the normal path
+    // (a malformed one gets the schema's own error), except a mixed request
+    // that waits for an apply: it would hold the admission lease its own
+    // drain waits for.
+    let shape = batch
         .iter()
         .map(restore_control_request)
-        .collect::<Option<Vec<_>>>();
-    let Some(classifications) = classifications else {
-        return restore_control_refusal(state.app.restore_coordinator().blocks_application());
-    };
-    let control_count = classifications.iter().filter(|control| **control).count();
-    if control_count > 0 && control_count != batch.iter().count() {
+        .try_fold(RestoreRequestShape::default(), |shape, current| {
+            current.map(|current| shape.merge(current))
+        });
+    let control_only = shape.is_some_and(|shape| shape.control && !shape.ordinary);
+    if !control_only && shape.is_some_and(|shape| shape.waits_for_drain) {
         return restore_control_refusal(state.app.restore_coordinator().blocks_application());
     }
-    let _restore_admission = if control_count == 0 {
+    let _restore_admission = if !control_only {
         match state.app.restore_coordinator().admit_request().await {
             Ok(guard) => Some(guard),
             Err(_) => return restore_maintenance_response(),
@@ -1966,7 +2028,7 @@ pub(crate) async fn graphql_handler(
             graphql_execution_timeout_response()
         }
     };
-    if control_count == 0
+    if !control_only
         && let Err(error) = state
             .app
             .image_proxy_repository()
@@ -3894,6 +3956,40 @@ mod tests {
         let key = body["data"]["createMyApiKey"]["apiKey"]
             .as_str()
             .expect("fixture key");
+        // Outside restore, unclassifiable and mixed requests reach the schema
+        // and get its ordinary answer, never a restore refusal.
+        for payload in [
+            serde_json::json!({"query": "query {"}),
+            serde_json::json!({"query": "query A { titles { id } } query B { titles { id } }"}),
+            serde_json::json!({"query": "query { restoreStatus { id } titles { id } }"}),
+            serde_json::json!([{ "query": "{ restoreStatus { id } }" }, { "query": "{ titles { id } }" }]),
+        ] {
+            let response = router.clone().oneshot(request(payload.clone())).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{payload}");
+            let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            for item in body.as_array().cloned().unwrap_or_else(|| vec![body.clone()]) {
+                for error in item["errors"].as_array().cloned().unwrap_or_default() {
+                    assert!(error["extensions"]["reason"].is_null(), "{payload}: {body}");
+                }
+            }
+        }
+        // A mixed request that waits for an apply would hold the admission
+        // lease its own drain waits for, so it is refused even outside restore.
+        let response = router
+            .clone()
+            .oneshot(request(serde_json::json!({
+                "query": "mutation { applyRestoreBundle(uploadId: \"fixture\") { summary { totalRows } } __typename }"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["errors"][0]["extensions"]["reason"],
+            "RESTORE_OPERATION_INVALID"
+        );
         let (attempt, _) = context
             .app
             .restore_coordinator()
@@ -3904,6 +4000,8 @@ mod tests {
             )
             .unwrap();
         for payload in [
+            serde_json::json!({"query": "query {"}),
+            serde_json::json!({"query": "query A { titles { id } } query B { titles { id } }"}),
             serde_json::json!({"query": "query restoreStatus { renamed: titles { id } }"}),
             serde_json::json!({"query": "query { ...Fields } fragment Fields on Query { titles { id } }"}),
             serde_json::json!({"query": "query { restoreStatus { id } titles { id } }"}),

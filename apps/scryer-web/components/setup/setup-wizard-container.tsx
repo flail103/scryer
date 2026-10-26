@@ -77,7 +77,6 @@ interface SetupWizardContainerProps {
     values?: Record<string, string | number | boolean | null | undefined>,
   ) => string;
   isReentry?: boolean;
-  onBackendRestarting: () => void;
 }
 
 function formatQualityTarget(target: QualityTargetId): string {
@@ -95,7 +94,6 @@ function formatQualityTarget(target: QualityTargetId): string {
 export function SetupWizardContainer({
   t,
   isReentry,
-  onBackendRestarting,
 }: SetupWizardContainerProps) {
   const client = useClient();
   const navigate = useNavigate();
@@ -763,7 +761,6 @@ export function SetupWizardContainer({
         <SetupRestoreView
           t={t}
           onBack={() => goToStep(0)}
-          onBackendRestarting={onBackendRestarting}
         />
       )}
 

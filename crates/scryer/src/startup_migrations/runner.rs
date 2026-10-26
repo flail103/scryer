@@ -210,7 +210,6 @@ impl ApplicationMigrator {
         datastore: StoreDatastore,
         settings: Arc<SettingsStore>,
     ) -> Result<Self, String> {
-        restore_checkpoint()?;
         validate_registry(MIGRATIONS)?;
         let ledger = MigrationLedger { datastore };
         let applied = ledger.applied_ids().await?;
@@ -225,7 +224,6 @@ impl ApplicationMigrator {
 
     async fn adopt_legacy_completion_markers(&mut self) -> Result<(), String> {
         for spec in MIGRATIONS {
-            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -246,7 +244,6 @@ impl ApplicationMigrator {
                     serde_json::from_str::<String>(&record.effective_value_json).ok()
                 });
             if state.as_deref() == Some("completed") {
-                restore_checkpoint()?;
                 self.ledger.record(*spec, 0).await?;
                 self.applied.insert(spec.id.to_string());
                 tracing::info!(
@@ -268,7 +265,6 @@ impl ApplicationMigrator {
             .copied()
             .filter(|spec| spec.phase == MigrationPhase::Early)
         {
-            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -325,7 +321,6 @@ impl ApplicationMigrator {
         &mut self,
         proxies: Arc<dyn scryer_application::ProxyConfigRepository>,
     ) -> Result<(), String> {
-        restore_checkpoint()?;
         let datastore = self.ledger.datastore.clone();
         let spec = *MIGRATIONS
             .iter()
@@ -345,7 +340,6 @@ impl ApplicationMigrator {
         previous_version: Option<&str>,
         current_version: &str,
     ) -> Result<(), String> {
-        restore_checkpoint()?;
         let datastore = self.ledger.datastore.clone();
         let store = DatastoreCustomizationStore::new(datastore.clone());
         if let Err(error) = app.resume_pending_title_tag_renames().await {
@@ -358,7 +352,6 @@ impl ApplicationMigrator {
         // Inspect per-installation progress even after global completion: a
         // restored catalog can introduce another legacy artifact later.
         let started = Instant::now();
-        restore_checkpoint()?;
         if super::_0014_plugin_components_020::migrate(app, &datastore, &store).await? {
             self.record_success(spec, started).await?;
         }
@@ -367,7 +360,6 @@ impl ApplicationMigrator {
             .copied()
             .filter(|spec| spec.phase == MigrationPhase::ApplicationReady)
         {
-            restore_checkpoint()?;
             if self.applied.contains(spec.id) {
                 continue;
             }
@@ -475,9 +467,6 @@ impl ApplicationMigrator {
     }
 
     pub(crate) fn spawn_title_folder_recovery(&self, app: &AppUseCase) {
-        if restore_checkpoint().is_err() {
-            return;
-        }
         let spec = *MIGRATIONS
             .iter()
             .find(|spec| spec.id == super::_0018_title_folder_recovery::ID)
@@ -507,9 +496,6 @@ impl ApplicationMigrator {
         app: &AppUseCase,
         previous_version: Option<&str>,
     ) {
-        if restore_checkpoint().is_err() {
-            return;
-        }
         let app = app.clone();
         self.queue_empty_duplicate_title_folder_cleanup(
             app.restore_coordinator().clone(),
@@ -573,9 +559,6 @@ impl ApplicationMigrator {
     where
         F: Future<Output = Result<(), String>>,
     {
-        if restore_checkpoint().is_err() {
-            return;
-        }
         let started = Instant::now();
         match migration.await {
             Ok(()) => {
@@ -628,16 +611,11 @@ impl ApplicationMigrator {
         spec: MigrationSpec,
         started: Instant,
     ) -> Result<(), String> {
-        restore_checkpoint()?;
         self.ledger.record(spec, elapsed_ms(started)).await?;
         self.applied.insert(spec.id.to_string());
         tracing::info!(migration_id = spec.id, "application migration completed");
         Ok(())
     }
-}
-
-fn restore_checkpoint() -> Result<(), String> {
-    scryer_application::check_restore_deadline().map_err(|error| error.to_string())
 }
 
 fn elapsed_ms(started: Instant) -> i64 {
@@ -1006,7 +984,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn background_restore_expired_budget_does_not_run_or_adopt_migrations() {
+    async fn background_restore_budget_never_interrupts_post_promotion_migrations() {
+        // Migrations run after promotion has committed the restored data. An
+        // exhausted restore budget must not stop them, or a large restored
+        // database could never finish starting.
         let (_temp, _settings, mut migrator) = test_migrator().await;
         let expired = scryer_application::RestoreDeadline::with_budget(std::time::Duration::ZERO);
         let mut executed = false;
@@ -1018,10 +999,18 @@ mod tests {
                         Ok(())
                     })
                     .await;
-                assert!(migrator.adopt_legacy_completion_markers().await.is_err());
+                migrator.adopt_legacy_completion_markers().await.unwrap();
             })
             .await;
-        assert!(!executed);
+        assert!(executed);
+        assert!(
+            migrator
+                .ledger
+                .applied_ids()
+                .await
+                .unwrap()
+                .contains(MIGRATIONS[0].id)
+        );
     }
 
     #[tokio::test]

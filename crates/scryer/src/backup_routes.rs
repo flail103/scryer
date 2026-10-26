@@ -226,6 +226,34 @@ fn retire_live_file_without_replacement(target: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Make renames inside `directory` durable. Windows offers no directory
+/// handle to flush; NTFS journals the rename itself.
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> std::io::Result<()> {
+    std::fs::File::open(directory)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn sync_parent_directories(targets: &[PathBuf]) -> std::io::Result<()> {
+    let mut synced: Vec<&Path> = Vec::new();
+    for parent in targets.iter().filter_map(|target| target.parent()) {
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        if !synced.contains(&parent) {
+            sync_directory(parent)?;
+            synced.push(parent);
+        }
+    }
+    Ok(())
+}
+
 fn recover_interrupted_restore_promotion(targets: &[PathBuf]) -> std::io::Result<()> {
     for target in targets {
         restore_backup_file_if_present(target)?;
@@ -471,12 +499,17 @@ where
         return Err(error);
     }
 
+    // The marker lives in another directory from the files it vouches for,
+    // so their renames must be durable before it is. Then the marker's own
+    // entry must be durable before cleanup removes any rollback copy.
+    sync_parent_directories(&promotion_targets).map_err(restore_recovery_error)?;
     std::fs::write(&promoted_marker, b"complete").map_err(restore_recovery_error)?;
     std::fs::OpenOptions::new()
         .write(true)
         .open(&promoted_marker)
         .and_then(|file| file.sync_all())
         .map_err(restore_recovery_error)?;
+    sync_directory(&pending_dir).map_err(restore_recovery_error)?;
     cleanup_restore_promotion_artifacts(&promotion_targets).map_err(restore_recovery_error)?;
     let _ = std::fs::remove_dir_all(&pending_dir);
     Ok(true)

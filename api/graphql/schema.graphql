@@ -26836,6 +26836,11 @@ type RestoreJobPayload {
 	"""
 	reason: String
 	"""
+	Server sentence for the failure, when this process observed it; clients
+	translate `reason` and show this only for a code they do not know.
+	"""
+	message: String
+	"""
 	Approximate database import percentage; 100 still requires finalization.
 	"""
 	importPercent: Int

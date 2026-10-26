@@ -5795,6 +5795,20 @@ const en: LocaleDictionary = {
   "setup.restoreSummaryTitle": "Bundle contents",
   "setup.restoreConfirmDescription":
     "This replaces the fresh setup database, writes restored instance secrets, and restarts Scryer into the restored instance.",
+  "setup.restoreRefusal.deadlineExceeded":
+    "The restore ran past its one-hour limit and was stopped safely. Try again.",
+  "setup.restoreRefusal.maintenanceActive":
+    "A restore or recovery is already in progress. Wait for it to finish.",
+  "setup.restoreRefusal.interrupted":
+    "The restore was interrupted before it finished. Try again.",
+  "setup.restoreRefusal.attemptNotFound":
+    "This restore attempt no longer exists. Start the restore again.",
+  "setup.restoreRefusal.recoveryRequired":
+    "The restore could not be confirmed safe. Check the server logs before trying again.",
+  "setup.restoreRefusal.operationInvalid":
+    "Restore requests must be sent on their own. Reload the page and try again.",
+  "setup.restoreRefusal.restartFailed":
+    "The restore was prepared, but Scryer could not restart into it. Retry restore runs the restart again without staging the backup twice, or restart Scryer to finish.",
   "setup.restoreCreatedAt": "Created",
   "setup.restoreSourceVersion": "Source version",
   "setup.restoreSourceEngine": "Source engine",

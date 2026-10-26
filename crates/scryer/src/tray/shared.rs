@@ -99,22 +99,90 @@ pub(crate) fn app_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
-fn restore_processing_active(profile: &Path) -> bool {
-    let bytes = match std::fs::read(profile.join("restore-job.json")) {
-        Ok(bytes) => bytes,
-        Err(error) => return error.kind() != std::io::ErrorKind::NotFound,
+/// Whether a restore is running right now. The record alone is not enough: a
+/// server that crashed mid-restore leaves an active phase on disk. Only an
+/// active phase whose owning process is a live Scryer server counts; an
+/// unreadable, stale or ownerless record never holds the wrapper open.
+fn restore_processing_active(profile: &Path, owner_is_live_server: impl Fn(u32) -> bool) -> bool {
+    let Ok(bytes) = std::fs::read(profile.join("restore-job.json")) else {
+        return false;
     };
     let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return true;
+        return false;
     };
-    !matches!(
+    let active = matches!(
         record.get("phase").and_then(serde_json::Value::as_str),
-        Some("complete" | "failed" | "interrupted")
-    )
+        Some("inspecting" | "draining" | "restoring" | "cancelling" | "restarting")
+    );
+    active
+        && record
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok())
+            .is_some_and(owner_is_live_server)
 }
 
-fn readiness_deadline_expired(profile: &Path, now: Instant, deadline: Instant) -> bool {
-    now >= deadline && !restore_processing_active(profile)
+fn readiness_deadline_expired(
+    profile: &Path,
+    now: Instant,
+    deadline: Instant,
+    owner_is_live_server: impl Fn(u32) -> bool,
+) -> bool {
+    now >= deadline && !restore_processing_active(profile, owner_is_live_server)
+}
+
+/// Whether `pid` is a running server from this installation.
+#[cfg(windows)]
+fn restore_owner_is_live_server(pid: u32) -> bool {
+    installation_dir().is_ok_and(|install_dir| {
+        application_updater::windows_process::find_product_processes(
+            &[SERVER_EXECUTABLE],
+            &install_dir,
+            &[],
+        )
+        .contains(&pid)
+    })
+}
+
+/// Whether `pid` is a running server from this installation.
+#[cfg(unix)]
+fn restore_owner_is_live_server(pid: u32) -> bool {
+    let Some(image) = process_image(pid) else {
+        return false;
+    };
+    let Ok(wrapper) = std::env::current_exe() else {
+        return false;
+    };
+    let expected = wrapper.with_file_name(SERVER_EXECUTABLE);
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.into());
+    canonical(&image) == canonical(&expected)
+}
+
+#[cfg(not(any(windows, unix)))]
+fn restore_owner_is_live_server(_pid: u32) -> bool {
+    false
+}
+
+/// The executable a live process runs, or `None` when it is not running.
+#[cfg(target_os = "macos")]
+fn process_image(pid: u32) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: The buffer is writable for the length passed; the call writes
+    // at most that many bytes and returns how many it wrote.
+    let written =
+        unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    let written = usize::try_from(written).ok().filter(|length| *length > 0)?;
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(
+        &buffer[..written],
+    )))
+}
+
+/// The executable a live process runs, or `None` when it is not running.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn process_image(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
 /// Where the desktop wrapper keeps the server's configuration, database and
@@ -624,6 +692,9 @@ pub(crate) struct ServerSupervisor {
     /// How long the log was when the owned server was started, so a failed
     /// start is reported with its own error rather than an earlier run's.
     log_offset: u64,
+    /// Decides whether a restore record's owning process is a live server.
+    /// Replaceable so tests can stand in for the shipped server binary.
+    restore_owner_probe: fn(u32) -> bool,
 }
 
 impl ServerSupervisor {
@@ -635,6 +706,7 @@ impl ServerSupervisor {
             #[cfg(windows)]
             job: None,
             log_offset: 0,
+            restore_owner_probe: restore_owner_is_live_server,
         }
     }
 
@@ -642,8 +714,12 @@ impl ServerSupervisor {
         &self.profile_dir
     }
 
+    fn restore_active(&self) -> bool {
+        restore_processing_active(&self.profile_dir, self.restore_owner_probe)
+    }
+
     pub(crate) fn ensure_restore_idle(&self) -> Result<(), String> {
-        if restore_processing_active(&self.profile_dir) {
+        if self.restore_active() {
             Err("A backup restore is still running. Keep Scryer open until it finishes.".into())
         } else {
             Ok(())
@@ -763,7 +839,7 @@ impl ServerSupervisor {
             .map_err(|error| format!("failed to check Scryer server status: {error}"))?
             .is_none()
         {
-            if restore_processing_active(&self.profile_dir) {
+            if self.restore_active() {
                 self.server = Some(child);
                 return Err(
                     "A backup restore is still running. Keep Scryer open until it finishes.".into(),
@@ -825,7 +901,12 @@ impl ServerSupervisor {
             if let Some(status) = self.exited_server()? {
                 return Err(self.start_failure(status));
             }
-            if readiness_deadline_expired(&self.profile_dir, Instant::now(), deadline) {
+            if readiness_deadline_expired(
+                &self.profile_dir,
+                Instant::now(),
+                deadline,
+                self.restore_owner_probe,
+            ) {
                 return Err(format!(
                     "timed out waiting for Scryer to become ready at {}",
                     app_origin(self.port)
@@ -1286,16 +1367,24 @@ mod tests {
     };
 
     #[test]
-    fn background_restore_desktop_deadline_waits_for_work_and_recovery() {
+    fn background_restore_desktop_deadline_waits_only_for_a_live_restore_owner() {
         let profile = tempfile::tempdir().unwrap();
         let record = profile.path().join("restore-job.json");
         let started = std::time::Instant::now();
         let deadline = started + super::SERVER_READY_TIMEOUT;
         let later = started + std::time::Duration::from_secs(7200);
+        let live_owner = std::process::id();
+        let is_live = |pid: u32| pid == std::process::id();
+        let supervisor = || {
+            let mut supervisor = super::ServerSupervisor::new(profile.path().to_owned(), 0);
+            supervisor.restore_owner_probe = |pid| pid == std::process::id();
+            supervisor
+        };
         assert!(super::readiness_deadline_expired(
             profile.path(),
             later,
-            deadline
+            deadline,
+            is_live
         ));
         for phase in [
             "inspecting",
@@ -1304,38 +1393,71 @@ mod tests {
             "cancelling",
             "restarting",
         ] {
-            std::fs::write(&record, serde_json::json!({"phase": phase}).to_string()).unwrap();
+            std::fs::write(
+                &record,
+                serde_json::json!({"phase": phase, "pid": live_owner}).to_string(),
+            )
+            .unwrap();
             assert!(!super::readiness_deadline_expired(
                 profile.path(),
                 later,
-                deadline
+                deadline,
+                is_live
             ));
-            assert!(
-                super::ServerSupervisor::new(profile.path().to_owned(), 0)
-                    .ensure_restore_idle()
-                    .is_err()
-            );
-        }
-        // A damaged record cannot be evidence that it is safe to terminate.
-        std::fs::write(&record, b"incomplete").unwrap();
-        assert!(!super::readiness_deadline_expired(
-            profile.path(),
-            later,
-            deadline
-        ));
-        for phase in ["complete", "failed", "interrupted"] {
-            std::fs::write(&record, serde_json::json!({"phase": phase}).to_string()).unwrap();
+            assert!(supervisor().ensure_restore_idle().is_err());
+            // The same phase left behind by a server that is gone, or by a
+            // record that names no owner, must not hold the wrapper open.
+            std::fs::write(
+                &record,
+                serde_json::json!({"phase": phase, "pid": live_owner.wrapping_add(1)}).to_string(),
+            )
+            .unwrap();
             assert!(super::readiness_deadline_expired(
                 profile.path(),
                 later,
-                deadline
+                deadline,
+                is_live
+            ));
+            supervisor().ensure_restore_idle().unwrap();
+            std::fs::write(&record, serde_json::json!({"phase": phase}).to_string()).unwrap();
+            supervisor().ensure_restore_idle().unwrap();
+        }
+        // A damaged record is not evidence that a restore is running.
+        std::fs::write(&record, b"incomplete").unwrap();
+        assert!(super::readiness_deadline_expired(
+            profile.path(),
+            later,
+            deadline,
+            is_live
+        ));
+        supervisor().ensure_restore_idle().unwrap();
+        for phase in ["complete", "failed", "interrupted"] {
+            std::fs::write(
+                &record,
+                serde_json::json!({"phase": phase, "pid": live_owner}).to_string(),
+            )
+            .unwrap();
+            assert!(super::readiness_deadline_expired(
+                profile.path(),
+                later,
+                deadline,
+                is_live
             ));
             assert!(!super::readiness_deadline_expired(
                 profile.path(),
                 started,
-                deadline
+                deadline,
+                is_live
             ));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_restore_owner_probe_rejects_processes_that_are_not_the_server() {
+        // The test binary is alive but is not the server shipped beside it.
+        assert!(!super::restore_owner_is_live_server(std::process::id()));
+        assert!(!super::restore_owner_is_live_server(u32::MAX));
     }
 
     #[cfg(windows)]
@@ -1399,6 +1521,9 @@ mod tests {
             )
             .unwrap();
         let mut supervisor = super::ServerSupervisor::new(profile.path().to_owned(), 0);
+        // The coordinator above runs in this test process, so it is the live
+        // restore owner the record names.
+        supervisor.restore_owner_probe = |pid| pid == std::process::id();
         supervisor.place_in_job(&child);
         supervisor.server = Some(child);
         assert!(supervisor.ensure_restore_idle().is_err());

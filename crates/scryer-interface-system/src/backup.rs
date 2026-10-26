@@ -97,6 +97,9 @@ pub struct RestoreJobPayload {
     expires_at: DateTime<Utc>,
     /// Stable failure reason code, if processing stopped.
     reason: Option<String>,
+    /// Server sentence for the failure, when this process observed it; clients
+    /// translate `reason` and show this only for a code they do not know.
+    message: Option<String>,
     /// Approximate database import percentage; 100 still requires finalization.
     import_percent: Option<i32>,
     /// Inspected contents when available; never contains backup secrets.
@@ -108,6 +111,10 @@ fn job_payload(
     status: scryer_application::RestoreJobStatus,
 ) -> GqlResult<RestoreJobPayload> {
     use scryer_application::{RestoreJobKind as K, RestoreJobPhase as P};
+    let message = matches!(status.phase, P::Failed | P::Interrupted)
+        .then(|| recorded_failure(&status.id))
+        .flatten()
+        .map(|error| to_gql_error(error).message);
     Ok(RestoreJobPayload {
         id: status.id.into(),
         upload_id: status.upload_id.into(),
@@ -130,6 +137,7 @@ fn job_payload(
         started_at: status.started_at,
         expires_at: status.expires_at,
         reason: status.reason,
+        message,
         import_percent: status.import_percent.map(i32::from),
         summary: app
             .restore_coordinator()
@@ -156,6 +164,56 @@ impl BackupQueries {
     }
 }
 
+/// The error a worker in this process last failed with, keyed by attempt id.
+/// The coordinator persists only the reason code; this keeps the original
+/// error so callers still waiting on the attempt receive it unchanged.
+static LAST_RESTORE_FAILURE: std::sync::Mutex<Option<(String, AppError)>> =
+    std::sync::Mutex::new(None);
+
+fn record_failure(id: &str, error: &AppError) {
+    *LAST_RESTORE_FAILURE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id.to_owned(), error.clone()));
+}
+
+fn recorded_failure(id: &str) -> Option<AppError> {
+    LAST_RESTORE_FAILURE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .filter(|(failed, _)| failed == id)
+        .map(|(_, error)| error.clone())
+}
+
+/// The error a failed or interrupted attempt reports: the worker's own error
+/// when the attempt kept its reason, otherwise the attempt's recorded reason.
+fn restore_failure_error(status: &scryer_application::RestoreJobStatus) -> AppError {
+    let recorded = recorded_failure(&status.id);
+    if let Some(error) = recorded
+        .as_ref()
+        .filter(|error| error.validation_reason().is_some())
+        .filter(|error| error.validation_reason() == status.reason.as_deref())
+    {
+        return error.clone();
+    }
+    let reason = scryer_application::restore_refusal::ALL
+        .iter()
+        .copied()
+        .find(|reason| Some(*reason) == status.reason.as_deref())
+        .unwrap_or(scryer_application::restore_refusal::RESTORE_INTERRUPTED);
+    match recorded {
+        Some(AppError::ValidationRefused { message, .. })
+        | Some(AppError::ValidationRefusedWithCount { message, .. }) => {
+            AppError::validation_refused(reason, message)
+        }
+        Some(error) => AppError::validation_refused(reason, error.to_string()),
+        None => AppError::validation_refused(
+            reason,
+            "Restore did not complete; see restore status and server logs",
+        ),
+    }
+}
+
 async fn wait_for_restore(app: &AppUseCase, id: &str) -> GqlResult<RestoreJobPayload> {
     loop {
         let notified = app.restore_coordinator().changed.notified();
@@ -167,14 +225,7 @@ async fn wait_for_restore(app: &AppUseCase, id: &str) -> GqlResult<RestoreJobPay
                 return job_payload(app, status);
             }
             if matches!(status.phase, P::Failed | P::Interrupted) {
-                return Err(to_gql_error(AppError::validation_refused(
-                    scryer_application::restore_refusal::ALL
-                        .iter()
-                        .copied()
-                        .find(|reason| Some(*reason) == status.reason.as_deref())
-                        .unwrap_or(scryer_application::restore_refusal::RESTORE_INTERRUPTED),
-                    "Restore did not complete; see restore status and server logs",
-                )));
+                return Err(to_gql_error(restore_failure_error(&status)));
             }
         } else {
             return Err(to_gql_error(
@@ -294,7 +345,7 @@ impl BackupMutations {
         })?;
 
         let bundle_path = upload_dir.join(STAGED_BUNDLE_FILENAME);
-        let guard = match write_uploaded_bundle(upload, bundle_path.clone(), guard).await {
+        let guard = match write_uploaded_bundle(upload, bundle_path, guard).await {
             Ok(guard) => guard,
             Err(error) => {
                 let _ = tokio::fs::remove_dir_all(&upload_dir).await;
@@ -315,27 +366,14 @@ impl BackupMutations {
         let deadline = scryer_application::RestoreDeadline::resume(status.expires_at);
         tokio::spawn(async move {
             let _guard = guard;
-            let worker_deadline = deadline.clone();
-            let work = async {
-                tokio::task::spawn_blocking(move || {
-                    worker_deadline.scope_blocking(|| {
-                        let summary = inspect_backup_bundle(&bundle_path, password.as_deref())?;
-                        worker_deadline.check()?;
-                        validate_inspected_bundle_is_restorable(&summary)?;
-                        Ok::<_, AppError>(summary)
-                    })
-                })
-                .await
-                .unwrap_or_else(|error| {
-                    Err(AppError::Repository(format!(
-                        "restore inspection worker failed: {error}"
-                    )))
-                })
-            };
-            let result = worker_app
-                .restore_coordinator()
-                .supervise(&id, &deadline, work)
-                .await;
+            let result = inspect_staged_upload(
+                worker_app.restore_coordinator(),
+                &id,
+                &deadline,
+                upload_dir,
+                password,
+            )
+            .await;
             match result {
                 Ok(summary) => {
                     worker_app.restore_coordinator().set_summary(summary);
@@ -402,21 +440,29 @@ impl BackupMutations {
         ensure_restore_supported(&restore.datastore_config).map_err(to_gql_error)?;
 
         let upload_id = upload_id.as_ref().trim();
-        if upload_id.is_empty() || upload_id.contains('/') || upload_id.contains('\\') {
+        if !is_valid_restore_upload_id(upload_id) {
             return Err(to_gql_error(AppError::validation_refused(
                 scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_ID_INVALID,
                 "invalid restore upload id",
             )));
         }
 
-        let bundle_path = restore_upload_bundle_path(&restore.data_dir, upload_id);
-        if !bundle_path.exists() {
-            return Err(to_gql_error(AppError::not_found_reason(
-                scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_NOT_FOUND,
-                "restore upload could not be found; inspect the bundle again",
-            )));
+        if let Some(status) = resume_failed_restart(
+            app.restore_coordinator(),
+            &restore.data_dir,
+            upload_id,
+            &restore.restart,
+        )
+        .map_err(to_gql_error)?
+        {
+            drop(maintenance_guard);
+            return job_payload(&app, status);
         }
 
+        let bundle_path =
+            staged_upload_bundle_path(&restore.data_dir, upload_id).map_err(to_gql_error)?;
+
+        let upload_dir = restore_upload_dir(&restore.data_dir, upload_id);
         let data_dir = restore.data_dir.clone();
         let datastore_config = restore.datastore_config;
         let datastore = restore.datastore.clone();
@@ -464,6 +510,9 @@ impl BackupMutations {
                 .await;
             match result {
                 Ok(summary) => {
+                    // The staged copy is no longer needed once the restore is
+                    // prepared, and it holds the bundle's instance secrets.
+                    let _ = tokio::fs::remove_dir_all(&upload_dir).await;
                     worker_app.restore_coordinator().set_summary(summary);
                     match worker_app.restore_coordinator().transition(
                         &id,
@@ -509,7 +558,73 @@ fn tracing_restore_error(
     deadline: &scryer_application::RestoreDeadline,
     error: AppError,
 ) {
+    record_failure(id, &error);
     app.restore_coordinator().fail(id, deadline, error);
+}
+
+/// Inspect one staged upload under the attempt's deadline. A bundle that fails
+/// inspection is never applied, so its upload directory is removed.
+async fn inspect_staged_upload(
+    coordinator: &scryer_application::RestoreCoordinator,
+    id: &str,
+    deadline: &scryer_application::RestoreDeadline,
+    upload_dir: PathBuf,
+    password: Option<String>,
+) -> Result<BackupBundleInspectSummary, AppError> {
+    let worker_deadline = deadline.clone();
+    let bundle_path = upload_dir.join(STAGED_BUNDLE_FILENAME);
+    let work = async {
+        tokio::task::spawn_blocking(move || {
+            worker_deadline.scope_blocking(|| {
+                let summary = inspect_backup_bundle(&bundle_path, password.as_deref())?;
+                worker_deadline.check()?;
+                validate_inspected_bundle_is_restorable(&summary)?;
+                Ok::<_, AppError>(summary)
+            })
+        })
+        .await
+        .unwrap_or_else(|error| {
+            Err(AppError::Repository(format!(
+                "restore inspection worker failed: {error}"
+            )))
+        })
+    };
+    let result = coordinator.supervise(id, deadline, work).await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_dir_all(&upload_dir).await;
+    }
+    result
+}
+
+/// A successful stage removed its upload, so a restart whose launcher failed is
+/// retried from the prepared stage instead of staging again. The ready marker
+/// is checked first: without it the stage is gone, the record is left as it
+/// is, and the caller reports the missing upload.
+fn resume_failed_restart(
+    coordinator: &scryer_application::RestoreCoordinator,
+    data_dir: &Path,
+    upload_id: &str,
+    restart: &scryer_interface_core::RestoreRestartHandle,
+) -> Result<Option<scryer_application::RestoreJobStatus>, AppError> {
+    if !pending_restore_ready_path(data_dir).is_file() {
+        return Ok(None);
+    }
+    let Some(status) = coordinator.resume_failed_restart(upload_id)? else {
+        return Ok(None);
+    };
+    restart.schedule_restart();
+    Ok(Some(status))
+}
+
+fn staged_upload_bundle_path(data_dir: &Path, upload_id: &str) -> Result<PathBuf, AppError> {
+    let bundle_path = restore_upload_bundle_path(data_dir, upload_id);
+    if !bundle_path.exists() {
+        return Err(AppError::not_found_reason(
+            scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_NOT_FOUND,
+            "restore upload could not be found; inspect the bundle again",
+        ));
+    }
+    Ok(bundle_path)
 }
 
 fn normalize_password(password: Option<String>) -> Option<String> {
@@ -527,6 +642,16 @@ fn encode_path_segment(value: &str) -> String {
         }
     }
     encoded
+}
+
+/// Upload ids are generated by `next_restore_upload_id`; accepting only its
+/// alphabet keeps a supplied id to one plain directory name under staging
+/// (no separators, `.`/`..`, or drive prefixes).
+fn is_valid_restore_upload_id(upload_id: &str) -> bool {
+    !upload_id.is_empty()
+        && upload_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn restore_upload_dir(data_dir: &Path, upload_id: &str) -> PathBuf {
@@ -842,11 +967,33 @@ fn write_owner_only_file_atomically(path: &Path, contents: &str) -> Result<(), A
 mod tests {
     use super::*;
 
+    /// A uniquely named scratch directory removed when the test ends.
+    struct ScratchDir(PathBuf);
+    impl ScratchDir {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "scryer-backup-test-{}-{}",
+                next_restore_upload_id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn background_restore_expired_staging_preserves_existing_and_unrelated_files() {
-        let directory =
-            std::env::temp_dir().join(format!("scryer-test-{}", next_restore_upload_id()));
-        std::fs::create_dir(&directory).unwrap();
+        let scratch = ScratchDir::new();
+        let directory = scratch.path().to_path_buf();
         let pending = pending_restore_dir(&directory);
         std::fs::create_dir(&pending).unwrap();
         let existing = pending.join("existing-stage");
@@ -874,6 +1021,170 @@ mod tests {
         assert_eq!(std::fs::read(existing).unwrap(), b"preserve");
         assert_eq!(std::fs::read(unrelated).unwrap(), b"preserve");
         assert!(!pending_restore_ready_path(&directory).exists());
-        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn background_restore_failed_inspection_removes_only_its_own_upload() {
+        let scratch = ScratchDir::new();
+        let upload_dir = restore_upload_dir(scratch.path(), "restore_1_1");
+        let sibling_dir = restore_upload_dir(scratch.path(), "restore_2_2");
+        std::fs::create_dir_all(&upload_dir).unwrap();
+        std::fs::create_dir_all(&sibling_dir).unwrap();
+        std::fs::write(
+            upload_dir.join(STAGED_BUNDLE_FILENAME),
+            b"not a backup bundle",
+        )
+        .unwrap();
+        std::fs::write(sibling_dir.join(STAGED_BUNDLE_FILENAME), b"preserve").unwrap();
+        let coordinator = scryer_application::RestoreCoordinator::default();
+        let (job, _) = coordinator
+            .start(
+                scratch.path(),
+                "restore_1_1",
+                scryer_application::RestoreJobKind::Inspect,
+            )
+            .unwrap();
+        let deadline = scryer_application::RestoreDeadline::resume(job.expires_at);
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            inspect_staged_upload(&coordinator, &job.id, &deadline, upload_dir.clone(), None),
+        )
+        .await
+        .expect("inspection must finish");
+        assert!(result.is_err());
+        assert!(!upload_dir.exists());
+        assert_eq!(
+            std::fs::read(sibling_dir.join(STAGED_BUNDLE_FILENAME)).unwrap(),
+            b"preserve"
+        );
+        assert!(scratch.path().join(RESTORE_STAGING_DIRNAME).is_dir());
+    }
+
+    #[test]
+    fn background_restore_failure_keeps_the_workers_reason_and_sentence() {
+        const SYNTHETIC_REFUSAL: &str = "SECURITY_BACKUP_SYNTHETIC_REFUSAL";
+        let scratch = ScratchDir::new();
+        let coordinator = scryer_application::RestoreCoordinator::default();
+        // A failed attempt carrying `reason`, recorded the way a worker leaves it.
+        let status = |reason: &str| {
+            let (job, _) = coordinator
+                .start(
+                    scratch.path(),
+                    "restore_1_1",
+                    scryer_application::RestoreJobKind::Inspect,
+                )
+                .unwrap();
+            coordinator
+                .transition(
+                    &job.id,
+                    scryer_application::RestoreJobPhase::Failed,
+                    Some(reason),
+                )
+                .unwrap();
+            coordinator.snapshot().unwrap()
+        };
+        let failed = status(SYNTHETIC_REFUSAL);
+        record_failure(
+            &failed.id,
+            &AppError::validation_refused(SYNTHETIC_REFUSAL, "synthetic sentence"),
+        );
+        let error = restore_failure_error(&failed);
+        assert_eq!(error.validation_reason(), Some(SYNTHETIC_REFUSAL));
+        assert_eq!(
+            to_gql_error(error).message,
+            "validation: synthetic sentence"
+        );
+
+        let interrupted = scryer_application::restore_refusal::RESTORE_INTERRUPTED;
+        let failed = status(interrupted);
+        record_failure(
+            &failed.id,
+            &AppError::Repository("synthetic storage failure".to_owned()),
+        );
+        let error = restore_failure_error(&failed);
+        assert_eq!(error.validation_reason(), Some(interrupted));
+        assert!(error.to_string().contains("synthetic storage failure"));
+
+        let deadline = scryer_application::restore_refusal::RESTORE_DEADLINE_EXCEEDED;
+        let error = restore_failure_error(&status(deadline));
+        assert_eq!(error.validation_reason(), Some(deadline));
+    }
+
+    #[test]
+    fn background_restore_failed_restart_resumes_from_the_prepared_stage() {
+        let scratch = ScratchDir::new();
+        let restart_requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requests = restart_requests.clone();
+        let restart = scryer_interface_core::RestoreRestartHandle::new(move || {
+            requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let coordinator = scryer_application::RestoreCoordinator::default();
+        let (job, _) = coordinator
+            .start(
+                scratch.path(),
+                "restore_1_1",
+                scryer_application::RestoreJobKind::Apply,
+            )
+            .unwrap();
+        coordinator
+            .transition(
+                &job.id,
+                scryer_application::RestoreJobPhase::Failed,
+                Some(scryer_application::restore_refusal::RESTORE_RESTART_FAILED),
+            )
+            .unwrap();
+
+        // Without the ready marker the stage is gone: nothing changes, and the
+        // normal path reports the upload the successful stage removed.
+        assert!(
+            resume_failed_restart(&coordinator, scratch.path(), "restore_1_1", &restart)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            coordinator.snapshot().unwrap().phase,
+            scryer_application::RestoreJobPhase::Failed
+        );
+        assert_eq!(
+            restart_requests.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            staged_upload_bundle_path(scratch.path(), "restore_1_1")
+                .unwrap_err()
+                .reason(),
+            Some(scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_NOT_FOUND)
+        );
+
+        std::fs::create_dir_all(pending_restore_dir(scratch.path())).unwrap();
+        std::fs::write(pending_restore_ready_path(scratch.path()), b"ready").unwrap();
+        // Another upload's retry does not resume this attempt.
+        assert!(
+            resume_failed_restart(&coordinator, scratch.path(), "restore_2_2", &restart)
+                .unwrap()
+                .is_none()
+        );
+        let resumed = resume_failed_restart(&coordinator, scratch.path(), "restore_1_1", &restart)
+            .unwrap()
+            .expect("a failed restart with a ready stage resumes");
+        assert_eq!(resumed.id, job.id);
+        assert_eq!(
+            coordinator.snapshot().unwrap().phase,
+            scryer_application::RestoreJobPhase::Restarting
+        );
+        assert_eq!(
+            restart_requests.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert!(!scratch.path().join(RESTORE_STAGING_DIRNAME).exists());
+        assert!(pending_restore_ready_path(scratch.path()).is_file());
+    }
+
+    #[test]
+    fn background_restore_upload_ids_stay_one_plain_directory_name() {
+        assert!(is_valid_restore_upload_id(&next_restore_upload_id()));
+        for invalid in ["", ".", "..", "../x", "a/b", "a\\b", "C:", "a b", "a\0b"] {
+            assert!(!is_valid_restore_upload_id(invalid), "{invalid:?}");
+        }
     }
 }
