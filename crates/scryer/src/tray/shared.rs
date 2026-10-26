@@ -99,6 +99,24 @@ pub(crate) fn app_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
+fn restore_processing_active(profile: &Path) -> bool {
+    let bytes = match std::fs::read(profile.join("restore-job.json")) {
+        Ok(bytes) => bytes,
+        Err(error) => return error.kind() != std::io::ErrorKind::NotFound,
+    };
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return true;
+    };
+    !matches!(
+        record.get("phase").and_then(serde_json::Value::as_str),
+        Some("complete" | "failed" | "interrupted")
+    )
+}
+
+fn readiness_deadline_expired(profile: &Path, now: Instant, deadline: Instant) -> bool {
+    now >= deadline && !restore_processing_active(profile)
+}
+
 /// Where the desktop wrapper keeps the server's configuration, database and
 /// logs. This is deliberately not the portable layout the tarball uses: a
 /// wrapper install writes to per-user application data, and a portable install
@@ -624,6 +642,14 @@ impl ServerSupervisor {
         &self.profile_dir
     }
 
+    pub(crate) fn ensure_restore_idle(&self) -> Result<(), String> {
+        if restore_processing_active(&self.profile_dir) {
+            Err("A backup restore is still running. Keep Scryer open until it finishes.".into())
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn logs_dir(&self) -> PathBuf {
         self.profile_dir.join("logs")
     }
@@ -737,6 +763,12 @@ impl ServerSupervisor {
             .map_err(|error| format!("failed to check Scryer server status: {error}"))?
             .is_none()
         {
+            if restore_processing_active(&self.profile_dir) {
+                self.server = Some(child);
+                return Err(
+                    "A backup restore is still running. Keep Scryer open until it finishes.".into(),
+                );
+            }
             if request_graceful_stop(&mut child)? {
                 return Ok(());
             }
@@ -760,6 +792,7 @@ impl ServerSupervisor {
         &self,
         policy: application_updater::windows_process::StopPolicy,
     ) -> Result<Vec<u32>, String> {
+        self.ensure_restore_idle()?;
         let install_dir = installation_dir()?;
         let owned: Vec<u32> = self.server.iter().map(Child::id).collect();
         Ok(
@@ -792,7 +825,7 @@ impl ServerSupervisor {
             if let Some(status) = self.exited_server()? {
                 return Err(self.start_failure(status));
             }
-            if Instant::now() >= deadline {
+            if readiness_deadline_expired(&self.profile_dir, Instant::now(), deadline) {
                 return Err(format!(
                     "timed out waiting for Scryer to become ready at {}",
                     app_origin(self.port)
@@ -1252,6 +1285,59 @@ mod tests {
         popover_content_from_health, remove_desktop_profile, row_detail,
     };
 
+    #[test]
+    fn background_restore_desktop_deadline_waits_for_work_and_recovery() {
+        let profile = tempfile::tempdir().unwrap();
+        let record = profile.path().join("restore-job.json");
+        let started = std::time::Instant::now();
+        let deadline = started + super::SERVER_READY_TIMEOUT;
+        let later = started + std::time::Duration::from_secs(7200);
+        assert!(super::readiness_deadline_expired(
+            profile.path(),
+            later,
+            deadline
+        ));
+        for phase in [
+            "inspecting",
+            "draining",
+            "restoring",
+            "cancelling",
+            "restarting",
+        ] {
+            std::fs::write(&record, serde_json::json!({"phase": phase}).to_string()).unwrap();
+            assert!(!super::readiness_deadline_expired(
+                profile.path(),
+                later,
+                deadline
+            ));
+            assert!(
+                super::ServerSupervisor::new(profile.path().to_owned(), 0)
+                    .ensure_restore_idle()
+                    .is_err()
+            );
+        }
+        // A damaged record cannot be evidence that it is safe to terminate.
+        std::fs::write(&record, b"incomplete").unwrap();
+        assert!(!super::readiness_deadline_expired(
+            profile.path(),
+            later,
+            deadline
+        ));
+        for phase in ["complete", "failed", "interrupted"] {
+            std::fs::write(&record, serde_json::json!({"phase": phase}).to_string()).unwrap();
+            assert!(super::readiness_deadline_expired(
+                profile.path(),
+                later,
+                deadline
+            ));
+            assert!(!super::readiness_deadline_expired(
+                profile.path(),
+                started,
+                deadline
+            ));
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn windowless_shutdown_child() {
@@ -1262,11 +1348,12 @@ mod tests {
         println!("shutdown-child-ready");
         std::io::stdout().flush().unwrap();
         assert_eq!(std::io::stdin().read(&mut [0]).unwrap(), 0);
+        println!("shutdown-child-finished");
     }
 
     #[cfg(windows)]
     #[test]
-    fn windowless_child_stops_without_console_interrupt_or_kill() {
+    fn background_restore_windows_supervisor_preserves_active_child() {
         use std::io::{BufRead, BufReader};
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
         command
@@ -1282,22 +1369,63 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
+            let mut finished = false;
             for line in BufReader::new(stdout).lines() {
-                if line.unwrap().contains("shutdown-child-ready") {
+                let line = line.unwrap();
+                if line.contains("shutdown-child-ready") {
                     let _ = ready_tx.send(());
                 }
+                finished |= line.contains("shutdown-child-finished");
             }
+            finished
         });
         let ready = ready_rx
             .recv_timeout(std::time::Duration::from_secs(60))
             .is_ok();
-        let stopped = ready && super::request_graceful_stop(&mut child).unwrap();
-        if !stopped {
+        if !ready {
             let _ = child.kill();
+            let _ = child.wait();
+            reader.join().unwrap();
+            panic!("synthetic child did not signal readiness");
         }
-        let status = child.wait().unwrap();
-        reader.join().unwrap();
-        assert!(ready && stopped && status.success());
+
+        let profile = tempfile::tempdir().unwrap();
+        let coordinator = scryer_application::RestoreCoordinator::default();
+        let (attempt, _) = coordinator
+            .start(
+                profile.path(),
+                "fixture",
+                scryer_application::RestoreJobKind::Apply,
+            )
+            .unwrap();
+        let mut supervisor = super::ServerSupervisor::new(profile.path().to_owned(), 0);
+        supervisor.place_in_job(&child);
+        supervisor.server = Some(child);
+        assert!(supervisor.ensure_restore_idle().is_err());
+        assert!(supervisor.stop().is_err());
+        assert!(
+            supervisor
+                .server
+                .as_mut()
+                .unwrap()
+                .try_wait()
+                .unwrap()
+                .is_none()
+        );
+        coordinator
+            .transition(
+                &attempt.id,
+                scryer_application::RestoreJobPhase::Failed,
+                Some(scryer_application::restore_refusal::RESTORE_DEADLINE_EXCEEDED),
+            )
+            .unwrap();
+        supervisor.ensure_restore_idle().unwrap();
+        supervisor.stop().unwrap();
+        assert!(
+            reader.join().unwrap(),
+            "child must finish through the graceful shutdown protocol"
+        );
+        assert!(!supervisor.owns_server());
     }
 
     // -- the environment the supervised server is not allowed to inherit ------

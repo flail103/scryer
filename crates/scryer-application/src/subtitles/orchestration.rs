@@ -1290,7 +1290,7 @@ pub async fn start_background_subtitle_poller(
 /// Spawn a fire-and-forget subtitle search for a newly imported file.
 /// Called from import code when `subtitles.auto_download_on_import` is true.
 pub fn spawn_subtitle_search_for_file(app: AppUseCase, title_id: String, media_file_id: String) {
-    tokio::spawn(async move {
+    app.restore_coordinator().clone().spawn_task(async move {
         let permit = match Arc::clone(&ON_IMPORT_SUBTITLE_SEARCH_LIMIT)
             .acquire_owned()
             .await

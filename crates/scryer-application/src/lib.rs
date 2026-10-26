@@ -472,6 +472,15 @@ pub use security::backup_bundle::{
     validate_restore_manifest_table_set,
 };
 pub use security::external_accounts::{ExternalAuthRuntimeConnection, ExternalAuthRuntimeSettings};
+pub use security::restore_control::refusal as restore_refusal;
+pub use security::restore_control::{
+    RESTORE_WORK_BUDGET, RestoreDeadline, RestoreReader, check_restore_deadline,
+    current_restore_deadline,
+};
+pub use security::restore_job::{
+    RESTORE_JOB_FILENAME, RestoreCoordinator, RestoreJobKind, RestoreJobPhase, RestoreJobStatus,
+    read_restore_job,
+};
 pub use settings::settings::{
     AcquisitionSettings, AutoBackupSettings, BackupSettings, DownloadClientRoutingSettingsEntry,
     ExternalImportLibraryPathsSelection, ExternalImportLibrarySettingsAutoApplyDraft,

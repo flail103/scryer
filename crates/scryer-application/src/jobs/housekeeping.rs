@@ -1160,7 +1160,7 @@ impl AppUseCase {
         let app = self.clone();
         let actor = actor.clone();
         let entry_id = entry_id.to_string();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             app.run_restore_recycled_item_job(run, actor_event, actor, entry_id, restore_guard)
                 .await;
         });
@@ -1290,7 +1290,7 @@ impl AppUseCase {
         let app = self.clone();
         let actor = actor.clone();
         let job_entry_ids = entry_ids.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             app.run_restore_recycled_items_job(
                 run,
                 actor_event,
@@ -1346,7 +1346,7 @@ impl AppUseCase {
         let app = self.clone();
         let actor = actor.clone();
         let job_entry_ids = entry_ids.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             app.run_purge_recycled_items_job(run, actor_event, actor, job_entry_ids, guards)
                 .await;
         });
@@ -2349,7 +2349,7 @@ impl AppUseCase {
             .await?;
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let _guard = guard;
             // An empty explicit scope must not become "all accessible" on revalidation.
             let result = if library_ids.is_empty() {

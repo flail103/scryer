@@ -2320,6 +2320,7 @@ pub struct AppRuntimeJobState {
     /// Serializes destructive whole-system maintenance such as restore and
     /// application upgrades for the lifetime of the operation.
     pub system_maintenance_lock: Arc<tokio::sync::Mutex<()>>,
+    pub restore: Arc<crate::RestoreCoordinator>,
     /// The executable host installs this callback once it has assembled its
     /// restart controller.
     pub application_upgrade_restart:
@@ -2697,6 +2698,7 @@ impl AppRuntimeState {
                 interactive_operation_guards: InteractiveOperationGuardTable::default(),
                 title_deletion_lock: Arc::new(tokio::sync::Mutex::new(())),
                 system_maintenance_lock: Arc::new(tokio::sync::Mutex::new(())),
+                restore: Arc::new(crate::RestoreCoordinator::default()),
                 application_upgrade_restart: Arc::new(std::sync::RwLock::new(None)),
                 #[cfg(not(windows))]
                 application_upgrade_bundle_signature_check: Arc::new(std::sync::RwLock::new(None)),

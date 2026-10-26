@@ -355,6 +355,7 @@ impl<R: Read> AeadChunkReader<R> {
     }
 
     fn fill_plaintext(&mut self) -> AppResult<()> {
+        crate::check_restore_deadline()?;
         if self.finished {
             return Ok(());
         }
@@ -843,6 +844,20 @@ pub const BACKUP_TABLE_CATALOG: &[BackupTableCatalogEntry] = &[
     },
     BackupTableCatalogEntry {
         table: "indexer_search_runs",
+        classification: BackupTableClassification::ResetOnRestore,
+    },
+    // Listing cursors and reader ownership describe in-flight searches,
+    // just like the search runs above. They are rebuilt after restoration.
+    BackupTableCatalogEntry {
+        table: "indexer_search_listings",
+        classification: BackupTableClassification::ResetOnRestore,
+    },
+    BackupTableCatalogEntry {
+        table: "indexer_search_listing_runs",
+        classification: BackupTableClassification::ResetOnRestore,
+    },
+    BackupTableCatalogEntry {
+        table: "indexer_search_listing_readers",
         classification: BackupTableClassification::ResetOnRestore,
     },
     BackupTableCatalogEntry {
@@ -1702,7 +1717,9 @@ pub fn inspect_backup_bundle(
     bundle_path: &Path,
     passphrase: Option<&str>,
 ) -> AppResult<BackupBundleInspectSummary> {
+    crate::check_restore_deadline()?;
     let extracted = extract_bundle_to_tempdir(bundle_path, passphrase)?;
+    crate::check_restore_deadline()?;
     let manifest = load_manifest(extracted.path())?;
     validate_extracted_bundle(extracted.path(), &manifest)?;
     Ok(manifest.summary())
@@ -1747,7 +1764,9 @@ pub fn prepare_backup_restore_payload(
     bundle_path: &Path,
     passphrase: Option<&str>,
 ) -> AppResult<BackupBundleRestorePayload> {
+    crate::check_restore_deadline()?;
     let extracted = extract_bundle_to_tempdir(bundle_path, passphrase)?;
+    crate::check_restore_deadline()?;
     let manifest = load_manifest(extracted.path())?;
     validate_extracted_bundle(extracted.path(), &manifest)?;
 
@@ -1784,12 +1803,13 @@ fn write_json_file(path: &Path, value: &impl Serialize) -> AppResult<()> {
 }
 
 fn checksum_hex(path: impl AsRef<Path>) -> AppResult<String> {
-    let mut file = File::open(path.as_ref()).map_err(|error| {
+    let file = File::open(path.as_ref()).map_err(|error| {
         AppError::Repository(format!(
             "failed to open {} for checksum: {error}",
             path.as_ref().display()
         ))
     })?;
+    let mut file = crate::RestoreReader::new(file);
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -1849,9 +1869,9 @@ fn extract_bundle_to_tempdir(bundle_path: &Path, passphrase: Option<&str>) -> Ap
     })?;
 
     let payload_reader = open_bundle_payload_reader(bundle_path, passphrase)?;
-    let decoder = zstd::Decoder::new(payload_reader)
+    let decoder = zstd::Decoder::new(crate::RestoreReader::new(payload_reader))
         .map_err(|error| map_streaming_bundle_error(error, "backup payload is not valid zstd"))?;
-    let mut archive = tar::Archive::new(decoder);
+    let mut archive = tar::Archive::new(crate::RestoreReader::new(decoder));
     archive.unpack(tempdir.path()).map_err(|error| {
         map_streaming_bundle_error(error, "backup payload is not a valid tar archive")
     })?;
@@ -2115,6 +2135,7 @@ fn expected_bundle_parts(manifest: &BackupBundleManifest) -> BTreeSet<String> {
 }
 
 fn copy_directory_contents(source: &Path, target: &Path) -> AppResult<()> {
+    crate::check_restore_deadline()?;
     std::fs::create_dir_all(target).map_err(|error| {
         AppError::Repository(format!(
             "failed to create prepared backup directory {}: {error}",
@@ -2140,11 +2161,20 @@ fn copy_directory_contents(source: &Path, target: &Path) -> AppResult<()> {
                 entry.path().display()
             ))
         })?;
+        crate::check_restore_deadline()?;
         let destination = target.join(entry.file_name());
         if file_type.is_dir() {
             copy_directory_contents(&entry.path(), &destination)?;
         } else if file_type.is_file() {
-            std::fs::copy(entry.path(), &destination).map_err(|error| {
+            let copy = (|| -> std::io::Result<()> {
+                let source = File::open(entry.path())?;
+                let permissions = source.metadata()?.permissions();
+                let mut source = crate::RestoreReader::new(source);
+                let mut target = File::create(&destination)?;
+                std::io::copy(&mut source, &mut target)?;
+                target.set_permissions(permissions)
+            })();
+            copy.map_err(|error| {
                 AppError::Repository(format!(
                     "failed to stage prepared backup file {}: {error}",
                     destination.display()
@@ -2355,6 +2385,24 @@ mod tests {
                 entry.table
             );
             assert!(!entry.facets.is_empty(), "{}", entry.table);
+        }
+    }
+
+    #[test]
+    fn background_restore_classifies_transient_listing_ownership() {
+        for table in [
+            "indexer_search_listings",
+            "indexer_search_listing_runs",
+            "indexer_search_listing_readers",
+        ] {
+            assert_eq!(
+                BACKUP_TABLE_CATALOG
+                    .iter()
+                    .find(|entry| entry.table == table)
+                    .map(|entry| entry.classification),
+                Some(BackupTableClassification::ResetOnRestore),
+                "{table}"
+            );
         }
     }
 

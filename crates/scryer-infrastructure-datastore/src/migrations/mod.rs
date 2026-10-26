@@ -780,72 +780,84 @@ async fn apply_single_migration(
     install_kind: MigrationInstallKind,
     hook_context: &MigrationHookContext,
 ) -> AppResult<()> {
+    scryer_application::check_restore_deadline()?;
     let start = Instant::now();
     let mut tx = conn
         .begin()
         .await
         .map_err(|error| AppError::Repository(error.to_string()))?;
 
-    if let Some(quarantined) = known_bad::known_bad_migration(migration.version) {
-        // Recorded exactly as if it had run (same version/description/checksum,
-        // so ledger validation on every later boot is unchanged), but none of
-        // its steps execute. The replacement version carries the safe work.
-        tracing::warn!(
-            version = migration.version,
-            replacement_version = quarantined.replacement_version,
-            reason = quarantined.reason,
-            "skipping quarantined migration; recording it as applied without executing its steps"
-        );
-        insert_applied_migration(&mut tx, migration, 0).await?;
-        tx.commit()
-            .await
-            .map_err(|error| AppError::Repository(error.to_string()))?;
-        return Ok(());
-    }
-
-    for step in &migration.steps {
-        if !step.engine().applies_to(EngineScope::Sqlite) {
-            continue;
+    let work = async {
+        if let Some(quarantined) = known_bad::known_bad_migration(migration.version) {
+            // Recorded exactly as if it had run (same version/description/checksum,
+            // so ledger validation on every later boot is unchanged), but none of
+            // its steps execute. The replacement version carries the safe work.
+            tracing::warn!(
+                version = migration.version,
+                replacement_version = quarantined.replacement_version,
+                reason = quarantined.reason,
+                "skipping quarantined migration; recording it as applied without executing its steps"
+            );
+            insert_applied_migration(&mut tx, migration, 0).await?;
+            return Ok(());
         }
 
-        if !step.scope().applies_to(install_kind) {
-            continue;
-        }
+        for step in &migration.steps {
+            if !step.engine().applies_to(EngineScope::Sqlite) {
+                continue;
+            }
 
-        match step {
-            CompiledMigrationStep::Sql { payload, .. } => {
-                let sql = payload
-                    .text(payload_bytes)
-                    .map_err(AppError::Repository)?
-                    .to_owned();
-                if sql.trim().is_empty() {
-                    continue;
+            if !step.scope().applies_to(install_kind) {
+                continue;
+            }
+
+            match step {
+                CompiledMigrationStep::Sql { payload, .. } => {
+                    let sql = payload
+                        .text(payload_bytes)
+                        .map_err(AppError::Repository)?
+                        .to_owned();
+                    if sql.trim().is_empty() {
+                        continue;
+                    }
+                    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|error| {
+                            AppError::Repository(map_migration_execute_error(
+                                migration.version,
+                                error.to_string(),
+                            ))
+                        })?;
                 }
-                sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| {
-                        AppError::Repository(map_migration_execute_error(
-                            migration.version,
-                            error.to_string(),
-                        ))
-                    })?;
-            }
-            CompiledMigrationStep::Rust { hook_id, .. } => {
-                run_rust_hook(
-                    hook_id.clone(),
-                    &mut tx,
-                    migration.version,
-                    install_kind,
-                    hook_context,
-                )
-                .await?;
+                CompiledMigrationStep::Rust { hook_id, .. } => {
+                    run_rust_hook(
+                        hook_id.clone(),
+                        &mut tx,
+                        migration.version,
+                        install_kind,
+                        hook_context,
+                    )
+                    .await?;
+                }
             }
         }
-    }
 
-    let elapsed_ns = start.elapsed().as_nanos().min(i64::MAX as u128) as i64;
-    insert_applied_migration(&mut tx, migration, elapsed_ns).await?;
+        let elapsed_ns = start.elapsed().as_nanos().min(i64::MAX as u128) as i64;
+        insert_applied_migration(&mut tx, migration, elapsed_ns).await?;
+        scryer_application::check_restore_deadline()?;
+        Ok(())
+    };
+    let result = match scryer_application::current_restore_deadline() {
+        Some(deadline) => deadline.run(work).await,
+        None => work.await,
+    };
+    if let Err(error) = result {
+        tx.rollback().await.map_err(|rollback| {
+            AppError::Repository(format!("failed to roll back migration: {rollback}"))
+        })?;
+        return Err(error);
+    }
     tx.commit()
         .await
         .map_err(|error| AppError::Repository(error.to_string()))?;

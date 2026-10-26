@@ -6,16 +6,22 @@ fn normalize_managed_child_routing_scopes(
     for scope in scopes {
         let scope_id = scope.scope_id.trim().to_ascii_lowercase();
         if !MANAGED_INDEXER_SCOPE_IDS.contains(&scope_id.as_str()) {
-            return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_ROUTING_SCOPE_UNSUPPORTED, format!(
-                "managed child routing scope '{}' is not supported",
-                scope.scope_id
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::integration::MANAGED_CHILD_ROUTING_SCOPE_UNSUPPORTED,
+                format!(
+                    "managed child routing scope '{}' is not supported",
+                    scope.scope_id
+                ),
+            ));
         }
         if routing_by_scope.contains_key(&scope_id) {
-            return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_ROUTING_CONTAINS_DUPLICATE_SCOPE, format!(
-                "managed child routing contains duplicate scope '{}'",
-                scope_id
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::integration::MANAGED_CHILD_ROUTING_CONTAINS_DUPLICATE_SCOPE,
+                format!(
+                    "managed child routing contains duplicate scope '{}'",
+                    scope_id
+                ),
+            ));
         }
         routing_by_scope.insert(scope_id, normalize_routing_categories(scope.categories));
     }
@@ -59,7 +65,7 @@ impl AppUseCase {
 
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             if let Err(error) = app.sync_indexer_config(&actor, &config_id).await {
                 tracing::warn!(
                     config_id = %config_id,
@@ -78,7 +84,7 @@ impl AppUseCase {
 
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             if let Err(error) = app
                 .enrich_managed_indexer_children(&actor, &config_id)
                 .await
@@ -113,10 +119,12 @@ impl AppUseCase {
             .lock_owned()
             .await;
         let indexer_configs = &self.services.integrations.indexer_configs;
-        let parent = indexer_configs
-            .get_by_id(config_id)
-            .await?
-            .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::integration::INDEXER_CONFIG_NOT_FOUND, format!("indexer config '{config_id}' not found")))?;
+        let parent = indexer_configs.get_by_id(config_id).await?.ok_or_else(|| {
+            AppError::not_found_reason(
+                crate::error_reasons::integration::INDEXER_CONFIG_NOT_FOUND,
+                format!("indexer config '{config_id}' not found"),
+            )
+        })?;
         let existing_by_key = indexer_configs
             .list(None)
             .await?
@@ -277,7 +285,10 @@ impl AppUseCase {
         for child in plan.children {
             let child_key = child.child_key.trim().to_string();
             if child_key.is_empty() {
-                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_PLAN_ENTRIES_REQUIRE_CHILD_KEY, "managed child plan entries require child_key"));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::integration::MANAGED_CHILD_PLAN_ENTRIES_REQUIRE_CHILD_KEY,
+                    "managed child plan entries require child_key",
+                ));
             }
             if !seen_child_keys.insert(child_key.clone()) {
                 return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_PLAN_CONTAINS_DUPLICATE_CHILD_KEY, format!(
@@ -288,18 +299,18 @@ impl AppUseCase {
 
             let name = child.name.trim().to_string();
             if name.is_empty() {
-                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_NAME, format!(
-                    "managed child '{}' requires a name",
-                    child_key
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_NAME,
+                    format!("managed child '{}' requires a name", child_key),
+                ));
             }
 
             let provider_type = child.provider_type.trim().to_ascii_lowercase();
             if provider_type.is_empty() {
-                return Err(AppError::validation_refused(crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_PROVIDER_TYPE, format!(
-                    "managed child '{}' requires provider_type",
-                    child_key
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::integration::MANAGED_CHILD_REQUIRES_PROVIDER_TYPE,
+                    format!("managed child '{}' requires provider_type", child_key),
+                ));
             }
 
             let fields = self.indexer_config_fields_for_provider_type(&provider_type)?;

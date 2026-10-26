@@ -212,6 +212,15 @@ export const scryerFetch: typeof fetch = async (input, init) => {
   if (response.status === MFA_STEP_UP_REQUIRED_STATUS) {
     dispatchMfaStepUpRequired();
   }
+  if (response.status === 503) {
+    const maintenance = await response.clone().json().catch(() => null);
+    if (maintenance?.reason === "RESTORE_MAINTENANCE_ACTIVE" ||
+      maintenance?.errors?.some((error: { extensions?: { reason?: string } }) =>
+        error.extensions?.reason === "RESTORE_MAINTENANCE_ACTIVE")) {
+      window.location.reload();
+      throw new TypeError("Restore is in progress");
+    }
+  }
 
   const ct = response.headers.get("content-type") ?? "";
   if (ct.includes("text/html")) {

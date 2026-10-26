@@ -4,6 +4,7 @@ version = "0.21.21"
 edition.workspace = true
 
 [dependencies]
+scryer-interface-system = { path = "../scryer-interface-system" }
 scryer-application = { path = "../scryer-application" }
 scryer-domain = { path = "../scryer-domain" }
 scryer-interface-core = { path = "../scryer-interface-core" }

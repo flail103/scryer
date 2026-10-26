@@ -62,3 +62,12 @@ test("every exported GraphQL document validates against the API schema", () => {
   }
   assert.deepEqual(failures, []);
 });
+
+test("background restore start and polling documents validate against the API schema", () => {
+  const source = readFileSync(new URL("../../components/setup/setup-restore-view.tsx", import.meta.url), "utf8");
+  const operations = source.match(/(?:mutation (?:InspectRestoreBundle|ApplyRestoreBundle)|query RestoreInspectionStatus)\b[^`]+/g) ?? [];
+  assert.equal(operations.length, 3);
+  for (const operation of operations) {
+    assert.deepEqual(validate(schema, parse(operation)), []);
+  }
+});

@@ -1975,6 +1975,7 @@ pub async fn restore_backup_bundle_to_datastore_path(
     bundle_path: &Path,
     passphrase: Option<&str>,
 ) -> AppResult<scryer_application::BackupRestorePreparedBundle> {
+    scryer_application::check_restore_deadline()?;
     let services =
         SqliteServices::new_with_mode(target_db_path.to_string_lossy(), migration_mode).await?;
     let restore_result = crate::sqlite_backup::restore_backup_bundle_into_sqlite_pool(
@@ -1984,16 +1985,22 @@ pub async fn restore_backup_bundle_to_datastore_path(
     )
     .await;
 
-    let checkpoint_result = if restore_result.is_ok() {
-        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(services.pool())
-            .await
-            .map(|_| ())
-            .map_err(|error| {
-                AppError::Repository(format!("failed to checkpoint restored database: {error}"))
-            })
-    } else {
-        Ok(())
+    let checkpoint_work = async {
+        if restore_result.is_ok() {
+            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(services.pool())
+                .await
+                .map(|_| ())
+                .map_err(|error| {
+                    AppError::Repository(format!("failed to checkpoint restored database: {error}"))
+                })
+        } else {
+            Ok(())
+        }
+    };
+    let checkpoint_result = match scryer_application::current_restore_deadline() {
+        Some(deadline) => deadline.run(checkpoint_work).await,
+        None => checkpoint_work.await,
     };
 
     services.pool().close().await;

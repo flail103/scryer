@@ -351,11 +351,14 @@ fn normalize_script_trigger(
 /// Returns immediately; the pipeline runs in the background and records
 /// results per-script.
 pub fn spawn_post_processing(ctx: PostProcessingContext) {
-    tokio::spawn(async move {
-        if let Err(err) = run_post_processing(ctx).await {
-            tracing::warn!(error = %err, "post-processing pipeline error");
-        }
-    });
+    ctx.app
+        .restore_coordinator()
+        .clone()
+        .spawn_task(async move {
+            if let Err(err) = run_post_processing(ctx).await {
+                tracing::warn!(error = %err, "post-processing pipeline error");
+            }
+        });
 }
 
 /// Run the full post-processing pipeline and await completion.

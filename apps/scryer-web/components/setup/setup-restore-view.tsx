@@ -26,7 +26,9 @@ import { LoadingMark } from "@/components/common/loading-mark";
 
 const INSPECT_RESTORE_BUNDLE_OPERATION = `
   mutation InspectRestoreBundle($bundleUpload: Upload!, $password: String) {
-    inspectRestoreBundle(bundleUpload: $bundleUpload, password: $password) {
+    inspectRestoreBundle: startInspectRestoreBundle(bundleUpload: $bundleUpload, password: $password) {
+      id
+      phase
       uploadId
       summary {
         formatVersion
@@ -47,10 +49,8 @@ const INSPECT_RESTORE_BUNDLE_OPERATION = `
 
 const APPLY_RESTORE_BUNDLE_OPERATION = `
   mutation ApplyRestoreBundle($uploadId: ID!, $password: String) {
-    applyRestoreBundle(uploadId: $uploadId, password: $password) {
-      summary {
-        formatVersion
-      }
+    applyRestoreBundle: startApplyRestoreBundle(uploadId: $uploadId, password: $password) {
+      id
     }
   }
 `;
@@ -72,8 +72,10 @@ type RestoreSummaryPayload = {
 type RestoreInspectResponse = {
   data?: {
     inspectRestoreBundle?: {
+      id: string;
+      phase: string;
       uploadId: string;
-      summary: RestoreSummaryPayload;
+      summary: RestoreSummaryPayload | null;
     } | null;
   };
   errors?: Array<{
@@ -84,9 +86,7 @@ type RestoreInspectResponse = {
 type RestoreApplyResponse = {
   data?: {
     applyRestoreBundle?: {
-      summary: {
-        formatVersion: string;
-      };
+      id: string;
     } | null;
   };
   errors?: Array<{
@@ -139,6 +139,45 @@ async function parseJsonResponse<T>(response: Response): Promise<T | undefined> 
   return JSON.parse(text) as T;
 }
 
+const INSPECTION_ATTEMPT_KEY = "scryer_restore_inspection_attempt";
+
+async function waitForInspection(id: string, fallback: string, signal: AbortSignal) {
+  for (;;) {
+    signal.throwIfAborted();
+    const response = await scryerFetch(graphqlUrl(), {
+      method: "POST",
+      signal,
+      headers: createAuthHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ query: `query RestoreInspectionStatus {
+        inspectRestoreBundle: restoreStatus {
+          id phase uploadId
+          summary { formatVersion createdAt sourceScryerVersion sourceEngine sourceMigrationKey
+            encrypted totalRows rowCounts { table rowCount } }
+        }
+      }` }),
+    });
+    const payload = await parseJsonResponse<RestoreInspectResponse>(response);
+    const job = payload?.data?.inspectRestoreBundle;
+    if (!response.ok || !job || job.id !== id) {
+      throw new Error(graphqlErrorMessage(payload) ?? fallback);
+    }
+    if (job.phase === "complete" && job.summary) return job;
+    if (["complete", "failed", "interrupted"].includes(job.phase)) {
+      sessionStorage.removeItem(INSPECTION_ATTEMPT_KEY);
+      throw new Error(fallback);
+    }
+    await new Promise<void>((resolve, reject) => {
+      const cancel = () => { window.clearTimeout(timer); reject(signal.reason); };
+      const timer = window.setTimeout(() => {
+        signal.removeEventListener("abort", cancel);
+        resolve();
+      }, 1000);
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+  }
+}
+
 function formatDateTime(value: string): string {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
@@ -150,7 +189,6 @@ function formatDateTime(value: string): string {
 export function SetupRestoreView({
   t,
   onBack,
-  onBackendRestarting,
 }: SetupRestoreViewProps) {
   const [selectedBundle, setSelectedBundle] = React.useState<File | null>(null);
   const [password, setPassword] = React.useState("");
@@ -162,6 +200,28 @@ export function SetupRestoreView({
   const [summary, setSummary] = React.useState<RestoreSummaryPayload | null>(null);
   const [isDragActive, setIsDragActive] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const inspectionAbort = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    inspectionAbort.current = controller;
+    const id = sessionStorage.getItem(INSPECTION_ATTEMPT_KEY);
+    if (id) {
+      setInspecting(true);
+      void waitForInspection(id, t("status.failedToLoad"), controller.signal)
+        .then((job) => {
+          if (controller.signal.aborted) return;
+          setUploadId(job.uploadId);
+          setSummary(job.summary);
+          sessionStorage.removeItem(INSPECTION_ATTEMPT_KEY);
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) setError(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t));
+        })
+        .finally(() => { if (!controller.signal.aborted) setInspecting(false); });
+    }
+    return () => inspectionAbort.current?.abort();
+  }, [t]);
 
   const bundleLooksEncrypted
     = selectedBundle?.name.toLowerCase().endsWith(".enc") ?? false;
@@ -202,6 +262,9 @@ export function SetupRestoreView({
 
     setInspecting(true);
     setError(null);
+    inspectionAbort.current?.abort();
+    const controller = new AbortController();
+    inspectionAbort.current = controller;
     try {
       const formData = new FormData();
       formData.append(
@@ -233,14 +296,19 @@ export function SetupRestoreView({
         throw new Error(graphqlErrorMessage(payload) ?? t("status.failedToLoad"));
       }
 
-      setUploadId(result.uploadId);
-      setSummary(result.summary);
+      sessionStorage.setItem(INSPECTION_ATTEMPT_KEY, result.id);
+      const inspected = await waitForInspection(result.id, t("status.failedToLoad"), controller.signal);
+      if (controller.signal.aborted) return;
+      setUploadId(inspected.uploadId);
+      setSummary(inspected.summary);
+      sessionStorage.removeItem(INSPECTION_ATTEMPT_KEY);
     } catch (nextError) {
+      if (controller.signal.aborted) return;
       setError(
         userFacingGraphQlErrorMessage(nextError, t("status.failedToLoad"), t),
       );
     } finally {
-      setInspecting(false);
+      if (!controller.signal.aborted) setInspecting(false);
     }
   }, [password, requiresPassword, selectedBundle, t]);
 
@@ -275,15 +343,14 @@ export function SetupRestoreView({
         throw new Error(graphqlErrorMessage(payload) ?? t("status.failedToUpdate"));
       }
 
-      window.history.replaceState(null, "", buildFrontendUrl("/"));
-      onBackendRestarting();
+      window.location.replace(buildFrontendUrl("/"));
     } catch (nextError) {
       setApplying(false);
       setError(
         userFacingGraphQlErrorMessage(nextError, t("status.failedToUpdate"), t),
       );
     }
-  }, [onBackendRestarting, password, summary, t, uploadId]);
+  }, [password, summary, t, uploadId]);
 
   return (
     <SetupPanel className="w-full space-y-6 bg-[linear-gradient(180deg,rgba(12,18,35,0.82),rgba(8,13,26,0.72))]">

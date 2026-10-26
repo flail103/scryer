@@ -1851,7 +1851,7 @@ impl ExternalImportMutations {
             let app_for_task = app.clone();
             let actor_for_task = actor.clone();
             let snapshot_for_task = begin.snapshot.clone();
-            tokio::spawn(async move {
+            app.restore_coordinator().spawn_task(async move {
                 run_external_import_arr_source_warmup_job(
                     app_for_task,
                     actor_for_task,
@@ -1902,7 +1902,7 @@ impl ExternalImportMutations {
             let actor_for_task = actor.clone();
             let snapshot_for_task = begin.snapshot.clone();
             let cancel_token = begin.cancel_token.clone();
-            tokio::spawn(async move {
+            app.restore_coordinator().spawn_task(async move {
                 run_external_import_prowlarr_warmup_job(
                     app_for_task,
                     actor_for_task,
@@ -2450,7 +2450,7 @@ impl ExternalImportMutations {
             let session_for_task = finalize_session_id.clone();
             let cancel_token = begin.cancel_token.clone();
             let snapshot_for_task = begin.snapshot.clone();
-            tokio::spawn(async move {
+            app.restore_coordinator().spawn_task(async move {
                 run_external_import_finalize_job(
                     app_for_task,
                     actor_for_task,

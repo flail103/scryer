@@ -1113,7 +1113,7 @@ impl AppUseCase {
         let (tx, rx) = broadcast::channel(128);
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let mut receiver = app.runtime.jobs.job_run_tracker.subscribe();
             let initial_runs = match app.active_job_runs(&actor).await {
                 Ok(runs) => runs,
@@ -1129,7 +1129,10 @@ impl AppUseCase {
             }
 
             loop {
-                match receiver.recv().await {
+                match tokio::select! {
+                    _ = app.restore_coordinator().shutdown_workers.cancelled() => break,
+                    event = receiver.recv() => event,
+                } {
                     Ok(run) => {
                         if !can_manage_system {
                             match app.actor_can_view_interactive_job_run(&actor, &run).await {
@@ -1263,7 +1266,7 @@ impl AppUseCase {
         let log_span = job_log_span(&run, actor);
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(
+        self.restore_coordinator().spawn_task(
             async move {
                 if let Err(error) = app
                     .run_job_run(run, JobExecutionPrincipal::User(actor), event_actor)
@@ -3969,7 +3972,7 @@ impl AppUseCase {
                     );
                 }
             });
-        tokio::spawn(start);
+        self.restore_coordinator().spawn_task(start);
     }
 
     pub(crate) async fn fail_job_run(
@@ -4055,7 +4058,7 @@ pub async fn start_background_library_refresh_loop(
         let initial_delay_seconds =
             background_library_refresh_initial_delay_seconds(&scheduler_seed, job_key)
                 .expect("background refresh job");
-        tokio::spawn(async move {
+        app.restore_coordinator().clone().spawn_task(async move {
             run_background_library_refresh_worker(app, token, job_key, initial_delay_seconds).await;
         });
     }
