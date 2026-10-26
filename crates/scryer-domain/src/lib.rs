@@ -4726,7 +4726,7 @@ pub struct DownloadFailedEventData {
     #[serde(default, alias = "error_message")]
     pub reason: Option<String>,
     /// Stable failure condition for history and retry decisions.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
     #[serde(default)]
     pub episode_ids: Vec<String>,

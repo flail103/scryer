@@ -675,10 +675,10 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_permanent_not_found_sentence_is_still_not_found() {
+    fn an_uncoded_live_permanent_failure_does_not_infer_not_found_from_its_sentence() {
         assert_eq!(
             class_of("permanent", "list not found", None),
-            ListFailureClass::NotFound
+            ListFailureClass::Failed
         );
         assert_eq!(
             class_of("permanent", "gone", None),

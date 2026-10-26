@@ -2122,7 +2122,9 @@ mod tests {
 
     fn validation_message(result: AppResult<DatastoreConfig>) -> String {
         match result {
-            Err(AppError::Validation(message)) => message,
+            Err(AppError::Validation(message) | AppError::ValidationRefused { message, .. }) => {
+                message
+            }
             other => panic!("expected validation error, got {other:?}"),
         }
     }

@@ -47,3 +47,43 @@ async fn reason_code_migration_preserves_text_and_backfills_legacy_conditions() 
             .unwrap();
     assert!(different_case.is_none());
 }
+
+#[tokio::test]
+async fn startup_embeds_reason_code_migration_for_both_engines() {
+    use scryer_infrastructure_datastore::migration_assets::{CompiledMigrationStep, EngineScope};
+    use scryer_infrastructure_datastore::{SqliteServices, migrations};
+
+    let catalog = migrations::embedded_catalog().expect("decode embedded migration catalog");
+    let migration = catalog
+        .find_migration(312)
+        .expect("reason-code migration must be registered in the embedded catalog");
+    for (expected_engine, expected_file) in [
+        (
+            EngineScope::Sqlite,
+            "migrations/0312_error_reason_codes.sql",
+        ),
+        (
+            EngineScope::Postgres,
+            "postgres/migrations/0312_error_reason_codes.sql",
+        ),
+    ] {
+        assert!(migration.steps.iter().any(|step| matches!(
+            step,
+            CompiledMigrationStep::Sql { file, engine, .. }
+                if *engine == expected_engine && file == expected_file
+        )));
+    }
+
+    let services = SqliteServices::new(":memory:")
+        .await
+        .expect("normal startup applies embedded migrations");
+    for query in [
+        "SELECT last_error_code FROM indexers LIMIT 0",
+        "SELECT disabled_reason_code FROM rule_sets LIMIT 0",
+    ] {
+        sqlx::query(query)
+            .fetch_all(services.pool())
+            .await
+            .expect("reason-code columns must exist after normal startup");
+    }
+}

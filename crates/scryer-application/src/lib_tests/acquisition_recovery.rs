@@ -2596,6 +2596,11 @@ async fn password_failed_download_emits_retryable_history_without_blocklisting()
         .unwrap();
     let mut item = failed_history_item("synthetic-job", "Synthetic.Release{{synthetic-secret}}");
     item.client_type = "weaver".into();
+    item.attention_reason_code = Some(
+        scryer_domain::DownloadPasswordFailure::Required
+            .reason_code()
+            .into(),
+    );
     item.attention_reason = Some(
         scryer_domain::DownloadPasswordFailure::Required
             .message()
@@ -2639,6 +2644,10 @@ async fn password_failed_download_emits_retryable_history_without_blocklisting()
         })
         .collect::<Vec<_>>();
     assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].reason_code.as_deref(),
+        Some("ARCHIVE_PASSWORD_REQUIRED")
+    );
     assert_eq!(
         failures[0].canonical_download_id.as_deref(),
         Some(download_id.to_string().as_str())
@@ -6698,7 +6707,7 @@ async fn acquisition_cycle_category_mismatch_veto_burns_the_release_without_subm
         vetoed
             .error_message
             .as_deref()
-            .is_some_and(|message| message.contains("category_mismatch")),
+            .is_some_and(|message| message.contains("contradicts the release's movie subject")),
         "the recorded failure must tell operators why: {:?}",
         vetoed.error_message
     );
@@ -6725,10 +6734,10 @@ async fn acquisition_cycle_category_mismatch_veto_burns_the_release_without_subm
         "counterfeit.feature.2024.1080p.web-dl-grp"
     );
     assert!(
-        blocklist[0]
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("category_mismatch")),
+        blocklist[0].reason.as_deref().is_some_and(|reason| {
+            reason.contains("indexer category 'TV > HD' contradicts the release's movie subject")
+                && reason.contains("the NZB was not handed to the download client")
+        }),
         "the entry must tell operators why: {:?}",
         blocklist[0].reason
     );

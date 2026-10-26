@@ -3510,6 +3510,23 @@ file = "postgres/migrations/0311_papyrus_palette.sql"
 engine = "postgres"
 scope = "all"
 
+[[migration]]
+version = 312
+description = "error reason codes"
+checksum_algo = "blake3"
+
+[[migration.steps]]
+kind = "sql"
+file = "migrations/0312_error_reason_codes.sql"
+engine = "sqlite"
+scope = "all"
+
+[[migration.steps]]
+kind = "sql"
+file = "postgres/migrations/0312_error_reason_codes.sql"
+engine = "postgres"
+scope = "all"
+
 [[baseline]]
 through_version = 254
 file = "baselines/0254_baseline.sql"

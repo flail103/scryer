@@ -197,9 +197,16 @@ async fn create_user_rejects_anonymous_username() {
         )
         .await;
 
-    let Err(AppError::Validation(message)) = result else {
+    let Err(AppError::ValidationRefused {
+        message, reason, ..
+    }) = result
+    else {
         panic!("anonymous username should be reserved");
     };
+    assert_eq!(
+        reason,
+        crate::error_reasons::security::ANONYMOUS_RESERVED_AUTHLESS_AUDIT_ATTRIBUTION
+    );
     assert!(message.contains("anonymous is reserved"));
 }
 
@@ -209,9 +216,16 @@ async fn ensure_default_admin_rejects_anonymous_username() {
 
     let result = app.ensure_default_admin("anonymous", "password123").await;
 
-    let Err(AppError::Validation(message)) = result else {
+    let Err(AppError::ValidationRefused {
+        message, reason, ..
+    }) = result
+    else {
         panic!("anonymous default admin username should be reserved");
     };
+    assert_eq!(
+        reason,
+        crate::error_reasons::security::ANONYMOUS_RESERVED_AUTHLESS_AUDIT_ATTRIBUTION
+    );
     assert!(message.contains("anonymous is reserved"));
 }
 

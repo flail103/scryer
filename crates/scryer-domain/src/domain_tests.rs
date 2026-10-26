@@ -1479,6 +1479,12 @@ fn legacy_download_failure_event_defaults_the_separate_reason_code() {
     let event: crate::DownloadFailedEventData =
         serde_json::from_str(r#"{"reason":"ARCHIVE_PASSWORD_REQUIRED: old text"}"#).unwrap();
     assert!(event.reason_code.is_none());
+    let legacy_json = serde_json::to_value(&event).unwrap();
+    assert!(legacy_json.get("reason_code").is_none());
+    assert_eq!(
+        serde_json::from_value::<crate::DownloadFailedEventData>(legacy_json).unwrap(),
+        event
+    );
     let event: crate::DownloadFailedEventData = serde_json::from_str(
         r#"{"reason_code":"ARCHIVE_PASSWORD_REQUIRED","reason":"translated text"}"#,
     )
@@ -1486,4 +1492,8 @@ fn legacy_download_failure_event_defaults_the_separate_reason_code() {
     let json = serde_json::to_value(&event).unwrap();
     assert_eq!(json["reason_code"], "ARCHIVE_PASSWORD_REQUIRED");
     assert_eq!(json["reason"], "translated text");
+    assert_eq!(
+        serde_json::from_value::<crate::DownloadFailedEventData>(json).unwrap(),
+        event
+    );
 }

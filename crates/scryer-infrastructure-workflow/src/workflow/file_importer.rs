@@ -72,10 +72,7 @@ fn import_io_error(error: &io::Error, message: String) -> AppError {
 /// Context may add diagnostics but must not discard a routed failure fact.
 fn import_error_context(error: &AppError, message: String) -> AppError {
     match error {
-        AppError::RepositoryFailed { reason, .. } => AppError::RepositoryFailed {
-            message,
-            reason: *reason,
-        },
+        AppError::RepositoryFailed { reason, .. } => AppError::RepositoryFailed { message, reason },
         _ => AppError::Repository(message),
     }
 }
@@ -3877,7 +3874,7 @@ mod tests {
 
         let error = round_trip_worker_error(AppError::Repository("disk full".into()));
         assert!(
-            matches!(&error, AppError::Repository(message) | AppError::RepositoryFailure { message: message, .. } if message == "disk full")
+            matches!(&error, AppError::Repository(message) | AppError::RepositoryFailure { message, .. } if message == "disk full")
         );
     }
 
@@ -3889,7 +3886,7 @@ mod tests {
         let rendered = AppError::Validation("bad request".into()).to_string();
         let error = round_trip_worker_error(AppError::Validation("bad request".into()));
         assert!(
-            matches!(&error, AppError::Repository(message) | AppError::RepositoryFailure { message: message, .. } if *message == rendered),
+            matches!(&error, AppError::Repository(message) | AppError::RepositoryFailure { message, .. } if *message == rendered),
             "got {error:?}"
         );
     }

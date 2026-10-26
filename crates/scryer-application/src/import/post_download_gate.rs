@@ -15,6 +15,7 @@ use scryer_domain::{
 use tracing::warn;
 
 const SOURCE_CHANGED_AFTER_PROBE_CODE: &str = "source_changed_after_probe";
+const IMPORT_SOURCE_CHANGED_AFTER_PROBE_CODE: &str = "import_source_changed_after_probe";
 const SOURCE_SNAPSHOT_UNAVAILABLE_CODE: &str = "import_source_snapshot_unavailable";
 
 pub(crate) enum ImportedFileGateDecision {
@@ -96,8 +97,8 @@ impl ImportedFileRejection {
     ///
     /// A rule-error hold keeps `PostDownloadRuleBlocked` so the result is routed
     /// by its code: its message quotes operator-authored rule text and must never
-    /// be read as a transient failure. Every other review hold keeps reporting
-    /// `PolicyMismatch`, which a source-changed hold relies on to be retried.
+    /// be read as a transient failure. Source races retain their retryable
+    /// reasons; other review holds report `PolicyMismatch`.
     pub(crate) fn review_hold_skip_reason(&self) -> ImportSkipReason {
         review_hold_skip_reason_for_code(self.recycle_reason)
     }
@@ -108,7 +109,10 @@ impl ImportedFileRejection {
 pub(crate) fn review_hold_skip_reason_for_code(code: &str) -> ImportSkipReason {
     if code == POST_DOWNLOAD_RULE_ERROR_CODE {
         ImportSkipReason::PostDownloadRuleBlocked
-    } else if code == SOURCE_CHANGED_AFTER_PROBE_CODE {
+    } else if matches!(
+        code,
+        SOURCE_CHANGED_AFTER_PROBE_CODE | IMPORT_SOURCE_CHANGED_AFTER_PROBE_CODE
+    ) {
         ImportSkipReason::SourceChanged
     } else if code == SOURCE_SNAPSHOT_UNAVAILABLE_CODE {
         ImportSkipReason::SourceUnavailable
@@ -135,7 +139,7 @@ fn import_source_changed_rejection(
             "import source changed after validation probe: {} ({detail})",
             path.display()
         ),
-        recycle_reason: "import_source_changed_after_probe",
+        recycle_reason: IMPORT_SOURCE_CHANGED_AFTER_PROBE_CODE,
         skip_reason: Some(ImportSkipReason::SourceChanged),
         blocking_rule_codes: vec![SOURCE_CHANGED_AFTER_PROBE_CODE.to_string()],
     }
@@ -3856,6 +3860,38 @@ mod tests {
         assert_eq!(
             quality_contradiction(&codes(&["quality_contradicted:garbage"])),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod source_review_reason_tests {
+    use super::*;
+
+    #[test]
+    fn source_change_review_retains_both_existing_codes_without_reading_the_sentence() {
+        for code in [
+            SOURCE_CHANGED_AFTER_PROBE_CODE,
+            IMPORT_SOURCE_CHANGED_AFTER_PROBE_CODE,
+        ] {
+            let rejection = ImportedFileRejection {
+                message: "rewritten explanation".into(),
+                recycle_reason: code,
+                skip_reason: Some(ImportSkipReason::SourceChanged),
+                blocking_rule_codes: Vec::new(),
+            };
+            assert_eq!(
+                rejection.review_hold_skip_reason(),
+                ImportSkipReason::SourceChanged
+            );
+        }
+        assert_eq!(
+            review_hold_skip_reason_for_code(SOURCE_SNAPSHOT_UNAVAILABLE_CODE),
+            ImportSkipReason::SourceUnavailable
+        );
+        assert_eq!(
+            review_hold_skip_reason_for_code(DISC_REVIEW_REQUIRED_CODE),
+            ImportSkipReason::PolicyMismatch
         );
     }
 }

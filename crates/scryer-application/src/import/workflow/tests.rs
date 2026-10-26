@@ -1167,25 +1167,23 @@ mod tests {
             ImportStatus::Skipped
         );
 
-        result.error_message = Some("source changed during copy".to_string());
-        assert_eq!(
-            completed_import_status_for_result(&result, ImportStatus::Failed),
-            ImportStatus::Pending
-        );
-
-        // These execution races lack a structured outcome and remain the only
-        // message-based retry hints. Import-check rejection reasons are typed.
-        for transient in [
-            "source changed during copy",
-            "destination temporarily unavailable",
-        ] {
-            result.error_message = Some(transient.to_string());
+        // Source races retain a retryable kind even when their explanation changes.
+        for transient in [ImportSkipReason::SourceChanged, ImportSkipReason::SourceUnavailable] {
+            result.skip_reason = Some(transient.clone());
+            result.error_message = Some("rewritten execution race explanation".to_string());
             assert_eq!(
                 completed_import_status_for_result(&result, ImportStatus::Failed),
                 ImportStatus::Pending,
-                "{transient}"
+                "{transient:?}"
             );
         }
+        result.skip_reason = Some(ImportSkipReason::PolicyMismatch);
+        result.error_message = Some("source changed during copy".to_string());
+        assert_eq!(
+            completed_import_status_for_result(&result, ImportStatus::Failed),
+            ImportStatus::Failed,
+            "a sentence cannot turn a policy verdict into a source race"
+        );
 
         // Decision-phase skips stay terminal whatever the text — there is no OS
         // error catalogue any more; execution failures are retried by phase.
