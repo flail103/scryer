@@ -1376,11 +1376,17 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         identity: &DownloadSubmissionIdentity,
         source_identity: Option<&ClientJobLocator>,
     ) -> AppResult<Option<String>> {
-        let mut identity = identity.clone();
         if let Some(download_id) = canonical_download_id {
-            identity.download_id = Some(download_id.to_wire());
+            let mut canonical_identity = identity.clone();
+            canonical_identity.download_id = Some(download_id.to_wire());
+            if let Some(detail) = self
+                .get_identity_tracked_state_detail(&canonical_identity, source_identity)
+                .await?
+            {
+                return Ok(Some(detail));
+            }
         }
-        self.get_identity_tracked_state_detail(&identity, source_identity)
+        self.get_identity_tracked_state_detail(identity, source_identity)
             .await
     }
 

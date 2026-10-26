@@ -674,6 +674,7 @@ pub enum DomainEventTypeValue {
     DownloadFailed,
     /// A download was ignored.
     DownloadIgnored,
+    /// A successful client listing omitted an accepted download.
     DownloadMissing,
     /// A release was blocklisted.
     ReleaseBlocklisted,
