@@ -4505,6 +4505,24 @@ async fn seed_series_pack_scope_fixture_with_download_client(
     Arc<TrackingIndexerClient>,
     Vec<(u32, String)>,
 ) {
+    seed_series_scope_fixture(indexer_client, persisted_seasons, download_client, 5, 1).await
+}
+
+/// A monitored series of `season_count` seasons of `episodes_per_season`
+/// aired episodes each, with a wanted row for every episode of each season in
+/// `persisted_seasons`. Returns each episode as `(season, episode id)`.
+async fn seed_series_scope_fixture(
+    indexer_client: Arc<TrackingIndexerClient>,
+    persisted_seasons: &[u32],
+    download_client: Arc<StubDownloadClient>,
+    season_count: u32,
+    episodes_per_season: u32,
+) -> (
+    AppUseCase,
+    Title,
+    Arc<TrackingIndexerClient>,
+    Vec<(u32, String)>,
+) {
     let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
     let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
         download_client,
@@ -4530,7 +4548,7 @@ async fn seed_series_pack_scope_fixture_with_download_client(
         .expect("create series-pack title");
 
     let mut episode_ids = Vec::new();
-    for season_number in 1..=5 {
+    for season_number in 1..=season_count {
         let season = app
             .services
             .catalog
@@ -4544,75 +4562,186 @@ async fn seed_series_pack_scope_fixture_with_download_client(
                 ordered_path: None,
                 narrative_order: Some(season_number.to_string()),
                 first_episode_number: Some("1".to_string()),
-                last_episode_number: Some("1".to_string()),
+                last_episode_number: Some(episodes_per_season.to_string()),
                 monitored: true,
                 created_at: Utc::now(),
             })
             .await
             .expect("create series-pack season");
-        let episode = app
-            .services
-            .catalog
-            .shows
-            .create_episode(Episode {
-                id: Id::new().0,
-                title_id: title.id.clone(),
-                collection_id: Some(season.id.clone()),
-                episode_type: scryer_domain::EpisodeType::Standard,
-                episode_number: Some("1".to_string()),
-                season_number: Some(season_number.to_string()),
-                episode_label: Some(format!("S{season_number:02}E01")),
-                title: Some(format!("S{season_number:02}E01")),
-                air_date: Some("2024-01-01".to_string()),
-                duration_seconds: Some(1_440),
-                has_multi_audio: false,
-                has_subtitle: false,
-                is_filler: false,
-                is_recap: false,
-                absolute_number: None,
-                contiguous_absolute_number: None,
-                overview: None,
-                tvdb_id: None,
-                tmdb_id: None,
-                image_url: None,
-                monitored: true,
-                created_at: Utc::now(),
-            })
-            .await
-            .expect("create series-pack episode");
-        if persisted_seasons.contains(&season_number) {
-            wanted_items
-                .upsert_acquisition_scope_state(&AcquisitionScopeState {
+        for episode_number in 1..=episodes_per_season {
+            let episode = app
+                .services
+                .catalog
+                .shows
+                .create_episode(Episode {
                     id: Id::new().0,
                     title_id: title.id.clone(),
-                    title_name: Some(title.name.clone()),
-                    title_slug: None,
-                    title_facet: None,
-                    library_id: None,
-                    library_name: None,
-                    library_slug: None,
-                    episode_id: Some(episode.id.clone()),
-                    collection_id: Some(season.id),
-                    series_movie_link_id: None,
+                    collection_id: Some(season.id.clone()),
+                    episode_type: scryer_domain::EpisodeType::Standard,
+                    episode_number: Some(episode_number.to_string()),
                     season_number: Some(season_number.to_string()),
-                    episode_number: Some("1".to_string()),
-                    media_type: "episode".to_string(),
-                    last_search_at: None,
-                    status: AcquisitionScopeStatus::Wanted,
-                    grabbed_release: None,
-                    landed_bar: None,
-                    latest_release_decision: None,
-                    mismatch_recovery_eligible: false,
-                    created_at: Utc::now().to_rfc3339(),
-                    updated_at: Utc::now().to_rfc3339(),
+                    episode_label: Some(format!("S{season_number:02}E{episode_number:02}")),
+                    title: Some(format!("S{season_number:02}E{episode_number:02}")),
+                    air_date: Some("2024-01-01".to_string()),
+                    duration_seconds: Some(1_440),
+                    has_multi_audio: false,
+                    has_subtitle: false,
+                    is_filler: false,
+                    is_recap: false,
+                    absolute_number: None,
+                    contiguous_absolute_number: None,
+                    overview: None,
+                    tvdb_id: None,
+                    tmdb_id: None,
+                    image_url: None,
+                    monitored: true,
+                    created_at: Utc::now(),
                 })
                 .await
-                .expect("seed series-pack wanted episode");
+                .expect("create series-pack episode");
+            if persisted_seasons.contains(&season_number) {
+                wanted_items
+                    .upsert_acquisition_scope_state(&AcquisitionScopeState {
+                        id: Id::new().0,
+                        title_id: title.id.clone(),
+                        title_name: Some(title.name.clone()),
+                        title_slug: None,
+                        title_facet: None,
+                        library_id: None,
+                        library_name: None,
+                        library_slug: None,
+                        episode_id: Some(episode.id.clone()),
+                        collection_id: Some(season.id.clone()),
+                        series_movie_link_id: None,
+                        season_number: Some(season_number.to_string()),
+                        episode_number: Some(episode_number.to_string()),
+                        media_type: "episode".to_string(),
+                        last_search_at: None,
+                        status: AcquisitionScopeStatus::Wanted,
+                        grabbed_release: None,
+                        landed_bar: None,
+                        latest_release_decision: None,
+                        mismatch_recovery_eligible: false,
+                        created_at: Utc::now().to_rfc3339(),
+                        updated_at: Utc::now().to_rfc3339(),
+                    })
+                    .await
+                    .expect("seed series-pack wanted episode");
+            }
+            episode_ids.push((season_number, episode.id));
         }
-        episode_ids.push((season_number, episode.id));
     }
 
     (app, title, indexer_client, episode_ids)
+}
+
+/// The episode searches issued so far, in order, as `(season, episode)`.
+async fn episode_searches(indexer_client: &TrackingIndexerClient) -> Vec<(u32, u32)> {
+    indexer_client
+        .searches
+        .lock()
+        .await
+        .iter()
+        .filter_map(|search| Some((search.season?, search.episode?)))
+        .collect()
+}
+
+/// A walk whose time is up stops inside the title it is walking, not only
+/// between titles, and the next walk picks the title up at its first unwalked
+/// scope instead of starting it over. A spent budget still gets one scope of
+/// the title in per walk, so the backlog keeps moving.
+#[tokio::test]
+async fn a_walk_out_of_time_stops_inside_a_title_and_the_next_walk_resumes_at_its_next_scope() {
+    use crate::acquisition_workflow::WalkStopReason;
+    let indexer_client = Arc::new(TrackingIndexerClient::default().returning_no_results());
+    let (app, _, indexer_client, _) = seed_series_pack_scope_fixture(indexer_client).await;
+
+    for season in 1..=4u32 {
+        let before = episode_searches(&indexer_client).await.len();
+        let outcome = app
+            .run_background_acquisition_cycle_with_budget_once(std::time::Duration::ZERO)
+            .await;
+        assert_eq!(outcome.titles_walked, 1, "walk {season}");
+        assert_eq!(
+            outcome.titles_stopped_midway, 1,
+            "walk {season} stops the title before its last scope"
+        );
+        assert_eq!(
+            outcome.stop,
+            Some(WalkStopReason::Deadline),
+            "walk {season}"
+        );
+        assert_eq!(
+            episode_searches(&indexer_client).await[before..].to_vec(),
+            vec![(season, 1)],
+            "walk {season} searches only the first scope the earlier walks did not reach"
+        );
+    }
+
+    // The fifth walk reaches the title's last scope, so nothing is left over.
+    let before = episode_searches(&indexer_client).await.len();
+    let last = app
+        .run_background_acquisition_cycle_with_budget_once(std::time::Duration::ZERO)
+        .await;
+    assert_eq!(last.titles_stopped_midway, 0);
+    assert_eq!(last.stop, None);
+    assert_eq!(
+        episode_searches(&indexer_client).await[before..].to_vec(),
+        vec![(5, 1)]
+    );
+    assert_eq!(
+        episode_searches(&indexer_client).await,
+        (1..=5).map(|season| (season, 1)).collect::<Vec<_>>(),
+        "every scope is searched exactly once across the walks"
+    );
+}
+
+/// A title with more scopes than one walk's search budget stops once it has
+/// spent the budget, even with time to spare, and the next walk searches the
+/// rest of it and nothing it already searched.
+#[tokio::test]
+async fn a_title_stops_at_its_search_budget_and_the_next_walk_searches_the_rest() {
+    use crate::acquisition_workflow::{BACKGROUND_TITLE_WALK_QUERY_BUDGET, WalkStopReason};
+    let episode_count = BACKGROUND_TITLE_WALK_QUERY_BUDGET as u32 + 5;
+    let indexer_client = Arc::new(TrackingIndexerClient::default().returning_no_results());
+    let (app, _, indexer_client, _) = seed_series_scope_fixture(
+        indexer_client,
+        &[1],
+        Arc::new(StubDownloadClient::default().with_unique_job_ids()),
+        1,
+        episode_count,
+    )
+    .await;
+
+    let first = app.run_background_acquisition_cycle_once().await;
+    assert_eq!(first.titles_walked, 1);
+    assert_eq!(first.titles_stopped_midway, 1);
+    assert_eq!(first.stop, Some(WalkStopReason::QueryBudget));
+    assert_eq!(first.indexer_queries, BACKGROUND_TITLE_WALK_QUERY_BUDGET);
+    let first_episodes = episode_searches(&indexer_client).await;
+    let reached = first_episodes.len() as u32;
+    assert!(
+        (1..episode_count).contains(&reached),
+        "the budget stops the title part-way: {first_episodes:?}"
+    );
+    assert_eq!(
+        first_episodes,
+        (1..=reached)
+            .map(|episode| (1, episode))
+            .collect::<Vec<_>>(),
+        "the title is walked in episode order up to where it stopped"
+    );
+
+    let second = app.run_background_acquisition_cycle_once().await;
+    assert_eq!(second.titles_stopped_midway, 0);
+    assert_eq!(second.stop, None);
+    assert_eq!(
+        episode_searches(&indexer_client).await[first_episodes.len()..].to_vec(),
+        (reached + 1..=episode_count)
+            .map(|episode| (1, episode))
+            .collect::<Vec<_>>(),
+        "the next walk searches exactly the scopes the first did not reach"
+    );
 }
 
 fn series_pack_anchor_standby(
