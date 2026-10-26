@@ -6009,6 +6009,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_managed_child_that_gets_no_caps_is_not_asked_again_on_the_next_pass() {
+        let indexer_repo = Arc::new(RecordingIndexerConfigRepo::new());
+        let mut parent = managed_test_child("parent", None, true, None);
+        parent.provider_type = "manager".to_string();
+        parent.managed_parent_config_id = None;
+        parent.managed_child_key = None;
+        parent.enable_interactive_search = false;
+        parent.enable_auto_search = false;
+        parent.config_json = Some(r#"{"base_url":"https://manager.example"}"#.to_string());
+        indexer_repo.create(parent).await.unwrap();
+        indexer_repo
+            .create(managed_test_child("silent", None, true, None))
+            .await
+            .unwrap();
+        // The manager's plan never carries this child, so no caps come back.
+        let mut provider = RecordingPluginProvider::with_sync_plan(crate::IndexerSyncPlan {
+            children: Vec::new(),
+        });
+        provider.enrichment_caps_json =
+            Some(serde_json::to_string(&scryer_domain::IndexerCapsSnapshot::default()).unwrap());
+        let provider = Arc::new(provider);
+        let app = test_app(
+            indexer_repo.clone(),
+            Some(provider.clone()),
+            Arc::new(RecordingSettingsRepository::default()),
+        );
+
+        app.enrich_managed_indexer_children(&test_admin(), "parent")
+            .await
+            .unwrap();
+        app.enrich_managed_indexer_children(&test_admin(), "parent")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            provider.enrichment_requests.lock().unwrap().clone(),
+            vec![HashSet::from(["silent".to_string()])],
+            "an unanswered child waits out its retry instead of being asked on every pass"
+        );
+
+        indexer_repo
+            .update(crate::IndexerConfigUpdate {
+                id: "silent".to_string(),
+                derived_base_url: Some("https://silent-moved.example".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        app.enrich_managed_indexer_children(&test_admin(), "parent")
+            .await
+            .unwrap();
+        assert_eq!(
+            provider.enrichment_requests.lock().unwrap().len(),
+            2,
+            "a connection change makes the child due again at once"
+        );
+    }
+
+    #[tokio::test]
     async fn managed_child_connection_change_makes_its_caps_due() {
         let indexer_repo = Arc::new(RecordingIndexerConfigRepo::new());
         let mut parent = managed_test_child("parent", None, true, None);
