@@ -3,7 +3,10 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompletedDownloadPathState {
     Ready,
+    /// Still inside the grace window.
     Retry,
+    /// Past the grace window: an automatic retry is scheduled.
+    RetryAfterGrace,
     Blocked,
 }
 
@@ -56,7 +59,7 @@ pub(super) fn evaluate_completed_download_path(
         attempts: 1,
         next_retry_at: now + Duration::minutes(5),
     });
-    CompletedDownloadPathState::Retry
+    CompletedDownloadPathState::RetryAfterGrace
 }
 
 fn missing_completed_download_path_message(completed: &CompletedDownload) -> String {

@@ -82,10 +82,6 @@ pub(crate) async fn check_with_lookup(
         return;
     }
 
-    if td.state == TrackedDownloadState::ImportBlocked && td.path_missing_since.is_some() {
-        return;
-    }
-
     let queue_identity = observed_queue_item_identity(&td.client_item);
     let queue_source_identity = queue_item_source_identity(&td.client_item);
     if let Some(state) =
@@ -197,13 +193,27 @@ pub(crate) async fn check_with_lookup(
         CompletedDownloadPathState::Retry => {
             return;
         }
+        CompletedDownloadPathState::RetryAfterGrace => {
+            // The row keeps retrying on its own, but a path still missing
+            // after the grace window usually means a wrong remote path
+            // mapping, mount or rclone `--links` setting, so tell the
+            // operator once.
+            if notify_manual_interaction_once(app, td).await {
+                tracing::warn!(
+                    id = %td.id,
+                    dest_dir = %completed.dest_dir,
+                    empty_dest_dir = completed.dest_dir.trim().is_empty(),
+                    grace_minutes = COMPLETED_PATH_GRACE_PERIOD_MINUTES,
+                    "completed download path remained unavailable after grace window; retrying automatically"
+                );
+            }
+            return;
+        }
         CompletedDownloadPathState::Blocked => {
             tracing::warn!(
                 id = %td.id,
                 dest_dir = %completed.dest_dir,
-                empty_dest_dir = completed.dest_dir.trim().is_empty(),
-                grace_minutes = COMPLETED_PATH_GRACE_PERIOD_MINUTES,
-                "completed download path remained unavailable after grace window; blocking import until manual retry"
+                "completed download path is a URL, not a local path; blocking import until manual retry"
             );
             set_state_to_import_blocked(app, td).await;
             return;
@@ -756,8 +766,16 @@ async fn set_state_to_import_blocked_with_reason(
     )
     .await;
 
+    notify_manual_interaction_once(app, td).await;
+}
+
+/// Raises the one `ImportRejected` notification that tells the operator this
+/// download needs their attention, carrying its first status message. Guarded
+/// by `notified_manual_interaction`, so repeated ticks stay quiet; returns
+/// whether this call raised it. It never changes the download's state.
+async fn notify_manual_interaction_once(app: &AppUseCase, td: &mut TrackedDownload) -> bool {
     if td.notified_manual_interaction {
-        return;
+        return false;
     }
 
     td.notified_manual_interaction = true;
@@ -767,73 +785,45 @@ async fn set_state_to_import_blocked_with_reason(
         .map(|message| message.text.clone())
         .unwrap_or_else(|| "Manual interaction required for this download.".to_string());
 
-    let event = match td.title_id.as_ref() {
-        Some(title_id) => match app.services.catalog.titles.get_by_id(title_id).await {
-            Ok(Some(title)) => new_title_domain_event(
-                None,
-                &title,
-                scryer_domain::DomainEventPayload::ImportRejected(ImportRejectedEventData {
-                    title: Some(title_context_snapshot(&title)),
-                    status: ImportStatus::Skipped,
-                    import_id: None,
-                    source_system: Some(td.client_type.clone()),
-                    source_ref: Some(td.client_item.download_client_item_id.clone()),
-                    source_title: td
-                        .source_title
-                        .clone()
-                        .or_else(|| Some(td.client_item.title_name.clone())),
-                    source_path: None,
-                    dest_path: None,
-                    quality: None,
-                    reason: Some(message.clone()),
-                    skip_reason: None,
-                    episode_ids: Vec::new(),
-                }),
-            ),
-            _ => new_global_domain_event(
-                None,
-                scryer_domain::DomainEventPayload::ImportRejected(ImportRejectedEventData {
-                    title: None,
-                    status: ImportStatus::Skipped,
-                    import_id: None,
-                    source_system: Some(td.client_type.clone()),
-                    source_ref: Some(td.client_item.download_client_item_id.clone()),
-                    source_title: td
-                        .source_title
-                        .clone()
-                        .or_else(|| Some(td.client_item.title_name.clone())),
-                    source_path: None,
-                    dest_path: None,
-                    quality: None,
-                    reason: Some(message.clone()),
-                    skip_reason: None,
-                    episode_ids: Vec::new(),
-                }),
-            ),
-        },
-        None => new_global_domain_event(
-            None,
-            scryer_domain::DomainEventPayload::ImportRejected(ImportRejectedEventData {
-                title: None,
-                status: ImportStatus::Skipped,
-                import_id: None,
-                source_system: Some(td.client_type.clone()),
-                source_ref: Some(td.client_item.download_client_item_id.clone()),
-                source_title: td
-                    .source_title
-                    .clone()
-                    .or_else(|| Some(td.client_item.title_name.clone())),
-                source_path: None,
-                dest_path: None,
-                quality: None,
-                reason: Some(message),
-                skip_reason: None,
-                episode_ids: Vec::new(),
-            }),
-        ),
+    let title = match td.title_id.as_ref() {
+        Some(title_id) => app
+            .services
+            .catalog
+            .titles
+            .get_by_id(title_id)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+    let payload = |title_snapshot| {
+        scryer_domain::DomainEventPayload::ImportRejected(ImportRejectedEventData {
+            title: title_snapshot,
+            status: ImportStatus::Skipped,
+            import_id: None,
+            source_system: Some(td.client_type.clone()),
+            source_ref: Some(td.client_item.download_client_item_id.clone()),
+            source_title: td
+                .source_title
+                .clone()
+                .or_else(|| Some(td.client_item.title_name.clone())),
+            source_path: None,
+            dest_path: None,
+            quality: None,
+            reason: Some(message.clone()),
+            skip_reason: None,
+            episode_ids: Vec::new(),
+        })
+    };
+    let event = match title.as_ref() {
+        Some(title) => {
+            new_title_domain_event(None, title, payload(Some(title_context_snapshot(title))))
+        }
+        None => new_global_domain_event(None, payload(None)),
     };
 
     let _ = app.append_domain_event(event).await;
+    true
 }
 
 async fn block_tracked_download_identity_for_manual_review(
