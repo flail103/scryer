@@ -108,6 +108,25 @@ async fn apply_no_video_import_backoff(
         .map(|retry| retry.attempts.saturating_add(1))
         .unwrap_or(1);
 
+    if attempts >= NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS {
+        let result_json = serde_json::to_string(result).ok();
+        if let Err(err) = app
+            .update_import_status_and_notify(&result.import_id, ImportStatus::Skipped, result_json)
+            .await
+        {
+            tracing::warn!(
+                import_id = result.import_id.as_str(),
+                error = %err,
+                "failed to mark exhausted no-video import attempt as skipped"
+            );
+        }
+        td.block_no_video_import_after_retries(format!(
+            "{} No video files were found after {attempts} unchanged checks. Manual review required.",
+            import_result_message(result, ImportStatus::Skipped)
+        ));
+        return true;
+    }
+
     let delay = match attempts {
         1 => Duration::seconds(NO_VIDEO_FIRST_RETRY_DELAY_SECS),
         2 => Duration::seconds(NO_VIDEO_SECOND_RETRY_DELAY_SECS),

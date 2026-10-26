@@ -188,6 +188,8 @@ pub struct NoVideoImportRetryState {
 /// Attempts are never capped: like Sonarr, the retry continues until the
 /// import succeeds or the operator removes/ignores/marks the download failed;
 /// only the delay between attempts grows (see `import_execution_retry_delay`).
+/// The same slot also carries the fixed 5-minute re-check of a completed
+/// download whose path is still missing after its grace window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportExecutionRetryState {
     pub attempts: u32,
@@ -319,7 +321,8 @@ impl TrackedDownload {
     }
 
     /// Whether an automatic import re-attempt is still inside its backoff
-    /// window (either the no-video probe or an execution-failure retry).
+    /// window (the no-video probe, an execution-failure retry, or the
+    /// re-check of a completed path still missing after its grace window).
     pub(crate) fn import_retry_deferred(&self, now: DateTime<Utc>) -> bool {
         self.no_video_import_retry
             .as_ref()
@@ -379,6 +382,23 @@ impl TrackedDownload {
             TrackedStatusMessageKind::Informational,
             message,
         )];
+    }
+
+    pub(crate) fn block_no_video_import_after_retries(&mut self, message: impl Into<String>) {
+        self.no_video_import_retry = None;
+        self.state = TrackedDownloadState::ImportBlocked;
+        self.waiting_for_completed_history = false;
+        self.status = TrackedDownloadStatus::Warning;
+        self.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            TrackedStatusMessageKind::Informational,
+            message,
+        )];
+    }
+
+    /// Whether this completed download is waiting, past its grace window, for
+    /// its completed path to appear, with the automatic re-check scheduled.
+    pub(crate) fn awaiting_completed_path_retry(&self) -> bool {
+        self.path_missing_since.is_some() && self.import_execution_retry.is_some()
     }
 
     pub(crate) fn clear_no_video_import_retry(&mut self) {
@@ -1201,6 +1221,13 @@ impl TrackedDownloadService {
             .any(|message| message.kind == TrackedStatusMessageKind::PasswordRetryReconciliation)
         {
             return true;
+        }
+        // A completed path still missing after its grace window parks the row
+        // in `Downloading` with an automatic re-check. Scryer still owes a
+        // download it submitted that import once the files arrive, so keep it
+        // past the client's rolling window; a foreign row owes nothing.
+        if td.state == TrackedDownloadState::Downloading && td.awaiting_completed_path_retry() {
+            return !tracked_download_is_foreign(td);
         }
         if !Self::should_preserve_tracking(td.state) {
             return false;
@@ -7293,6 +7320,59 @@ mod tests {
         for id in tracked_ids {
             assert!(tracker.find(&id).is_some_and(|td| td.is_trackable));
         }
+    }
+
+    /// A completed path still missing after its grace window keeps a row
+    /// Scryer submitted in `Downloading` with an automatic re-check. That row
+    /// must survive the client's rolling window, but a foreign row in the same
+    /// wait owes nothing and is still released.
+    #[test]
+    fn absent_download_waiting_for_its_completed_path_keeps_only_scryer_bindings() {
+        let mut tracker = TrackedDownloadService::new();
+        let mut tracked_ids = Vec::new();
+        for (id, scryer_origin) in [("path-wait-submitted", true), ("path-wait-foreign", false)] {
+            let mut tracked = build_tracked_download(id);
+            tracked.client_item.state = DownloadQueueState::Completed;
+            tracked.client_item.is_scryer_origin = scryer_origin;
+            tracked.match_type = TitleMatchType::Unmatched;
+            tracked.path_missing_since = Some(Utc::now() - chrono::Duration::minutes(11));
+            tracked.import_execution_retry = Some(ImportExecutionRetryState {
+                attempts: 1,
+                next_retry_at: Utc::now() + chrono::Duration::minutes(5),
+            });
+            tracked_ids.push(tracked.id.clone());
+            tracker.cache.insert(tracked.download_id, tracked);
+        }
+        for id in &tracked_ids {
+            expire_snapshot_absence(&mut tracker, id);
+        }
+
+        let authoritative_client_ids = HashSet::from(["client-1".to_string()]);
+        let unavailable_sources = tracker
+            .update_trackable_excluding_client_types_for_authoritative_clients(
+                &HashSet::new(),
+                &[],
+                Some(&authoritative_client_ids),
+            );
+
+        assert_eq!(
+            unavailable_sources,
+            vec![ClientJobLocator::new(
+                Some("client-1"),
+                "nzbget",
+                "path-wait-foreign"
+            )]
+        );
+        assert!(
+            tracker
+                .find("path-wait-submitted")
+                .is_some_and(|td| td.is_trackable)
+        );
+        assert!(
+            tracker
+                .find("path-wait-foreign")
+                .is_some_and(|td| !td.is_trackable)
+        );
     }
 
     /// A client that did not answer this tick proves nothing about its rows,

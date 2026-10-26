@@ -1009,6 +1009,9 @@ async fn apply_result_keeps_retrying_no_video_import_after_unchanged_checks() {
     assert_eq!(td.status, TrackedDownloadStatus::Warning);
     assert_eq!(td.no_video_import_retry.as_ref().unwrap().attempts, 2);
 
+    // Unchanged checks past the two fast retries keep retrying at the slow
+    // cadence until the 48-hour ceiling.
+    assert!(5 < NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS);
     for attempt in 3..=5 {
         let before = Utc::now();
         assert!(!apply_import_result(&app, &mut td, result.clone(), 0).await);
@@ -1017,6 +1020,61 @@ async fn apply_result_keeps_retrying_no_video_import_after_unchanged_checks() {
         assert_eq!(retry.attempts, attempt);
         assert!(retry.next_retry_at >= before + Duration::minutes(15));
     }
+}
+
+#[tokio::test]
+async fn apply_result_blocks_no_video_import_once_slow_retries_reach_the_ceiling() {
+    assert_eq!(
+        i64::from(NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS),
+        2 + Duration::hours(48).num_seconds() / NO_VIDEO_SLOW_RETRY_DELAY_SECS
+    );
+    let app = build_app(Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut td = build_tracked_download("title-1", "movie", "Paper.Lantern.2012.1080p.WEB-DL");
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let result = ImportResult {
+        import_id: "import-1".to_string(),
+        decision: ImportDecision::Skipped,
+        skip_reason: Some(ImportSkipReason::NoVideoFiles),
+        title_id: Some("title-1".to_string()),
+        source_system: Some("nzbget".to_string()),
+        source_ref: Some("dl-1".to_string()),
+        source_title: Some("Paper.Lantern.2012.1080p.WEB-DL".to_string()),
+        source_path: temp_dir.path().to_string_lossy().into_owned(),
+        dest_path: None,
+        quality: None,
+        episode_ids: vec![],
+        file_size_bytes: None,
+        link_type: None,
+        error_message: Some("no eligible video files found".to_string()),
+        release_burned: false,
+        started_at: Utc::now(),
+        completed_at: Utc::now(),
+        upgrade: false,
+        upgrade_previous_path: None,
+    };
+
+    // The first check records the unchanged source signature; then jump the
+    // count to just below the ceiling instead of running every slow retry.
+    assert!(!apply_import_result(&app, &mut td, result.clone(), 0).await);
+    td.no_video_import_retry
+        .as_mut()
+        .expect("automatic retry")
+        .attempts = NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS - 2;
+
+    assert!(!apply_import_result(&app, &mut td, result.clone(), 0).await);
+    assert_eq!(td.state, TrackedDownloadState::ImportPending);
+    assert_eq!(
+        td.no_video_import_retry.as_ref().unwrap().attempts,
+        NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS - 1
+    );
+
+    assert!(!apply_import_result(&app, &mut td, result, 0).await);
+    assert_eq!(td.state, TrackedDownloadState::ImportBlocked);
+    assert_eq!(td.status, TrackedDownloadStatus::Warning);
+    assert!(td.no_video_import_retry.is_none());
+    assert!(td.status_messages[0].text.contains(&format!(
+        "after {NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS} unchanged checks"
+    )));
 }
 
 #[tokio::test]
