@@ -444,10 +444,10 @@ fn oauth_validation_error(err: AppError) -> Response {
             )
         }
         AppError::ValidationRefused {
-            message, reason, ..
-        } if reason == "OAUTH_INVALID_SCOPE" => {
-            oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message)
-        }
+            message,
+            reason: scryer_application::error_reasons::oauth::INVALID_SCOPE,
+            ..
+        } => oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message),
         AppError::Validation(message) | AppError::ValidationRefused { message, .. } => {
             oauth_error(StatusCode::BAD_REQUEST, "invalid_request", message)
         }
@@ -473,10 +473,10 @@ fn oauth_app_error(err: AppError) -> Response {
             )
         }
         AppError::ValidationRefused {
-            message, reason, ..
-        } if reason == "OAUTH_INVALID_SCOPE" => {
-            oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message)
-        }
+            message,
+            reason: scryer_application::error_reasons::oauth::INVALID_SCOPE,
+            ..
+        } => oauth_error(StatusCode::BAD_REQUEST, "invalid_scope", message),
         AppError::Validation(error) | AppError::ValidationRefused { message: error, .. } => {
             tracing::debug!(error = %error, "OAuth request validation failed");
             oauth_error(

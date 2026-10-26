@@ -1615,9 +1615,13 @@ async fn a_consolidation_owns_both_roots_and_every_title_the_plan_touches() {
             None,
         )
         .await;
-    let Err(AppError::Validation(message)) = repointed else {
+    let Err(AppError::ValidationRefused {
+        message, reason, ..
+    }) = repointed
+    else {
         panic!("retiring a held root must be refused: {repointed:?}");
     };
+    assert_eq!(reason, crate::error_reasons::location::OWNERSHIP_BUSY);
     assert!(message.contains(operation_id), "got {message}");
 
     // The bystander is untouched by any of it.

@@ -40,8 +40,9 @@ fn completed_download_path_ready_clears_waiting_state_when_path_appears() {
     let mut td = build_tracked_download("title-1", "movie", "Paper.Lantern.2012.1080p");
     td.path_missing_since = Some(Utc::now() - Duration::minutes(5));
     td.status = TrackedDownloadStatus::Warning;
-    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
-        PATH_WAITING_MESSAGE.to_string(),
+    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+        crate::tracked_downloads::TrackedStatusMessageKind::PathWaiting,
+        "rewritten waiting explanation",
     )];
 
     let existing_dir = std::env::temp_dir().join(format!("scryer-path-ready-{}", Id::new().0));

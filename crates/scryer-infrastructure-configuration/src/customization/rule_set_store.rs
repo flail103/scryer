@@ -855,7 +855,7 @@ mod tests {
             .expect_err("unknown stored phase must not silently change evaluation order");
         assert!(matches!(
             error,
-            AppError::Repository(message) | AppError::RepositoryFailure { message: message, .. } if message.contains("invalid rule set evaluation phase: future_phase")
+            AppError::Repository(message) | AppError::RepositoryFailure { message, .. } if message.contains("invalid rule set evaluation phase: future_phase")
         ));
     }
 }

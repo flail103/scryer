@@ -1368,8 +1368,9 @@ mod released_hold {
         let mut td = build_tracked_download("title-1", "series", BATCH_RELEASE);
         td.state = TrackedDownloadState::ImportBlocked;
         td.status = TrackedDownloadStatus::Warning;
-        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
-            crate::import_workflow::SCENE_SUBTITLE_PENDING_WARNING,
+        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            crate::tracked_downloads::TrackedStatusMessageKind::SceneSubtitlePending,
+            "rewritten subtitle hold explanation",
         )];
         td.completed_source = Some(build_completed_download(
             BATCH_RELEASE,
@@ -1515,15 +1516,14 @@ mod released_hold {
     async fn a_scryer_grab_whose_submission_cannot_be_resolved_is_left_untouched() {
         let download = held_download_dir();
         let app = batch_app(None, &["ep-301", "ep-302", "ep-303"]).await;
+        let original = held_download(download.path());
+        let original_status_messages = original.status_messages.clone();
 
-        let (settlement, td) = release(&app, held_download(download.path()), AUTOMATIC).await;
+        let (settlement, td) = release(&app, original, AUTOMATIC).await;
 
         assert!(settlement.is_err(), "{settlement:?}");
         assert_eq!(td.state, TrackedDownloadState::ImportBlocked);
-        assert_eq!(
-            crate::tracked_downloads::status_texts(&td.status_messages),
-            vec![crate::import_workflow::SCENE_SUBTITLE_PENDING_WARNING.to_string()]
-        );
+        assert_eq!(td.status_messages, original_status_messages);
     }
 
     #[tokio::test]

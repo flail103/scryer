@@ -2418,8 +2418,8 @@ mod tests {
 
         assert!(matches!(
             conflict,
-            Err(AppError::Validation(message))
-                if message == "external account is already linked to a different provider identity"
+            Err(AppError::ValidationRefused { reason, .. })
+                if reason == crate::error_reasons::EXTERNAL_ACCOUNT_IDENTITY_MISMATCH
         ));
     }
 
@@ -2445,8 +2445,8 @@ mod tests {
 
             assert!(matches!(
                 result,
-                Err(AppError::Validation(message))
-                    if message == "external account identity must be present when claiming"
+                Err(AppError::ValidationRefused { reason, .. })
+                    if reason == crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_IDENTITY_REQUIRED
             ));
         }
     }

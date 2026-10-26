@@ -2182,9 +2182,13 @@ async fn a_bulk_move_spanning_two_source_roots_owns_every_root_it_reads_from() {
             None,
         )
         .await;
-    let Err(crate::AppError::Validation(message)) = repointed else {
+    let Err(crate::AppError::ValidationRefused {
+        message, reason, ..
+    }) = repointed
+    else {
         panic!("retiring a held root must be refused: {repointed:?}");
     };
+    assert_eq!(reason, crate::error_reasons::location::OWNERSHIP_BUSY);
     assert!(
         message.contains(operation_id),
         "the refusal names the operation holding the ground: {message}"

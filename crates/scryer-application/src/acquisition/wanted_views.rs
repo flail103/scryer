@@ -855,10 +855,7 @@ pub struct AcquisitionSearchJobView {
 /// search, not a failure: the typed `NoAutoEligibleRelease` expresses the same
 /// outcome the old `Validation("no auto-eligible release found")` did.
 pub(crate) fn scope_search_error_is_failure(error: &AppError) -> bool {
-    match error {
-        AppError::NoAutoEligibleRelease { .. } => false,
-        _ => true,
-    }
+    !matches!(error, AppError::NoAutoEligibleRelease { .. })
 }
 /// The job's terminal status. It completes when no scope failed; it fails when
 /// nothing was grabbed and either every scope failed or a scope could not submit

@@ -139,13 +139,9 @@ impl CapsRequestCache {
         };
         let mut result = flight.lock().await;
         if result.is_none() {
-            *result = Some(request.await.map_err(std::convert::identity));
+            *result = Some(request.await);
         }
-        result
-            .as_ref()
-            .expect("caps fetch completed")
-            .clone()
-            .map_err(std::convert::identity)
+        result.as_ref().expect("caps fetch completed").clone()
     }
 }
 

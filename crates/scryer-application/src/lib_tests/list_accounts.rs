@@ -612,12 +612,17 @@ async fn private_account_poll_ends_when_the_approved_link_can_never_be_recorded(
     // The member's lists are turned off while the provider is approving the link.
     set_member_list_policy(&harness, ListPolicy::None).await;
     auth.poll_release.notify_one();
-    let Err(AppError::Unauthorized(message)) = timeout(Duration::from_secs(30), first)
-        .await
-        .expect("first poll finished")
+    let Err(AppError::UnauthorizedReason { message, reason }) =
+        timeout(Duration::from_secs(30), first)
+            .await
+            .expect("first poll finished")
     else {
         panic!("a write that cannot succeed must end the link with its reason");
     };
+    assert_eq!(
+        reason,
+        crate::error_reasons::lists::PERSONAL_LISTS_NOT_ALLOWED_MEMBER
+    );
     assert!(message.contains("not allowed"), "{message}");
     set_member_list_policy(&harness, ListPolicy::Approval).await;
     assert!(matches!(

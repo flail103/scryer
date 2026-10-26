@@ -1297,7 +1297,7 @@ mod tests {
         .err()
         .expect("an NZB inflating past the limit must reject");
         assert!(
-            matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. } if message.contains("payload exceeded")),
+            matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message, .. } if message.contains("payload exceeded")),
             "{error:?}"
         );
         assert!(!contains_partial(tempdir.path()));
@@ -1339,7 +1339,7 @@ mod tests {
             .err()
             .expect("corrupt compressed payload must reject");
             assert!(
-                matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. }
+                matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message, .. }
                     if message.contains(&format!("{label}-compressed"))),
                 "{label}: {error:?}"
             );
@@ -1365,7 +1365,7 @@ mod tests {
             .err()
             .expect("archive payload must reject");
             assert!(
-                matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. }
+                matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message, .. }
                     if message.contains(&format!("a {label} file"))),
                 "{label}: {error:?}"
             );
@@ -1590,7 +1590,7 @@ mod tests {
             Err(error) => error,
         };
         assert!(
-            matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. } if message.contains("payload exceeded")),
+            matches!(&error, AppError::Validation(message) | AppError::ValidationRefused { message, .. } if message.contains("payload exceeded")),
             "{error:?}"
         );
         assert!(!contains_partial(tempdir.path()));

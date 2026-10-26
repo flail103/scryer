@@ -363,7 +363,7 @@ mod tests {
             .await
             .expect_err("duplicate name should be rejected");
         assert!(
-            matches!(conflict, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. } if message.contains("already in use"))
+            matches!(conflict, AppError::Validation(message) | AppError::ValidationRefused { message, .. } if message.contains("already in use"))
         );
 
         store
@@ -381,7 +381,7 @@ mod tests {
             .await
             .expect_err("rename onto an existing name should be rejected");
         assert!(
-            matches!(conflict, AppError::Validation(message) | AppError::ValidationRefused { message: message, .. } if message.contains("already in use"))
+            matches!(conflict, AppError::Validation(message) | AppError::ValidationRefused { message, .. } if message.contains("already in use"))
         );
     }
 

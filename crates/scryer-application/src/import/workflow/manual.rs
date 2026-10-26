@@ -301,7 +301,7 @@ async fn process_pending_manual_import(app: AppUseCase, record: scryer_domain::I
             result
                 .file_results
                 .iter()
-                .any(|file| manual_file_has_scene_subtitle_hold(file))
+                .any(manual_file_has_scene_subtitle_hold)
         });
     let terminalized = if has_successful_import && !subtitles_pending {
         let canonical_download_id = match app
@@ -2646,7 +2646,7 @@ fn manual_import_terminal_status_and_error(
             results.iter().any(manual_file_has_scene_subtitle_hold).then_some(ImportErrorCode::SceneSubtitlePending),
             results
                 .iter()
-                .any(|file| manual_file_has_scene_subtitle_hold(file))
+                .any(manual_file_has_scene_subtitle_hold)
                 .then(|| SCENE_SUBTITLE_PENDING_WARNING.into()),
         ),
         None => (
@@ -3101,7 +3101,7 @@ pub(crate) async fn execute_manual_import_with_release_evidence(
         .all(|file| file.success)
         && !results
             .iter()
-            .any(|file| manual_file_has_scene_subtitle_hold(file));
+            .any(manual_file_has_scene_subtitle_hold);
     if can_release {
         let cleanup_succeeded = complete_deferred_import_source_cleanup(app, cleanups)
             .await
@@ -3130,7 +3130,7 @@ pub(crate) async fn execute_manual_import_with_release_evidence(
         }
     } else if results
         .iter()
-        .any(|file| manual_file_has_scene_subtitle_hold(file))
+        .any(manual_file_has_scene_subtitle_hold)
     {
         record_manual_hold_reason(
             app,
@@ -4862,7 +4862,7 @@ mod manual_import_recovery_tests {
         )];
         let (status, code, message) = manual_import_terminal_status_and_error(&results);
         assert_eq!(status, ImportStatus::Completed);
-        assert_eq!(code, None);
+        assert_eq!(code, Some(ImportErrorCode::SceneSubtitlePending));
         assert_eq!(message.as_deref(), Some(SCENE_SUBTITLE_PENDING_WARNING));
         let mut record = completed_manual_import_record("qbittorrent", true);
         let mut result: ManualImportExecutionResult =

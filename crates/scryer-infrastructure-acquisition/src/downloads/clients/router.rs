@@ -6726,15 +6726,18 @@ mod tests {
         ));
         assert!(matches!(
             router.pause_queue_item("job-1").await,
-            Err(AppError::Validation(message)) if message.contains("download client item not found")
+            Err(AppError::ValidationRefused { reason, .. })
+                if reason == crate::error_reasons::ACQUISITION_DOWNLOAD_CLIENT_ITEM_NOT_FOUND
         ));
         assert!(matches!(
             router.resume_queue_item("job-1").await,
-            Err(AppError::Validation(message)) if message.contains("download client item not found")
+            Err(AppError::ValidationRefused { reason, .. })
+                if reason == crate::error_reasons::ACQUISITION_DOWNLOAD_CLIENT_ITEM_NOT_FOUND
         ));
         assert!(matches!(
             router.delete_queue_item("job-1", false, false).await,
-            Err(AppError::Validation(message)) if message.contains("download client item not found")
+            Err(AppError::ValidationRefused { reason, .. })
+                if reason == crate::error_reasons::ACQUISITION_DOWNLOAD_CLIENT_ITEM_NOT_FOUND
         ));
     }
 

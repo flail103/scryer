@@ -1401,10 +1401,16 @@ async fn a_disabled_custom_job_cannot_be_triggered() {
         .trigger_custom_job(&persisted_system_admin(&ctx).await, &script.id)
         .await
     {
-        Err(scryer_application::AppError::Validation(message)) => {
-            assert!(message.contains("disabled"), "{message}")
+        Err(scryer_application::AppError::ValidationRefused {
+            reason, message, ..
+        }) => {
+            assert_eq!(
+                reason,
+                scryer_application::error_reasons::jobs::SCHEDULED_SCRIPT_DISABLED
+            );
+            assert!(message.contains("disabled"), "{message}");
         }
-        other => panic!("expected Validation, got {other:?}"),
+        other => panic!("expected disabled-script refusal, got {other:?}"),
     }
     let jobs = ctx.app.list_jobs(&system_admin()).await.expect("list jobs");
     assert!(
