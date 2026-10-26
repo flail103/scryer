@@ -5774,11 +5774,14 @@ enum BackgroundAcquisitionTrigger {
 /// scope since the last walk (see `scope_reopened_since_walk`); that decision
 /// is made inside the pass and does not move this count.
 ///
-/// Whatever asks for it, a walk never starts inside the idle gap: the walk
-/// interval, floored at the poll interval, measured from the end of the last
-/// walk. A walk that overran its budget still leaves the machine that long
-/// before the next one. Nor does a walk start while an RSS sync runs. A walk
-/// held back for either reason runs on the first tick after the hold lifts.
+/// A scheduled walk, and a deferred-work re-arm, never start inside the idle
+/// gap: the walk interval, floored at the poll interval, measured from the end
+/// of the last walk. A walk that overran its budget still leaves the machine
+/// that long before the next one. A wake is exempt from the gap: something
+/// just changed (a title was added, a profile or a setting moved), and the
+/// operator expects that to be acted on now, not after the rest. No walk,
+/// whatever asks for it, starts while an RSS sync runs. A walk held back runs
+/// on the first tick after the hold lifts.
 #[derive(Debug)]
 struct AcquisitionWalkCadence {
     poll_period: std::time::Duration,
@@ -5842,8 +5845,8 @@ impl AcquisitionWalkCadence {
         self.pass_for_beside_rss(trigger, now, false)
     }
 
-    /// The pass `trigger` runs. `rss_running` holds the walk back the way the
-    /// idle gap does.
+    /// The pass `trigger` runs. `rss_running` holds every walk back; the idle
+    /// gap holds back all but a wake.
     fn pass_for_beside_rss(
         &mut self,
         trigger: BackgroundAcquisitionTrigger,
@@ -5860,7 +5863,8 @@ impl AcquisitionWalkCadence {
                 self.ticks_since_walk >= self.ticks_per_walk || retry_due || self.walk_held
             }
         };
-        let held = rss_running || self.in_walk_gap(now);
+        let exempt_from_gap = trigger == BackgroundAcquisitionTrigger::Wake;
+        let held = rss_running || (!exempt_from_gap && self.in_walk_gap(now));
         match (wants_walk, held) {
             (true, false) => {
                 self.walk_held = false;
@@ -7280,28 +7284,28 @@ mod task_runner_tests {
             vec![Held, Held, Held, Held, Held, Full]
         );
 
-        // A wake or a deferred retry right after a walk waits out the gap,
-        // and the first tick after it walks for them.
+        // A wake right after a walk walks again; a deferred retry right after
+        // that waits out the gap, and the first tick after it walks for it.
         let walked_at = start + secs(480);
-        assert_eq!(
-            cadence.pass_for(BackgroundAcquisitionTrigger::Wake, walked_at + secs(1)),
-            Held
-        );
+        let woken_at = walked_at + secs(1);
+        let pass = cadence.pass_for(BackgroundAcquisitionTrigger::Wake, woken_at);
+        assert_eq!(pass, Full);
+        cadence.record(pass, BackgroundAcquisitionCycleOutcome::default(), woken_at);
         assert_eq!(
             cadence.pass_for(
                 BackgroundAcquisitionTrigger::DeferredRetry,
-                walked_at + secs(2)
+                woken_at + secs(1)
             ),
             Held
         );
         assert_eq!(
-            cadence.pass_for(BackgroundAcquisitionTrigger::PollTick, walked_at + secs(60)),
+            cadence.pass_for(BackgroundAcquisitionTrigger::PollTick, woken_at + secs(60)),
             Held
         );
         assert_eq!(
             cadence.pass_for(
                 BackgroundAcquisitionTrigger::PollTick,
-                walked_at + secs(300)
+                woken_at + secs(300)
             ),
             Full
         );
@@ -7309,7 +7313,7 @@ mod task_runner_tests {
 
     /// The gap is measured from the end of the last walk, not its start: a walk
     /// that ran far past its budget still leaves the machine a full gap before
-    /// the next one, whatever asked for it in the meantime.
+    /// the next scheduled or re-armed one.
     #[test]
     fn the_idle_gap_holds_the_next_walk_back_after_an_overrun() {
         use BackgroundAcquisitionPass::{FailureCheckWalkHeld as Held, Full};
@@ -7329,9 +7333,8 @@ mod task_runner_tests {
             ended,
         );
 
-        // A wake queued during the walk, a deferred retry and every tick of
-        // the gap run the failure check only.
-        assert_eq!(cadence.pass_for(Wake, ended), Held);
+        // A deferred retry and every tick of the gap run the failure check
+        // only.
         assert_eq!(cadence.pass_for(DeferredRetry, ended + secs(5)), Held);
         for tick in 1..=4 {
             assert_eq!(
@@ -7344,6 +7347,37 @@ mod task_runner_tests {
         assert_eq!(cadence.pass_for(PollTick, ended + secs(299)), Held);
         // The first tick at the gap's end walks.
         assert_eq!(cadence.pass_for(PollTick, ended + secs(300)), Full);
+    }
+
+    /// A wake is what a title add, a profile change or a settings change
+    /// sends, so it walks straight through the idle gap. The walk it starts
+    /// restarts the gap for the scheduled cadence behind it.
+    #[test]
+    fn a_wake_walks_inside_the_idle_gap() {
+        use BackgroundAcquisitionPass::{
+            FailureCheckOnly as Check, FailureCheckWalkHeld as Held, Full,
+        };
+        use BackgroundAcquisitionTrigger::{DeferredRetry, PollTick, Wake};
+        let start = tokio::time::Instant::now();
+        let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
+        let walked = BackgroundAcquisitionCycleOutcome {
+            walked: true,
+            ..BackgroundAcquisitionCycleOutcome::default()
+        };
+        assert_eq!(cadence.pass_for(Wake, start), Full);
+        cadence.record(Full, walked, start);
+
+        // Deep inside the gap the tick and a re-arm are held, the wake is not.
+        assert_eq!(cadence.pass_for(PollTick, start + secs(60)), Held);
+        assert_eq!(cadence.pass_for(DeferredRetry, start + secs(90)), Held);
+        assert_eq!(cadence.pass_for(Wake, start + secs(120)), Full);
+        cadence.record(Full, walked, start + secs(130));
+
+        // The wake's walk is the new gap start: the tick that would have
+        // ended the first gap is still inside the second, and the one past
+        // the second gap is free but not yet due.
+        assert_eq!(cadence.pass_for(PollTick, start + secs(300)), Held);
+        assert_eq!(cadence.pass_for(PollTick, start + secs(430)), Check);
     }
 
     /// A walk does not start while the scheduled RSS sync runs, and the first
