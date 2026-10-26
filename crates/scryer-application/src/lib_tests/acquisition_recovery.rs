@@ -13950,6 +13950,62 @@ async fn a_contained_indexer_is_held_until_due_without_coverage_or_deferral() {
     );
 }
 
+/// An indexer that background searches learned to carry nothing for the
+/// subject's facet is held by the walk the same way a contained one is: the
+/// cycle neither asks it nor defers the scope, an operator's walk still asks
+/// it, and once the hold runs out the cycle asks again.
+#[tokio::test]
+async fn a_facet_suppressed_indexer_is_held_by_the_walk_until_it_expires() {
+    let indexer_client = Arc::new(TrackingIndexerClient::default().returning_no_results());
+    indexer_client.containment.lock().await.facet_hold_until =
+        Some(chrono::Utc::now() + chrono::Duration::hours(24));
+    let (app, title, indexer_client, _) =
+        seed_recent_failed_season_pack_fixture_with_indexer(indexer_client).await;
+
+    let held = app.run_background_acquisition_cycle_once().await;
+    assert!(
+        indexer_client.searches.lock().await.is_empty(),
+        "a facet-suppressed indexer is not asked by the background cycle"
+    );
+    assert_eq!(held.deferred_scopes, 0, "a facet hold is not a deferral");
+    {
+        let containment = indexer_client.containment.lock().await;
+        assert!(
+            !containment.facet_hold_reads.is_empty()
+                && containment
+                    .facet_hold_reads
+                    .iter()
+                    .all(|facet| facet == "anime"),
+            "the walk asks about the subject's search facet: {:?}",
+            containment.facet_hold_reads
+        );
+    }
+
+    crate::acquisition::workflow::run_interactive_title_acquisition_walk(
+        &app,
+        &title.id,
+        None,
+        None,
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .expect("interactive title walk");
+    let after_operator = indexer_client.searches.lock().await.len();
+    assert!(
+        after_operator > 0,
+        "an operator's walk still asks the indexer"
+    );
+
+    indexer_client.containment.lock().await.facet_hold_until =
+        Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+    app.run_background_acquisition_cycle_once().await;
+    assert!(
+        indexer_client.searches.lock().await.len() > after_operator,
+        "once the facet hold expires, the cycle asks the indexer again"
+    );
+}
+
 /// Both walkers arbitrate over the same title, so exactly one may hold it at a
 /// time. The cycle *skips* a held title rather than blocking on it — and counts
 /// the skip for telemetry only: the job wakes the poller when it releases the

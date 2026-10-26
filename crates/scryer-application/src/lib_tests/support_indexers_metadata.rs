@@ -209,6 +209,11 @@ pub(super) struct TrackedContainment {
     /// Contained indexers per convergence scope, with the instant they are due.
     holds: std::collections::HashMap<String, Vec<(String, chrono::DateTime<chrono::Utc>)>>,
     pub(super) linked_scopes: Vec<String>,
+    /// Instant until which every asked indexer is held out of its facet, as
+    /// if background searches had learned it carries nothing there.
+    pub(super) facet_hold_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// The facet each facet-hold read asked about.
+    pub(super) facet_hold_reads: Vec<String>,
 }
 
 impl TrackingIndexerClient {
@@ -462,6 +467,21 @@ impl IndexerClient for TrackingIndexerClient {
             .filter(|(id, until)| *until > now && indexer_ids.contains(id))
             .cloned()
             .collect())
+    }
+
+    async fn facet_suppression_holds(
+        &self,
+        facet: &str,
+        indexer_ids: &[String],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>> {
+        let mut containment = self.containment.lock().await;
+        containment.facet_hold_reads.push(facet.to_string());
+        Ok(containment
+            .facet_hold_until
+            .filter(|until| *until > now)
+            .map(|until| indexer_ids.iter().map(|id| (id.clone(), until)).collect())
+            .unwrap_or_default())
     }
 }
 

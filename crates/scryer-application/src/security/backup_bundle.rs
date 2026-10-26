@@ -815,6 +815,12 @@ pub const BACKUP_TABLE_CATALOG: &[BackupTableCatalogEntry] = &[
         table: "indexer_errors",
         classification: BackupTableClassification::Export,
     },
+    // Short-lived learned emptiness per indexer and facet; a restored
+    // instance relearns it within a few background searches.
+    BackupTableCatalogEntry {
+        table: "indexer_facet_learning",
+        classification: BackupTableClassification::ResetOnRestore,
+    },
     BackupTableCatalogEntry {
         table: "indexer_search_candidates",
         classification: BackupTableClassification::ResetOnRestore,

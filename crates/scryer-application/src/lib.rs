@@ -119,6 +119,10 @@ pub use ports::{
     DownloadCleanupClaim, DownloadCleanupPayload, DownloadCleanupRecord, DownloadClientObservation,
 };
 pub use ports::{DownloadTitleReassignment, DownloadTitleReferences};
+pub use ports::{
+    IndexerFacetLearningPolicy, IndexerFacetLearningState, IndexerFacetSearchOutcome,
+    IndexerFacetTransition,
+};
 mod quality;
 mod rate_limit_signal;
 pub mod request_rules;

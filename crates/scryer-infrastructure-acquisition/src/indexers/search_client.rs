@@ -38,6 +38,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::search_learning::FREETEXT_LEARNING_KEY_PREFIX;
+use scryer_application::{
+    IndexerFacetLearningPolicy, IndexerFacetLearningState, IndexerFacetSearchOutcome,
+    IndexerFacetTransition,
+};
 
 use scryer_outbound_http::{
     DestinationKey, HostKey, HostRpsProfile, HostRpsProfileSource, LOCAL_MANAGED_HOST_RPS,
@@ -1874,6 +1878,26 @@ fn truncate_rss_poll_results(results: &mut Vec<IndexerSearchResult>, cap: usize)
 const LEARNED_EMPTY_SUPPRESSION_THRESHOLD: u32 = 3;
 const LEARNED_SUPPRESSION_REPROBE_INTERVAL_DAYS: i64 = 7;
 
+/// Distinct titles in a row whose background searches an indexer answered
+/// with nothing usable before background searches leave it out of that
+/// media facet. A general tracker that never carries anime reaches this
+/// within one walk; one usable result anywhere resets it.
+const FACET_EMPTY_TITLE_THRESHOLD: usize = 5;
+/// How long a learned-empty facet keeps an indexer out of background
+/// searches before one re-probe may ask it again.
+const FACET_SUPPRESSION_HOURS: i64 = 24;
+/// How long a claimed facet re-probe holds other background searches off
+/// before another may claim it, in case the claimed one errors.
+const FACET_REPROBE_CLAIM_MINUTES: i64 = 60;
+
+fn facet_learning_policy() -> IndexerFacetLearningPolicy {
+    IndexerFacetLearningPolicy {
+        empty_title_threshold: FACET_EMPTY_TITLE_THRESHOLD,
+        suppression: Duration::hours(FACET_SUPPRESSION_HOURS),
+        reprobe_claim: Duration::minutes(FACET_REPROBE_CLAIM_MINUTES),
+    }
+}
+
 /// Why an indexer never reached dispatch for one search.
 ///
 /// The variants are the label domain of `scryer_indexer_skips_total`, so they
@@ -1913,6 +1937,8 @@ enum IndexerSkipReason {
     QueryBudgetExceeded,
     /// A Prowlarr managed child whose caps snapshot has not been fetched yet.
     ManagedCapsPending,
+    /// Background searches learned the indexer carries nothing for the facet.
+    FacetSuppressed,
 }
 
 impl IndexerSkipReason {
@@ -1934,6 +1960,7 @@ impl IndexerSkipReason {
             Self::StrategiesSuppressed => "strategies_suppressed",
             Self::QueryBudgetExceeded => "query_budget_exceeded",
             Self::ManagedCapsPending => "managed_caps_pending",
+            Self::FacetSuppressed => "facet_suppressed",
         }
     }
 
@@ -1957,6 +1984,7 @@ impl IndexerSkipReason {
             Self::StrategiesSuppressed => "all automatic search strategies are learned-suppressed",
             Self::QueryBudgetExceeded => "over its query budget for an interactive search",
             Self::ManagedCapsPending => "managed indexer caps not fetched yet",
+            Self::FacetSuppressed => "learned to carry nothing for this facet",
         }
     }
 }
@@ -2566,6 +2594,16 @@ async fn record_strategy_learning_outcome(
     strategy_label: &str,
     usable_hits: usize,
 ) {
+    record_facet_learning_outcome(
+        search_learning,
+        learning_context,
+        mode,
+        indexer_id,
+        indexer_name,
+        usable_hits,
+        Utc::now(),
+    )
+    .await;
     if mode != SearchMode::Auto {
         return;
     }
@@ -2650,6 +2688,121 @@ async fn record_strategy_learning_outcome(
             empty_successes = record.empty_successes,
             "suppressing learned-empty automatic indexer search strategy"
         );
+    }
+}
+
+/// Feeds one complete strategy answer into the indexer's learned state for
+/// the search facet. A usable result from any search with a title clears it;
+/// only a background pass's empty answer counts toward the streak, so an
+/// operator's searches never suppress anything. Errors, partial answers and
+/// deferrals never reach here and leave the state as it was.
+async fn record_facet_learning_outcome(
+    search_learning: &Arc<dyn IndexerSearchLearningRepository>,
+    learning_context: Option<&IndexerSearchLearningContext>,
+    mode: SearchMode,
+    indexer_id: &str,
+    indexer_name: &str,
+    usable_hits: usize,
+    now: DateTime<Utc>,
+) {
+    let Some(learning_context) = learning_context else {
+        return;
+    };
+    if learning_context.title_id.trim().is_empty()
+        || learning_context.subject_kind == ReleaseSearchSubjectKind::Rss
+    {
+        return;
+    }
+    let outcome = if usable_hits > 0 {
+        IndexerFacetSearchOutcome::Usable
+    } else if candidate_reuse_permitted(mode, Some(learning_context)) {
+        IndexerFacetSearchOutcome::Empty
+    } else {
+        return;
+    };
+    let facet = learning_context.facet.as_str();
+    match search_learning
+        .record_facet_search_outcome(
+            indexer_id,
+            facet,
+            &learning_context.title_id,
+            outcome,
+            now,
+            facet_learning_policy(),
+        )
+        .await
+    {
+        Ok(IndexerFacetTransition::Suppressed { streak, until }) => {
+            info!(
+                indexer = indexer_name,
+                facet,
+                streak,
+                suppressed_until = %until,
+                "suppressing indexer for this facet in background searches: recent titles all came back empty"
+            );
+        }
+        Ok(IndexerFacetTransition::Cleared {
+            streak,
+            was_suppressed: true,
+        }) => {
+            info!(
+                indexer = indexer_name,
+                facet, streak, "cleared learned-empty facet suppression after a usable result"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            warn!(
+                indexer = indexer_name,
+                facet,
+                error = %error,
+                "failed to record indexer facet learning outcome"
+            );
+        }
+    }
+}
+
+/// Whether a background pass leaves this indexer out of the facet. A
+/// suppression whose window has passed lets exactly one search through as
+/// the re-probe; every other search keeps skipping until that one lands or
+/// its claim lapses. A failed claim keeps the indexer out, like the
+/// per-strategy re-probe.
+async fn facet_suppressed_for_background(
+    search_learning: &Arc<dyn IndexerSearchLearningRepository>,
+    state: Option<&IndexerFacetLearningState>,
+    indexer_id: &str,
+    indexer_name: &str,
+    facet: &str,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(state) = state.filter(|state| state.suppressed_until.is_some()) else {
+        return false;
+    };
+    let policy = facet_learning_policy();
+    if state.held_until(now, policy).is_some() {
+        return true;
+    }
+    match search_learning
+        .try_claim_facet_reprobe(indexer_id, facet, now, policy)
+        .await
+    {
+        Ok(true) => {
+            debug!(
+                indexer = indexer_name,
+                facet, "claimed learned-empty facet re-probe"
+            );
+            false
+        }
+        Ok(false) => true,
+        Err(error) => {
+            warn!(
+                indexer = indexer_name,
+                facet,
+                error = %error,
+                "failed to claim learned-empty facet re-probe"
+            );
+            true
+        }
     }
 }
 
@@ -5753,6 +5906,31 @@ impl IndexerClient for MultiIndexerSearchClient {
             };
             proxy_configs_by_id.insert(proxy_config_id.to_string(), fetched);
         }
+        // Only a background pass reads learned facet emptiness; interactive
+        // and operator searches always ask every indexer.
+        let background_facet_context = learning_context.as_ref().filter(|context| {
+            !is_rss_request && Self::is_background_pass(mode, is_rss_request, Some(context))
+        });
+        let facet_learning = match background_facet_context {
+            Some(context) => {
+                let indexer_ids = enabled
+                    .iter()
+                    .map(|(config, _)| config.id.clone())
+                    .collect::<Vec<_>>();
+                self.search_learning
+                    .facet_learning_states(&context.facet, &indexer_ids)
+                    .await
+                    .unwrap_or_else(|error| {
+                        warn!(
+                            facet = context.facet.as_str(),
+                            error = %error,
+                            "failed to load indexer facet learning; asking every indexer"
+                        );
+                        HashMap::new()
+                    })
+            }
+            None => HashMap::new(),
+        };
         let mut scheduler_candidates = Vec::new();
         let mut scheduler_eligible = Vec::new();
         // Indexers that cannot answer this search at all. They are reported as
@@ -5836,6 +6014,30 @@ impl IndexerClient for MultiIndexerSearchClient {
                     facet, "skipping indexer: no supported IDs for facet and no freetext"
                 );
                 unsupported_indexer_ids.push(config.id.clone());
+                continue;
+            }
+            if let Some(context) = background_facet_context
+                && facet_suppressed_for_background(
+                    &self.search_learning,
+                    facet_learning.get(&config.id),
+                    &config.id,
+                    config.name.as_str(),
+                    &context.facet,
+                    now,
+                )
+                .await
+            {
+                record_indexer_skip(
+                    mode,
+                    is_rss_request,
+                    config.name.as_str(),
+                    IndexerSkipReason::FacetSuppressed,
+                );
+                debug!(
+                    indexer = config.name.as_str(),
+                    facet = context.facet.as_str(),
+                    "skipping indexer: learned to carry nothing for this facet"
+                );
                 continue;
             }
 
@@ -8208,6 +8410,29 @@ response.next_cursor.is_some(),
             }
         }
         Ok(holds)
+    }
+
+    async fn facet_suppression_holds(
+        &self,
+        facet: &str,
+        indexer_ids: &[String],
+        now: DateTime<Utc>,
+    ) -> AppResult<HashMap<String, DateTime<Utc>>> {
+        if indexer_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let policy = facet_learning_policy();
+        Ok(self
+            .search_learning
+            .facet_learning_states(facet, indexer_ids)
+            .await?
+            .into_iter()
+            .filter_map(|(indexer_id, state)| {
+                state
+                    .held_until(now, policy)
+                    .map(|until| (indexer_id, until))
+            })
+            .collect())
     }
 }
 
@@ -18149,6 +18374,7 @@ mod tests {
             StdArc<StdMutex<Vec<(IndexerSearchRunWrite, Vec<IndexerSearchCandidateWrite>)>>>,
         cleanup_batches: StdArc<StdMutex<std::collections::VecDeque<u32>>>,
         cleanup_limits: StdArc<StdMutex<Vec<u32>>>,
+        facets: StdArc<StdMutex<HashMap<(String, String), IndexerFacetLearningState>>>,
     }
 
     #[async_trait]
@@ -18371,6 +18597,366 @@ mod tests {
             record.updated_at = Some(Utc::now().to_rfc3339());
             Ok(true)
         }
+
+        async fn facet_learning_states(
+            &self,
+            facet: &str,
+            indexer_ids: &[String],
+        ) -> AppResult<HashMap<String, IndexerFacetLearningState>> {
+            let facets = self.facets.lock().expect("facet learning mutex");
+            Ok(indexer_ids
+                .iter()
+                .filter_map(|indexer_id| {
+                    facets
+                        .get(&(indexer_id.clone(), facet.to_string()))
+                        .map(|state| (indexer_id.clone(), state.clone()))
+                })
+                .collect())
+        }
+
+        async fn record_facet_search_outcome(
+            &self,
+            indexer_id: &str,
+            facet: &str,
+            title_id: &str,
+            outcome: IndexerFacetSearchOutcome,
+            now: DateTime<Utc>,
+            policy: IndexerFacetLearningPolicy,
+        ) -> AppResult<IndexerFacetTransition> {
+            let mut facets = self.facets.lock().expect("facet learning mutex");
+            let key = (indexer_id.to_string(), facet.to_string());
+            let (next, transition) = facets
+                .get(&key)
+                .cloned()
+                .unwrap_or_default()
+                .apply_outcome(title_id, outcome, now, policy);
+            if let Some(next) = next {
+                facets.insert(key, next);
+            }
+            Ok(transition)
+        }
+
+        async fn try_claim_facet_reprobe(
+            &self,
+            indexer_id: &str,
+            facet: &str,
+            now: DateTime<Utc>,
+            policy: IndexerFacetLearningPolicy,
+        ) -> AppResult<bool> {
+            let mut facets = self.facets.lock().expect("facet learning mutex");
+            let key = (indexer_id.to_string(), facet.to_string());
+            let Some(next) = facets
+                .get(&key)
+                .and_then(|state| state.claim_reprobe(now, policy))
+            else {
+                return Ok(false);
+            };
+            facets.insert(key, next);
+            Ok(true)
+        }
+    }
+
+    fn facet_context(title_id: &str, background: bool) -> IndexerSearchLearningContext {
+        IndexerSearchLearningContext {
+            title_id: title_id.into(),
+            facet: "anime".into(),
+            subject_kind: ReleaseSearchSubjectKind::Episode,
+            search_session_id: format!("session-{title_id}"),
+            background_value: background.then_some(0.5),
+            candidate_reuse_allowed: background,
+        }
+    }
+
+    fn suppressed_facet_state(until: DateTime<Utc>) -> IndexerFacetLearningState {
+        IndexerFacetLearningState {
+            empty_title_ids: (0..FACET_EMPTY_TITLE_THRESHOLD)
+                .map(|index| format!("title-{index}"))
+                .collect(),
+            suppressed_until: Some(until),
+            reprobe_claimed_at: None,
+            revision: 1,
+        }
+    }
+
+    async fn anime_facet_search(
+        client: &MultiIndexerSearchClient,
+        mode: SearchMode,
+        context: IndexerSearchLearningContext,
+        episode: u32,
+    ) -> IndexerSearchResponse {
+        <MultiIndexerSearchClient as IndexerClient>::search(
+            client,
+            format!("Quiet Lantern {episode:02}"),
+            HashMap::from([("anidb_id".to_string(), "40001".to_string())]),
+            Some("anime".into()),
+            Some("anime".into()),
+            None,
+            None,
+            None,
+            mode,
+            match mode {
+                SearchMode::Interactive => IndexerErrorOperation::InteractiveSearch,
+                SearchMode::Auto => IndexerErrorOperation::AutomaticSearch,
+            },
+            Some(1),
+            Some(episode),
+            Some(episode),
+            None,
+            vec![],
+            Some(context),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("anime search should succeed")
+    }
+
+    #[tokio::test]
+    async fn facet_learning_suppresses_after_distinct_empty_background_titles() {
+        let repo_impl = StdArc::new(InMemorySearchLearningRepository::default());
+        let facets = repo_impl.facets.clone();
+        let repo: StdArc<dyn IndexerSearchLearningRepository> = repo_impl;
+        let record = |title: String, background: bool, mode: SearchMode, hits: usize| {
+            let repo = repo.clone();
+            async move {
+                record_strategy_learning_outcome(
+                    &repo,
+                    Some(&facet_context(&title, background)),
+                    mode,
+                    "idx-general",
+                    "General Tracker",
+                    "ids_abs",
+                    hits,
+                )
+                .await;
+            }
+        };
+        let state = || {
+            facets
+                .lock()
+                .expect("facet learning mutex")
+                .get(&("idx-general".to_string(), "anime".to_string()))
+                .cloned()
+        };
+
+        // An operator's empty searches never count.
+        for index in 0..FACET_EMPTY_TITLE_THRESHOLD {
+            record(format!("operator-{index}"), false, SearchMode::Auto, 0).await;
+        }
+        assert_eq!(state(), None);
+
+        for index in 0..FACET_EMPTY_TITLE_THRESHOLD - 1 {
+            let title = format!("title-{index}");
+            record(title.clone(), true, SearchMode::Auto, 0).await;
+            // A second empty strategy or episode of the same title is not
+            // another title.
+            record(title, true, SearchMode::Auto, 0).await;
+        }
+        let pending = state().expect("streak is tracked");
+        assert_eq!(pending.streak(), FACET_EMPTY_TITLE_THRESHOLD - 1);
+        assert_eq!(pending.suppressed_until, None);
+
+        record("title-last".to_string(), true, SearchMode::Auto, 0).await;
+        let suppressed = state().expect("streak is tracked");
+        assert_eq!(suppressed.streak(), FACET_EMPTY_TITLE_THRESHOLD);
+        assert!(
+            suppressed
+                .held_until(Utc::now(), facet_learning_policy())
+                .is_some(),
+            "the indexer is out of the facet for background searches"
+        );
+
+        // A usable hit from any search, interactive included, clears both.
+        record("title-hit".to_string(), false, SearchMode::Interactive, 2).await;
+        let cleared = state().expect("row stays");
+        assert_eq!(cleared.streak(), 0);
+        assert_eq!(cleared.suppressed_until, None);
+    }
+
+    #[tokio::test]
+    async fn facet_learning_ignores_errored_background_searches() {
+        let repo_impl = StdArc::new(InMemorySearchLearningRepository::default());
+        let facets = repo_impl.facets.clone();
+        let repo: StdArc<dyn IndexerSearchLearningRepository> = repo_impl;
+        let (client, calls) = scripted_search_client(anime_caps(), |_call| {
+            Err(AppError::Repository("upstream unavailable".into()))
+        });
+        let client = client.with_search_learning_repository(repo);
+
+        for index in 0..=FACET_EMPTY_TITLE_THRESHOLD {
+            anime_facet_search(
+                &client,
+                SearchMode::Auto,
+                facet_context(&format!("title-{index}"), true),
+                index as u32 + 1,
+            )
+            .await;
+        }
+
+        assert!(!calls.lock().expect("call log mutex").is_empty());
+        assert!(
+            facets.lock().expect("facet learning mutex").is_empty(),
+            "an error is neither empty nor usable"
+        );
+    }
+
+    #[tokio::test]
+    async fn facet_suppressed_indexer_is_skipped_by_background_searches_only() {
+        let repo_impl = StdArc::new(InMemorySearchLearningRepository::default());
+        let until = Utc::now() + Duration::hours(FACET_SUPPRESSION_HOURS);
+        repo_impl
+            .facets
+            .lock()
+            .expect("facet learning mutex")
+            .insert(
+                ("idx-1".to_string(), "anime".to_string()),
+                suppressed_facet_state(until),
+            );
+        let repo: StdArc<dyn IndexerSearchLearningRepository> = repo_impl;
+        let (client, calls) =
+            scripted_search_client(anime_caps(), |_call| response_with_titles(&[]));
+        let client = client.with_search_learning_repository(repo);
+
+        anime_facet_search(
+            &client,
+            SearchMode::Auto,
+            facet_context("title-bg", true),
+            1,
+        )
+        .await;
+        assert!(
+            calls.lock().expect("call log mutex").is_empty(),
+            "a background search does not call a facet-suppressed indexer"
+        );
+
+        // The walk sees the same indexer as held until the window ends.
+        let holds = <MultiIndexerSearchClient as IndexerClient>::facet_suppression_holds(
+            &client,
+            "anime",
+            &["idx-1".to_string(), "idx-2".to_string()],
+            Utc::now(),
+        )
+        .await
+        .expect("holds should load");
+        assert_eq!(holds, HashMap::from([("idx-1".to_string(), until)]));
+        assert!(
+            <MultiIndexerSearchClient as IndexerClient>::facet_suppression_holds(
+                &client,
+                "series",
+                &["idx-1".to_string()],
+                Utc::now(),
+            )
+            .await
+            .expect("holds should load")
+            .is_empty(),
+            "other facets are not held"
+        );
+
+        anime_facet_search(
+            &client,
+            SearchMode::Auto,
+            facet_context("title-operator", false),
+            2,
+        )
+        .await;
+        assert!(
+            !calls.lock().expect("call log mutex").is_empty(),
+            "an operator's automatic search still asks the indexer"
+        );
+        calls.lock().expect("call log mutex").clear();
+        anime_facet_search(
+            &client,
+            SearchMode::Interactive,
+            facet_context("title-interactive", false),
+            3,
+        )
+        .await;
+        assert!(
+            !calls.lock().expect("call log mutex").is_empty(),
+            "an interactive search still asks the indexer"
+        );
+    }
+
+    #[tokio::test]
+    async fn facet_suppression_expiry_allows_exactly_one_reprobe() {
+        let repo_impl = StdArc::new(InMemorySearchLearningRepository::default());
+        let facets = repo_impl.facets.clone();
+        let expired = Utc::now() - Duration::minutes(1);
+        facets.lock().expect("facet learning mutex").insert(
+            ("idx-1".to_string(), "anime".to_string()),
+            suppressed_facet_state(expired),
+        );
+        let repo: StdArc<dyn IndexerSearchLearningRepository> = repo_impl;
+        let (client, calls) =
+            scripted_search_client(anime_caps(), |_call| response_with_titles(&[]));
+        let client = client.with_search_learning_repository(repo.clone());
+
+        // A claim taken by another search holds this one off.
+        assert!(
+            repo.try_claim_facet_reprobe("idx-1", "anime", Utc::now(), facet_learning_policy())
+                .await
+                .expect("claim")
+        );
+        anime_facet_search(&client, SearchMode::Auto, facet_context("title-a", true), 1).await;
+        assert!(
+            calls.lock().expect("call log mutex").is_empty(),
+            "only the claiming search re-probes"
+        );
+
+        // Once that claim lapses, the next background search is the re-probe.
+        facets
+            .lock()
+            .expect("facet learning mutex")
+            .get_mut(&("idx-1".to_string(), "anime".to_string()))
+            .expect("state")
+            .reprobe_claimed_at =
+            Some(Utc::now() - Duration::minutes(FACET_REPROBE_CLAIM_MINUTES + 1));
+        anime_facet_search(&client, SearchMode::Auto, facet_context("title-b", true), 2).await;
+        assert!(
+            !calls.lock().expect("call log mutex").is_empty(),
+            "the re-probe asks the indexer"
+        );
+        let resuppressed = facets
+            .lock()
+            .expect("facet learning mutex")
+            .get(&("idx-1".to_string(), "anime".to_string()))
+            .cloned()
+            .expect("state");
+        assert!(
+            resuppressed.suppressed_until.is_some_and(
+                |until| until > Utc::now() + Duration::hours(FACET_SUPPRESSION_HOURS - 1)
+            ),
+            "an empty re-probe suppresses for another full window"
+        );
+
+        calls.lock().expect("call log mutex").clear();
+        anime_facet_search(&client, SearchMode::Auto, facet_context("title-c", true), 3).await;
+        assert!(calls.lock().expect("call log mutex").is_empty());
+    }
+
+    #[tokio::test]
+    async fn facet_reprobe_with_a_usable_hit_clears_the_suppression() {
+        let repo_impl = StdArc::new(InMemorySearchLearningRepository::default());
+        let facets = repo_impl.facets.clone();
+        facets.lock().expect("facet learning mutex").insert(
+            ("idx-1".to_string(), "anime".to_string()),
+            suppressed_facet_state(Utc::now() - Duration::minutes(1)),
+        );
+        let repo: StdArc<dyn IndexerSearchLearningRepository> = repo_impl;
+        let (client, _calls) = scripted_search_client(anime_caps(), |_call| {
+            response_with_titles(&["Quiet.Lantern.S01E04.1080p.WEB-DL"])
+        });
+        let client = client.with_search_learning_repository(repo);
+
+        anime_facet_search(&client, SearchMode::Auto, facet_context("title-a", true), 4).await;
+
+        let state = facets
+            .lock()
+            .expect("facet learning mutex")
+            .get(&("idx-1".to_string(), "anime".to_string()))
+            .cloned()
+            .expect("state");
+        assert_eq!(state.streak(), 0);
+        assert_eq!(state.suppressed_until, None);
     }
 
     #[tokio::test]

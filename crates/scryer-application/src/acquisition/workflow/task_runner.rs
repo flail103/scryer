@@ -1961,8 +1961,13 @@ async fn plan_series_pack_for_title(
         let holds = if uncovered.is_empty() {
             HashMap::new()
         } else {
-            app.contained_indexer_holds(&convergence.scope_key, &uncovered, now)
-                .await
+            app.contained_indexer_holds(
+                &convergence.scope_key,
+                title_subject.search_facet.as_str(),
+                &uncovered,
+                now,
+            )
+            .await
         };
         let uncovered = uncovered
             .into_iter()
@@ -3898,9 +3903,16 @@ async fn process_single_target(
             // search here hit the provider's own limit waits out its backoff.
             // It stays uncovered, but asking it sooner repeats the same capped
             // answer. This is not a deferral: the poller must not re-arm for
-            // it, and the cycle keeps selecting other scopes.
+            // it, and the cycle keeps selecting other scopes. An indexer
+            // learned to carry nothing for this facet is held the same way
+            // until its suppression ends.
             let holds = app
-                .contained_indexer_holds(&convergence.scope_key, &uncovered, *now)
+                .contained_indexer_holds(
+                    &convergence.scope_key,
+                    pending_subject.for_convergence().search_facet.as_str(),
+                    &uncovered,
+                    *now,
+                )
                 .await;
             let uncovered = uncovered
                 .into_iter()
@@ -4032,6 +4044,7 @@ async fn process_single_target(
                                 let holds = app
                                     .contained_indexer_holds(
                                         &pack_convergence.scope_key,
+                                        pack_subject.for_convergence().search_facet.as_str(),
                                         &uncovered,
                                         *now,
                                     )

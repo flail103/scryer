@@ -5441,6 +5441,211 @@ pub trait IndexerSearchLearningRepository: Send + Sync {
         key: &IndexerSearchLearningKey,
         stale_before: DateTime<Utc>,
     ) -> AppResult<bool>;
+
+    /// The learned facet state of each listed indexer that has one. An
+    /// indexer without a row is absent from the map.
+    async fn facet_learning_states(
+        &self,
+        _facet: &str,
+        _indexer_ids: &[String],
+    ) -> AppResult<HashMap<String, IndexerFacetLearningState>> {
+        Ok(HashMap::new())
+    }
+
+    /// Applies one search outcome for `title_id` to the indexer's state for
+    /// `facet` (see [`IndexerFacetLearningState::apply_outcome`]) and reports
+    /// what changed.
+    async fn record_facet_search_outcome(
+        &self,
+        _indexer_id: &str,
+        _facet: &str,
+        _title_id: &str,
+        _outcome: IndexerFacetSearchOutcome,
+        _now: DateTime<Utc>,
+        _policy: IndexerFacetLearningPolicy,
+    ) -> AppResult<IndexerFacetTransition> {
+        Ok(IndexerFacetTransition::Unchanged)
+    }
+
+    /// Claims the single re-probe of an indexer whose facet suppression has
+    /// expired. Only one caller gets `true` until the claim lands or lapses.
+    async fn try_claim_facet_reprobe(
+        &self,
+        _indexer_id: &str,
+        _facet: &str,
+        _now: DateTime<Utc>,
+        _policy: IndexerFacetLearningPolicy,
+    ) -> AppResult<bool> {
+        Ok(false)
+    }
+}
+
+/// How an indexer is learned to carry nothing for a media facet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexerFacetLearningPolicy {
+    /// Distinct titles in a row whose background searches all came back
+    /// empty before background searches leave the indexer out of the facet.
+    pub empty_title_threshold: usize,
+    /// How long one suppression lasts.
+    pub suppression: chrono::Duration,
+    /// How long a claimed re-probe holds every other background search off
+    /// before another may claim it (the re-probe may error and land nothing).
+    pub reprobe_claim: chrono::Duration,
+}
+
+/// One search's answer from one indexer, as facet learning reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexerFacetSearchOutcome {
+    /// A background search the indexer answered completely with nothing usable.
+    Empty,
+    /// Any search the indexer answered with at least one usable result.
+    Usable,
+}
+
+/// What one recorded outcome did to an indexer's facet state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexerFacetTransition {
+    Unchanged,
+    /// Another distinct empty title, still under the threshold.
+    StreakAdvanced {
+        streak: usize,
+    },
+    /// The indexer is now left out of background searches for the facet.
+    Suppressed {
+        streak: usize,
+        until: DateTime<Utc>,
+    },
+    /// A usable result reset the streak and lifted any suppression.
+    Cleared {
+        streak: usize,
+        was_suppressed: bool,
+    },
+}
+
+/// One indexer's learned emptiness for one media facet.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IndexerFacetLearningState {
+    /// Distinct titles in a row whose background searches came back empty,
+    /// oldest first. Never longer than the policy threshold.
+    pub empty_title_ids: Vec<String>,
+    /// Set from the moment the threshold is reached until a usable result.
+    /// Background searches skip the indexer for the facet before this
+    /// instant; after it, one claimed re-probe may ask.
+    pub suppressed_until: Option<DateTime<Utc>>,
+    /// When the current re-probe was claimed.
+    pub reprobe_claimed_at: Option<DateTime<Utc>>,
+    /// Compare-and-set token for the stored row.
+    pub revision: i64,
+}
+
+impl IndexerFacetLearningState {
+    pub fn streak(&self) -> usize {
+        self.empty_title_ids.len()
+    }
+
+    /// Until when background searches leave the indexer out of the facet:
+    /// the suppression window, then a live re-probe claim. `None` once a
+    /// background search may ask.
+    pub fn held_until(
+        &self,
+        now: DateTime<Utc>,
+        policy: IndexerFacetLearningPolicy,
+    ) -> Option<DateTime<Utc>> {
+        let until = self.suppressed_until?;
+        if until > now {
+            return Some(until);
+        }
+        self.reprobe_claimed_at
+            .filter(|claimed_at| *claimed_at >= until)
+            .map(|claimed_at| claimed_at + policy.reprobe_claim)
+            .filter(|claim_until| *claim_until > now)
+    }
+
+    /// The state after claiming the re-probe, or `None` when the indexer is
+    /// not suppressed, its window is still open, or another claim is live.
+    pub fn claim_reprobe(
+        &self,
+        now: DateTime<Utc>,
+        policy: IndexerFacetLearningPolicy,
+    ) -> Option<Self> {
+        if self.suppressed_until.is_none() || self.held_until(now, policy).is_some() {
+            return None;
+        }
+        Some(Self {
+            reprobe_claimed_at: Some(now),
+            ..self.clone()
+        })
+    }
+
+    /// The state after one outcome for `title_id`, `None` when nothing
+    /// changes. A usable result clears everything. An empty one adds a
+    /// distinct title to the streak and suppresses at the threshold; once
+    /// suppressed, an empty answer after the window (the re-probe)
+    /// suppresses again for a full window.
+    pub fn apply_outcome(
+        &self,
+        title_id: &str,
+        outcome: IndexerFacetSearchOutcome,
+        now: DateTime<Utc>,
+        policy: IndexerFacetLearningPolicy,
+    ) -> (Option<Self>, IndexerFacetTransition) {
+        match outcome {
+            IndexerFacetSearchOutcome::Usable => {
+                if self.empty_title_ids.is_empty() && self.suppressed_until.is_none() {
+                    return (None, IndexerFacetTransition::Unchanged);
+                }
+                (
+                    Some(Self {
+                        revision: self.revision,
+                        ..Self::default()
+                    }),
+                    IndexerFacetTransition::Cleared {
+                        streak: self.streak(),
+                        was_suppressed: self.suppressed_until.is_some(),
+                    },
+                )
+            }
+            IndexerFacetSearchOutcome::Empty => {
+                if let Some(until) = self.suppressed_until {
+                    if until > now {
+                        return (None, IndexerFacetTransition::Unchanged);
+                    }
+                    let until = now + policy.suppression;
+                    return (
+                        Some(Self {
+                            suppressed_until: Some(until),
+                            reprobe_claimed_at: None,
+                            ..self.clone()
+                        }),
+                        IndexerFacetTransition::Suppressed {
+                            streak: self.streak(),
+                            until,
+                        },
+                    );
+                }
+                if self.empty_title_ids.iter().any(|id| id == title_id) {
+                    return (None, IndexerFacetTransition::Unchanged);
+                }
+                let mut next = self.clone();
+                next.empty_title_ids.push(title_id.to_string());
+                let streak = next.streak();
+                if streak >= policy.empty_title_threshold.max(1) {
+                    let until = now + policy.suppression;
+                    next.suppressed_until = Some(until);
+                    next.reprobe_claimed_at = None;
+                    (
+                        Some(next),
+                        IndexerFacetTransition::Suppressed { streak, until },
+                    )
+                } else {
+                    (
+                        Some(next),
+                        IndexerFacetTransition::StreakAdvanced { streak },
+                    )
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -9663,6 +9868,18 @@ pub trait IndexerClient: Send + Sync {
     async fn contained_search_holds(
         &self,
         _coverage_scope_key: &str,
+        _indexer_ids: &[String],
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>> {
+        Ok(std::collections::HashMap::new())
+    }
+
+    /// Indexers among `indexer_ids` that background searches currently leave
+    /// out of `facet` because they were learned to carry nothing for it, with
+    /// the instant each may be asked again.
+    async fn facet_suppression_holds(
+        &self,
+        _facet: &str,
         _indexer_ids: &[String],
         _now: chrono::DateTime<chrono::Utc>,
     ) -> AppResult<std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>> {

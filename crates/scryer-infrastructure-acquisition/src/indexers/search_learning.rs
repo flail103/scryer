@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use scryer_application::{
     AppError, AppResult, BackgroundIndexerSearchStrategyState, HashDomain,
-    IndexerSearchCandidateWrite, IndexerSearchLearningKey, IndexerSearchLearningRecord,
-    IndexerSearchLearningRepository, IndexerSearchRunWrite, NormalizedIndexerSearchCandidate,
-    ReusableIndexerSearchCandidate, ReusableIndexerSearchCandidatePage,
-    ReusableIndexerSearchStrategy, SEARCH_STRATEGY_CONTAINED, SEARCH_STRATEGY_CONVERGED,
-    blake3_identity_hex,
+    IndexerFacetLearningPolicy, IndexerFacetLearningState, IndexerFacetSearchOutcome,
+    IndexerFacetTransition, IndexerSearchCandidateWrite, IndexerSearchLearningKey,
+    IndexerSearchLearningRecord, IndexerSearchLearningRepository, IndexerSearchRunWrite,
+    NormalizedIndexerSearchCandidate, ReusableIndexerSearchCandidate,
+    ReusableIndexerSearchCandidatePage, ReusableIndexerSearchStrategy, SEARCH_STRATEGY_CONTAINED,
+    SEARCH_STRATEGY_CONVERGED, blake3_identity_hex,
 };
 use scryer_infrastructure_crypto::{
     EncryptionKey,
@@ -1135,7 +1136,22 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
             vec![SqlArg::I64(i64::from(limit.max(1)))],
         )
         .await?;
-        Ok(deleted.min(u64::from(u32::MAX)) as u32)
+        let deleted_facet_rows = SqlRuntime::execute_write(
+            &self.datastore,
+            "prune_orphaned_indexer_facet_learning",
+            "DELETE FROM indexer_facet_learning
+              WHERE (indexer_id, facet) IN (
+                  SELECT f.indexer_id, f.facet
+                    FROM indexer_facet_learning f
+                   WHERE NOT EXISTS (SELECT 1 FROM indexers i WHERE i.id = f.indexer_id)
+                   LIMIT {}
+              )",
+            vec![SqlArg::I64(i64::from(limit.max(1)))],
+        )
+        .await?;
+        Ok(deleted
+            .saturating_add(deleted_facet_rows)
+            .min(u64::from(u32::MAX)) as u32)
     }
 
     async fn prune_indexer(&self, indexer_id: &str) -> AppResult<()> {
@@ -1143,6 +1159,13 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
             &self.datastore,
             "prune_indexer_search_learning",
             "DELETE FROM indexer_search_learning WHERE indexer_id = {}",
+            vec![SqlArg::Text(indexer_id.to_string())],
+        )
+        .await?;
+        SqlRuntime::execute_write(
+            &self.datastore,
+            "prune_indexer_facet_learning",
+            "DELETE FROM indexer_facet_learning WHERE indexer_id = {}",
             vec![SqlArg::Text(indexer_id.to_string())],
         )
         .await?;
@@ -1236,6 +1259,184 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
 
         Ok(rows > 0)
     }
+
+    async fn facet_learning_states(
+        &self,
+        facet: &str,
+        indexer_ids: &[String],
+    ) -> AppResult<HashMap<String, IndexerFacetLearningState>> {
+        if indexer_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = std::iter::repeat_n("{}", indexer_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut args = vec![SqlArg::Text(facet.to_string())];
+        args.extend(indexer_ids.iter().cloned().map(SqlArg::Text));
+        let rows = SqlRuntime::fetch_all(
+            self.datastore.read_exec(),
+            &format!(
+                "SELECT indexer_id, empty_title_ids, suppressed_until, reprobe_claimed_at, revision
+                   FROM indexer_facet_learning
+                  WHERE facet = {{}} AND indexer_id IN ({placeholders})"
+            ),
+            &args,
+        )
+        .await?;
+        rows.iter()
+            .map(|row| Ok((row.text("indexer_id")?, row_to_facet_learning_state(row)?)))
+            .collect()
+    }
+
+    async fn record_facet_search_outcome(
+        &self,
+        indexer_id: &str,
+        facet: &str,
+        title_id: &str,
+        outcome: IndexerFacetSearchOutcome,
+        now: DateTime<Utc>,
+        policy: IndexerFacetLearningPolicy,
+    ) -> AppResult<IndexerFacetTransition> {
+        for _ in 0..FACET_LEARNING_WRITE_ATTEMPTS {
+            let current = self.facet_learning_state(indexer_id, facet).await?;
+            let (next, transition) = current
+                .clone()
+                .unwrap_or_default()
+                .apply_outcome(title_id, outcome, now, policy);
+            let Some(next) = next else {
+                return Ok(transition);
+            };
+            if self
+                .compare_and_set_facet_learning(indexer_id, facet, current.as_ref(), &next, now)
+                .await?
+            {
+                return Ok(transition);
+            }
+        }
+        Err(AppError::Repository(
+            "indexer facet learning kept changing under a concurrent writer".to_string(),
+        ))
+    }
+
+    async fn try_claim_facet_reprobe(
+        &self,
+        indexer_id: &str,
+        facet: &str,
+        now: DateTime<Utc>,
+        policy: IndexerFacetLearningPolicy,
+    ) -> AppResult<bool> {
+        let Some(current) = self.facet_learning_state(indexer_id, facet).await? else {
+            return Ok(false);
+        };
+        let Some(next) = current.claim_reprobe(now, policy) else {
+            return Ok(false);
+        };
+        // Losing the compare-and-set means another search changed the row
+        // first, most likely by claiming this same re-probe.
+        self.compare_and_set_facet_learning(indexer_id, facet, Some(&current), &next, now)
+            .await
+    }
+}
+
+/// Compare-and-set rounds a facet learning write gets before it gives up.
+/// Writers are the searches of one indexer for one facet, so a conflict is
+/// rare and a second round almost always lands.
+const FACET_LEARNING_WRITE_ATTEMPTS: usize = 5;
+
+impl IndexerSearchLearningStore {
+    async fn facet_learning_state(
+        &self,
+        indexer_id: &str,
+        facet: &str,
+    ) -> AppResult<Option<IndexerFacetLearningState>> {
+        let row = SqlRuntime::fetch_optional(
+            self.datastore.read_exec(),
+            "SELECT empty_title_ids, suppressed_until, reprobe_claimed_at, revision
+               FROM indexer_facet_learning
+              WHERE indexer_id = {} AND facet = {}",
+            &[
+                SqlArg::Text(indexer_id.to_string()),
+                SqlArg::Text(facet.to_string()),
+            ],
+        )
+        .await?;
+        row.as_ref().map(row_to_facet_learning_state).transpose()
+    }
+
+    /// Writes `next` only if the row still is `current` (`None`: still
+    /// absent). Returns whether the write landed.
+    async fn compare_and_set_facet_learning(
+        &self,
+        indexer_id: &str,
+        facet: &str,
+        current: Option<&IndexerFacetLearningState>,
+        next: &IndexerFacetLearningState,
+        now: DateTime<Utc>,
+    ) -> AppResult<bool> {
+        let empty_title_ids = serde_json::to_string(&next.empty_title_ids).map_err(|error| {
+            AppError::Repository(format!("failed to encode facet learning titles: {error}"))
+        })?;
+        let rows = match current {
+            None => {
+                SqlRuntime::execute_write(
+                    &self.datastore,
+                    "insert_indexer_facet_learning",
+                    "INSERT INTO indexer_facet_learning (
+                        indexer_id, facet, empty_title_ids, suppressed_until,
+                        reprobe_claimed_at, revision, updated_at
+                     )
+                     VALUES ({}, {}, {}, {}, {}, 1, {})
+                     ON CONFLICT (indexer_id, facet) DO NOTHING",
+                    vec![
+                        SqlArg::Text(indexer_id.to_string()),
+                        SqlArg::Text(facet.to_string()),
+                        SqlArg::Text(empty_title_ids),
+                        SqlArg::OptTimestamp(next.suppressed_until),
+                        SqlArg::OptTimestamp(next.reprobe_claimed_at),
+                        SqlArg::Timestamp(now),
+                    ],
+                )
+                .await?
+            }
+            Some(current) => {
+                SqlRuntime::execute_write(
+                    &self.datastore,
+                    "update_indexer_facet_learning",
+                    "UPDATE indexer_facet_learning
+                        SET empty_title_ids = {}, suppressed_until = {},
+                            reprobe_claimed_at = {}, revision = revision + 1,
+                            updated_at = {}
+                      WHERE indexer_id = {} AND facet = {} AND revision = {}",
+                    vec![
+                        SqlArg::Text(empty_title_ids),
+                        SqlArg::OptTimestamp(next.suppressed_until),
+                        SqlArg::OptTimestamp(next.reprobe_claimed_at),
+                        SqlArg::Timestamp(now),
+                        SqlArg::Text(indexer_id.to_string()),
+                        SqlArg::Text(facet.to_string()),
+                        SqlArg::I64(current.revision),
+                    ],
+                )
+                .await?
+            }
+        };
+        Ok(rows > 0)
+    }
+}
+
+fn row_to_facet_learning_state(row: &SqlRow) -> AppResult<IndexerFacetLearningState> {
+    let empty_title_ids = serde_json::from_str::<Vec<String>>(&row.text("empty_title_ids")?)
+        .map_err(|error| {
+            AppError::Repository(format!(
+                "indexer_facet_learning.empty_title_ids is not a title list: {error}"
+            ))
+        })?;
+    Ok(IndexerFacetLearningState {
+        empty_title_ids,
+        suppressed_until: row.opt_timestamp("suppressed_until")?,
+        reprobe_claimed_at: row.opt_timestamp("reprobe_claimed_at")?,
+        revision: row.i64("revision")?,
+    })
 }
 
 /// Drops the title-text rows of one (indexer, title, facet) beyond
@@ -1306,6 +1507,193 @@ mod tests {
     use scryer_application::SEARCH_STRATEGY_OPEN;
 
     use sqlx::sqlite::SqlitePoolOptions;
+
+    const POSTGRES_TEST_FACET_LEARNING_TABLE: &str = "CREATE TEMP TABLE indexer_facet_learning (
+            indexer_id TEXT NOT NULL,
+            facet TEXT NOT NULL,
+            empty_title_ids TEXT NOT NULL DEFAULT '[]',
+            suppressed_until TIMESTAMPTZ,
+            reprobe_claimed_at TIMESTAMPTZ,
+            revision BIGINT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (indexer_id, facet)
+        ) ON COMMIT PRESERVE ROWS";
+
+    const FACET_POLICY: IndexerFacetLearningPolicy = IndexerFacetLearningPolicy {
+        empty_title_threshold: 5,
+        suppression: chrono::Duration::hours(24),
+        reprobe_claim: chrono::Duration::hours(1),
+    };
+
+    #[tokio::test]
+    async fn sqlite_store_suppresses_a_facet_after_distinct_empty_titles_and_clears_on_a_hit() {
+        let (store, _pool) = sqlite_store().await;
+        let now = DateTime::parse_from_rfc3339("2026-10-20T12:00:00Z")
+            .expect("fixed instant")
+            .with_timezone(&Utc);
+        let record = |title: &'static str, outcome, at| {
+            let store = store.clone();
+            async move {
+                store
+                    .record_facet_search_outcome(
+                        "idx-general",
+                        "anime",
+                        title,
+                        outcome,
+                        at,
+                        FACET_POLICY,
+                    )
+                    .await
+                    .expect("facet outcome should persist")
+            }
+        };
+
+        for (index, title) in ["title-a", "title-b", "title-c", "title-d"]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(
+                record(title, IndexerFacetSearchOutcome::Empty, now).await,
+                IndexerFacetTransition::StreakAdvanced { streak: index + 1 }
+            );
+        }
+        assert_eq!(
+            record("title-b", IndexerFacetSearchOutcome::Empty, now).await,
+            IndexerFacetTransition::Unchanged,
+            "a repeated title is not a new one"
+        );
+        let until = now + FACET_POLICY.suppression;
+        assert_eq!(
+            record("title-e", IndexerFacetSearchOutcome::Empty, now).await,
+            IndexerFacetTransition::Suppressed { streak: 5, until }
+        );
+
+        let ids = vec!["idx-general".to_string(), "idx-other".to_string()];
+        let states = store
+            .facet_learning_states("anime", &ids)
+            .await
+            .expect("facet states should load");
+        assert_eq!(states.len(), 1);
+        let state = &states["idx-general"];
+        assert_eq!(state.streak(), 5);
+        assert_eq!(state.held_until(now, FACET_POLICY), Some(until));
+        assert!(
+            store
+                .facet_learning_states("series", &ids)
+                .await
+                .expect("facet states should load")
+                .is_empty(),
+            "another facet is untouched"
+        );
+        assert!(
+            !store
+                .try_claim_facet_reprobe("idx-general", "anime", now, FACET_POLICY)
+                .await
+                .expect("claim"),
+            "no re-probe inside the window"
+        );
+
+        // After the window exactly one re-probe is claimed.
+        let after = until + chrono::Duration::minutes(1);
+        assert!(
+            store
+                .try_claim_facet_reprobe("idx-general", "anime", after, FACET_POLICY)
+                .await
+                .expect("claim")
+        );
+        assert!(
+            !store
+                .try_claim_facet_reprobe("idx-general", "anime", after, FACET_POLICY)
+                .await
+                .expect("claim")
+        );
+        let claimed = &store
+            .facet_learning_states("anime", &ids)
+            .await
+            .expect("facet states should load")["idx-general"];
+        assert_eq!(
+            claimed.held_until(after, FACET_POLICY),
+            Some(after + FACET_POLICY.reprobe_claim),
+            "the claimed re-probe holds the walk off"
+        );
+
+        // An empty re-probe suppresses for another full window.
+        assert_eq!(
+            record("title-f", IndexerFacetSearchOutcome::Empty, after).await,
+            IndexerFacetTransition::Suppressed {
+                streak: 5,
+                until: after + FACET_POLICY.suppression,
+            }
+        );
+
+        // Any usable hit clears the streak and the suppression.
+        assert_eq!(
+            record("title-g", IndexerFacetSearchOutcome::Usable, after).await,
+            IndexerFacetTransition::Cleared {
+                streak: 5,
+                was_suppressed: true,
+            }
+        );
+        let cleared = &store
+            .facet_learning_states("anime", &ids)
+            .await
+            .expect("facet states should load")["idx-general"];
+        assert_eq!(cleared.streak(), 0);
+        assert_eq!(cleared.held_until(after, FACET_POLICY), None);
+        assert_eq!(
+            record("title-g", IndexerFacetSearchOutcome::Usable, after).await,
+            IndexerFacetTransition::Unchanged
+        );
+
+        store
+            .prune_indexer("idx-general")
+            .await
+            .expect("prune should succeed");
+        assert!(
+            store
+                .facet_learning_states("anime", &ids)
+                .await
+                .expect("facet states should load")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_lapsed_reprobe_claim_can_be_claimed_again() {
+        let (store, _pool) = sqlite_store().await;
+        let now = DateTime::parse_from_rfc3339("2026-10-20T12:00:00Z")
+            .expect("fixed instant")
+            .with_timezone(&Utc);
+        for title in ["t1", "t2", "t3", "t4", "t5"] {
+            store
+                .record_facet_search_outcome(
+                    "idx-general",
+                    "anime",
+                    title,
+                    IndexerFacetSearchOutcome::Empty,
+                    now,
+                    FACET_POLICY,
+                )
+                .await
+                .expect("facet outcome should persist");
+        }
+        let after = now + FACET_POLICY.suppression;
+        assert!(
+            store
+                .try_claim_facet_reprobe("idx-general", "anime", after, FACET_POLICY)
+                .await
+                .expect("claim")
+        );
+        // The re-probe errored and landed nothing; once its claim lapses
+        // another background search may try.
+        let lapsed = after + FACET_POLICY.reprobe_claim;
+        assert!(
+            store
+                .try_claim_facet_reprobe("idx-general", "anime", lapsed, FACET_POLICY)
+                .await
+                .expect("claim")
+        );
+    }
 
     async fn sqlite_store() -> (IndexerSearchLearningStore, sqlx::SqlitePool) {
         let pool = SqlitePoolOptions::new()
@@ -1440,6 +1828,12 @@ mod tests {
         .execute(&pool)
         .await
         .expect("search candidate value table should be created");
+        sqlx::query(include_str!(
+            "../../../scryer/src/db/migrations/0313_indexer_facet_learning.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("facet learning table should be created");
         for table in ["titles", "indexers"] {
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "CREATE TABLE {table} (id TEXT PRIMARY KEY)"
@@ -1971,6 +2365,7 @@ mod tests {
             ) ON COMMIT PRESERVE ROWS",
             "CREATE TEMP TABLE titles (id TEXT PRIMARY KEY) ON COMMIT PRESERVE ROWS",
             "CREATE TEMP TABLE indexers (id TEXT PRIMARY KEY) ON COMMIT PRESERVE ROWS",
+            POSTGRES_TEST_FACET_LEARNING_TABLE,
         ] {
             sqlx::query(statement)
                 .execute(&pool)
@@ -2360,6 +2755,10 @@ mod tests {
         .execute(&pool)
         .await
         .map_err(repo_err)?;
+        sqlx::query(POSTGRES_TEST_FACET_LEARNING_TABLE)
+            .execute(&pool)
+            .await
+            .map_err(repo_err)?;
         sqlx::query(
             "CREATE TEMP TABLE indexer_search_candidates (
                 id TEXT PRIMARY KEY,
