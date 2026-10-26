@@ -2809,6 +2809,54 @@ pub struct RawTextSearchRequest {
     pub limit: Option<u32>,
 }
 
+/// The host's answer, once a paged read from the first page has that page in
+/// hand, to whether reading on is worth it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexerFirstPageVerdict {
+    /// Read on as the page budget allows.
+    ReadOn,
+    /// Another strategy's chain already reads this listing: end the read at
+    /// the first page. `listing_open` while that chain still has pages to
+    /// read, which leaves this answer partial with no reason; otherwise the
+    /// answer is complete.
+    Stop { listing_open: bool },
+}
+
+/// Asked with the first page's content fingerprint (see
+/// `indexer_listing_page_fingerprint`).
+#[derive(Clone)]
+pub struct IndexerFirstPageGate(
+    Arc<
+        dyn Fn(
+                String,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = IndexerFirstPageVerdict> + Send>,
+            > + Send
+            + Sync,
+    >,
+);
+
+impl IndexerFirstPageGate {
+    pub fn new<F, Fut>(gate: F) -> Self
+    where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = IndexerFirstPageVerdict> + Send + 'static,
+    {
+        Self(Arc::new(move |fingerprint| Box::pin(gate(fingerprint))))
+    }
+
+    /// The verdict on the first page with this fingerprint.
+    pub async fn verdict(&self, first_page_fingerprint: String) -> IndexerFirstPageVerdict {
+        (self.0)(first_page_fingerprint).await
+    }
+}
+
+impl std::fmt::Debug for IndexerFirstPageGate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("IndexerFirstPageGate")
+    }
+}
+
 /// One complete effective search strategy submitted to a plan-capable indexer.
 #[derive(Clone, Debug)]
 pub struct IndexerSearchStrategyRequest {
@@ -2841,6 +2889,9 @@ pub struct IndexerSearchStrategyRequest {
     /// The most results the indexer is asked for. `None` leaves the adapter's
     /// default request limit in force.
     pub result_limit: Option<usize>,
+    /// Asked after the first page of a paged read that starts from the
+    /// beginning. `None` reads on as the page budget allows.
+    pub first_page_gate: Option<IndexerFirstPageGate>,
 }
 
 /// The newest release the scheduler recorded on an indexer's previous

@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use scryer_application::{
     AppError, AppResult, DownloadSourceKind, IndexerClient, IndexerErrorOperation,
-    IndexerErrorRecorder, IndexerLoginChallenge, IndexerResponseAttributes, IndexerRoutingPlan,
-    IndexerSearchCompletion, IndexerSearchIncompleteReason as HostIncompleteReason,
-    IndexerSearchPlanCapability, IndexerSearchPlanRequest, IndexerSearchPlanSummary,
-    IndexerSearchResponse, IndexerSearchResult, IndexerSearchStrategyEvent,
-    IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, IndexerStatsTracker,
-    NullIndexerStatsTracker, PluginDynamicConfigFields, PluginFailureReason,
+    IndexerErrorRecorder, IndexerFirstPageGate, IndexerFirstPageVerdict, IndexerLoginChallenge,
+    IndexerResponseAttributes, IndexerRoutingPlan, IndexerSearchCompletion,
+    IndexerSearchIncompleteReason as HostIncompleteReason, IndexerSearchPlanCapability,
+    IndexerSearchPlanRequest, IndexerSearchPlanSummary, IndexerSearchResponse, IndexerSearchResult,
+    IndexerSearchStrategyEvent, IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest,
+    IndexerStatsTracker, NullIndexerStatsTracker, PluginDynamicConfigFields, PluginFailureReason,
     ResolvedDownloadArtifact, SearchMode, extract_magnet_info_hash, is_valid_magnet_uri,
     normalize_release_password,
 };
@@ -2085,6 +2085,11 @@ struct PagedRead {
     /// Every cursor this read started a page from; bounded by the page
     /// budget or [`MAX_UNBUDGETED_PAGES`].
     visited: std::collections::HashSet<String>,
+    /// The content fingerprint of every page this read took in.
+    page_fingerprints: std::collections::HashSet<String>,
+    /// The fingerprint of the first page of a read that started from the
+    /// beginning, held for the request's first-page gate until it is asked.
+    first_page_fingerprint: Option<String>,
     pages: u32,
     unattested: bool,
     merged: Option<PluginSearchResponse>,
@@ -2105,6 +2110,8 @@ impl PagedRead {
             page_budget,
             cursor: request.page_cursor.clone(),
             visited: request.page_cursor.iter().cloned().collect(),
+            page_fingerprints: std::collections::HashSet::new(),
+            first_page_fingerprint: None,
             pages: 0,
             unattested: false,
             merged: None,
@@ -2142,6 +2149,39 @@ impl PagedRead {
             completion: page_completion,
         } = page;
         let returned_cursor = page_response.next_cursor.take();
+        let fingerprint = scryer_application::indexer_listing_page_fingerprint(
+            page_response.results.iter().map(|result| {
+                [
+                    result.guid.as_deref(),
+                    result.link.as_deref(),
+                    result.download_url.as_deref(),
+                    Some(result.title.as_str()),
+                ]
+            }),
+        );
+        let answered = matches!(
+            page_completion,
+            IndexerSearchCompletion::Complete
+                | IndexerSearchCompletion::Partial {
+                    reason: Some(HostIncompleteReason::Unattested),
+                    ..
+                }
+        );
+        if self.pages == 1 && self.visited.is_empty() && answered {
+            self.first_page_fingerprint = fingerprint.clone();
+        }
+        // A provider that ignores the offset hands back a page already read
+        // under a fresh cursor. Nothing past it is new: the read is exhausted.
+        if let Some(fingerprint) = fingerprint
+            && !self.page_fingerprints.insert(fingerprint)
+        {
+            let completion = if self.unattested {
+                self.stopped(None)
+            } else {
+                IndexerSearchCompletion::Complete
+            };
+            return PagedStep::Done(self.finish(completion, None));
+        }
         match self.merged.as_mut() {
             Some(merged) => {
                 merged.results.append(&mut page_response.results);
@@ -2210,6 +2250,37 @@ impl PagedRead {
         PagedStep::Next(next)
     }
 
+    /// Ends the read after its first page because the host's gate found the
+    /// page is a listing another strategy already reads: what the page did
+    /// not finish belongs to that strategy's read. While that read still has
+    /// pages left (`listing_open`) this answer stays open with it, partial
+    /// with no reason; once it has ended, this one is complete too.
+    fn stop_at_first_page(
+        &mut self,
+        step: PagedStep,
+        listing_open: bool,
+    ) -> PluginSearchCallResponse {
+        let completion = if listing_open {
+            IndexerSearchCompletion::Partial {
+                reason: None,
+                retry_after: None,
+            }
+        } else if self.unattested {
+            self.stopped(None)
+        } else {
+            IndexerSearchCompletion::Complete
+        };
+        match step {
+            PagedStep::Next(_) => self.finish(completion, None),
+            PagedStep::Done(mut answered) => {
+                if answered.response.next_cursor.take().is_some() {
+                    answered.completion = completion;
+                }
+                answered
+            }
+        }
+    }
+
     /// A page failed. With nothing read yet the error stands; otherwise the
     /// pages already read are kept and the failed one is asked again from the
     /// cursor that reached it.
@@ -2270,8 +2341,10 @@ impl WasmIndexerClient {
         operation: IndexerErrorOperation,
         cancel_token: CancellationToken,
         page_budget: Option<u32>,
+        first_page_gate: Option<IndexerFirstPageGate>,
     ) -> AppResult<PluginSearchCallResponse> {
         let mut read = PagedRead::new(&request, page_budget);
+        let mut first_page_gate = first_page_gate;
         let mut page_request = request;
         loop {
             if cancel_token.is_cancelled() {
@@ -2292,7 +2365,15 @@ impl WasmIndexerClient {
                     return read.fail(error);
                 }
             };
-            match read.absorb(page) {
+            let step = read.absorb(page);
+            if let Some(fingerprint) = read.first_page_fingerprint.take()
+                && let Some(gate) = first_page_gate.take()
+                && let IndexerFirstPageVerdict::Stop { listing_open } =
+                    gate.verdict(fingerprint).await
+            {
+                return Ok(read.stop_at_first_page(step, listing_open));
+            }
+            match step {
                 PagedStep::Next(cursor) => page_request.page_cursor = Some(cursor),
                 PagedStep::Done(response) => return Ok(response),
             }
@@ -2309,10 +2390,17 @@ impl WasmIndexerClient {
         operation: IndexerErrorOperation,
         cancel_token: CancellationToken,
         page_budget: Option<u32>,
+        first_page_gate: Option<IndexerFirstPageGate>,
     ) -> AppResult<IndexerSearchResponse> {
         if self.paged_search() && (!request.query.trim().is_empty() || !request.ids.is_empty()) {
             let response = self
-                .follow_paged_search(request, operation, cancel_token, page_budget)
+                .follow_paged_search(
+                    request,
+                    operation,
+                    cancel_token,
+                    page_budget,
+                    first_page_gate,
+                )
                 .await?;
             return Ok(host_search_response(self, response));
         }
@@ -2643,7 +2731,7 @@ impl IndexerClient for WasmIndexerClient {
             rss_catch_up: None,
             page_cursor: None,
         };
-        self.search_with_request(request, mode, operation, cancel_token, None)
+        self.search_with_request(request, mode, operation, cancel_token, None, None)
             .await
     }
 
@@ -2660,10 +2748,18 @@ impl IndexerClient for WasmIndexerClient {
         let mut request = request;
         let page_cursor = request.page_cursor.take();
         let page_budget = request.page_budget;
+        let first_page_gate = request.first_page_gate.take();
         let mut request = plugin_search_request_from_strategy(request, mode);
         request.page_cursor = page_cursor;
-        self.search_with_request(request, mode, operation, cancel_token, page_budget)
-            .await
+        self.search_with_request(
+            request,
+            mode,
+            operation,
+            cancel_token,
+            page_budget,
+            first_page_gate,
+        )
+        .await
     }
 
     async fn search_raw_text(
@@ -2697,6 +2793,7 @@ impl IndexerClient for WasmIndexerClient {
             mode,
             IndexerErrorOperation::InteractiveSearch,
             cancel_token,
+            None,
             None,
         )
         .await
@@ -3218,9 +3315,10 @@ mod tests {
         let mut read = paged_read(0, None, None);
         for page_number in 1..MAX_UNBUDGETED_PAGES {
             let cursor = format!("p{}", page_number + 1);
-            assert_eq!(next(read.absorb(page(&["A"], Some(&cursor)))), cursor);
+            let title = format!("A{page_number}");
+            assert_eq!(next(read.absorb(page(&[&title], Some(&cursor)))), cursor);
         }
-        let response = done(read.absorb(page(&["A"], Some("beyond"))));
+        let response = done(read.absorb(page(&["last"], Some("beyond"))));
         assert_eq!(
             response.response.results.len(),
             MAX_UNBUDGETED_PAGES as usize
@@ -3287,6 +3385,76 @@ mod tests {
         assert_eq!(response.response.next_cursor.as_deref(), Some("p2"));
     }
 
+    #[test]
+    fn a_page_that_repeats_an_earlier_page_ends_the_read_as_exhausted() {
+        // The provider ignores the offset: every cursor answers page one.
+        let mut read = paged_read(1000, None, Some(5));
+        assert_eq!(next(read.absorb(page(&["A", "B"], Some("p2")))), "p2");
+        assert_eq!(next(read.absorb(page(&["C", "D"], Some("p3")))), "p3");
+        let response = done(read.absorb(page(&["A", "B"], Some("p4"))));
+        assert_eq!(titles(&response), vec!["A", "B", "C", "D"]);
+        assert_eq!(response.response.next_cursor, None);
+        assert_eq!(response.completion, IndexerSearchCompletion::Complete);
+
+        // The same titles in another order are a different page.
+        let mut read = paged_read(1000, None, Some(5));
+        next(read.absorb(page(&["A", "B"], Some("p2"))));
+        assert_eq!(next(read.absorb(page(&["B", "A"], Some("p3")))), "p3");
+
+        // An empty page has no content to repeat.
+        let mut read = paged_read(1000, None, Some(5));
+        next(read.absorb(page(&[], Some("p2"))));
+        assert_eq!(next(read.absorb(page(&[], Some("p3")))), "p3");
+    }
+
+    #[test]
+    fn only_a_non_empty_first_page_of_a_fresh_read_is_offered_to_the_gate() {
+        let mut read = paged_read(1000, None, Some(5));
+        next(read.absorb(page(&[], Some("p2"))));
+        assert_eq!(
+            read.first_page_fingerprint, None,
+            "an empty page is no listing"
+        );
+
+        let mut read = paged_read(1000, Some("p4"), Some(5));
+        next(read.absorb(page(&["A"], Some("p5"))));
+        assert_eq!(
+            read.first_page_fingerprint, None,
+            "a resumed read has no first page"
+        );
+
+        let mut read = paged_read(1000, None, Some(5));
+        next(read.absorb(page(&["A"], Some("p2"))));
+        assert!(read.first_page_fingerprint.take().is_some());
+        next(read.absorb(page(&["B"], Some("p3"))));
+        assert_eq!(
+            read.first_page_fingerprint, None,
+            "only the first page is offered"
+        );
+    }
+
+    #[test]
+    fn a_first_page_stop_stays_open_while_the_shared_listing_is_still_read() {
+        let mut read = paged_read(1000, None, Some(5));
+        let step = read.absorb(page(&["A"], Some("p2")));
+        let response = read.stop_at_first_page(step, true);
+        assert_eq!(titles(&response), vec!["A"]);
+        assert_eq!(response.response.next_cursor, None);
+        assert_eq!(
+            response.completion,
+            IndexerSearchCompletion::Partial {
+                reason: None,
+                retry_after: None,
+            }
+        );
+
+        let mut read = paged_read(1000, None, Some(5));
+        let step = read.absorb(page(&["A"], Some("p2")));
+        let response = read.stop_at_first_page(step, false);
+        assert_eq!(response.response.next_cursor, None);
+        assert_eq!(response.completion, IndexerSearchCompletion::Complete);
+    }
+
     fn rss_strategy(
         rss_catch_up: Option<scryer_application::IndexerRssCatchUp>,
     ) -> IndexerSearchStrategyRequest {
@@ -3294,6 +3462,7 @@ mod tests {
             page_cursor: None,
             page_budget: None,
             result_limit: None,
+            first_page_gate: None,
             strategy_id: "rss-strategy".to_string(),
             labels: vec!["rss".to_string()],
             query: String::new(),

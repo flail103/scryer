@@ -5307,6 +5307,67 @@ pub struct ReusableIndexerSearchStrategy {
     pub retry_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Where an indexer's listings for one title live: the indexer, the identity
+/// it answered under, and the title's facet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexerSearchListingScope {
+    pub indexer_id: String,
+    pub indexer_fingerprint: String,
+    pub title_id: String,
+    pub facet: String,
+}
+
+/// One background strategy of one search scope.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IndexerSearchListingStrategy {
+    pub scope_key: String,
+    pub query_signature: String,
+}
+
+/// A strategy found reading a listing it does not own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexerSearchListingReader {
+    pub strategy: IndexerSearchListingStrategy,
+    /// The reader's episode-insensitive request signature.
+    pub strategy_family: String,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// One listing of a title: the answer an indexer gives, identified by its
+/// first page, with the strategy whose page chain reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexerSearchListing {
+    pub first_page_fingerprint: String,
+    pub owner: IndexerSearchListingStrategy,
+    pub owner_strategy_family: String,
+    /// Where the chain reads on. `None` with `finished` false means the chain
+    /// has its first page claimed but no page recorded yet.
+    pub page_cursor: Option<String>,
+    /// The chain read to the end of the listing.
+    pub finished: bool,
+    pub chain_started_at: chrono::DateTime<chrono::Utc>,
+    /// When the chain last recorded a page, or changed owner.
+    pub advanced_at: chrono::DateTime<chrono::Utc>,
+    pub readers: Vec<IndexerSearchListingReader>,
+    /// The runs whose pages the chain has read so far, oldest first.
+    pub run_ids: Vec<String>,
+}
+
+/// What a background strategy's first page says about its listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexerSearchListingClaim {
+    /// No other strategy reads this listing, or its chain was abandoned
+    /// before recording a page: the claimant owns a chain from page one.
+    Owner,
+    /// Another strategy's chain already reads this exact listing: the
+    /// indexer answers at title level, and the claimant is recorded as its
+    /// reader. `listing_open` while that chain has not read to the end.
+    SameListing {
+        owner: IndexerSearchListingStrategy,
+        listing_open: bool,
+    },
+}
+
 #[async_trait]
 pub trait IndexerSearchLearningRepository: Send + Sync {
     async fn list_for_title(
@@ -5408,6 +5469,82 @@ pub trait IndexerSearchLearningRepository: Send + Sync {
         _now: chrono::DateTime<chrono::Utc>,
     ) -> AppResult<Option<chrono::DateTime<chrono::Utc>>> {
         Ok(None)
+    }
+
+    /// The listings of a title whose chain advanced at or after
+    /// `fresh_after`, with their readers seen since then.
+    async fn list_search_listings(
+        &self,
+        _scope: &IndexerSearchListingScope,
+        _fresh_after: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<Vec<IndexerSearchListing>> {
+        Ok(Vec::new())
+    }
+
+    /// Records a background strategy's first page. A fresh listing with that
+    /// page and another owner makes the claimant its reader, unless its chain
+    /// recorded no page and went idle before `idle_before`, which hands it to
+    /// the claimant. Otherwise the claimant owns the listing from page one.
+    /// Either way the claimant stops owning or reading any other listing.
+    #[allow(clippy::too_many_arguments)]
+    async fn claim_search_listing(
+        &self,
+        _scope: &IndexerSearchListingScope,
+        _first_page_fingerprint: &str,
+        _claimant: &IndexerSearchListingStrategy,
+        _strategy_family: &str,
+        _fresh_after: chrono::DateTime<chrono::Utc>,
+        _idle_before: chrono::DateTime<chrono::Utc>,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<IndexerSearchListingClaim> {
+        Ok(IndexerSearchListingClaim::Owner)
+    }
+
+    /// Records `reader` as reading the listing without having fetched it,
+    /// once the listing is known to cover its scope.
+    async fn join_search_listing(
+        &self,
+        _scope: &IndexerSearchListingScope,
+        _first_page_fingerprint: &str,
+        _reader: &IndexerSearchListingStrategy,
+        _strategy_family: &str,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<()> {
+        Ok(())
+    }
+
+    /// Adds a run's page to the listing's chain and moves the chain to
+    /// `next_cursor`; no cursor finishes the chain. Only the owner advances
+    /// it: `false` when `owner` no longer owns the listing.
+    #[allow(clippy::too_many_arguments)]
+    async fn link_search_listing_run(
+        &self,
+        _scope: &IndexerSearchListingScope,
+        _first_page_fingerprint: &str,
+        _owner: &IndexerSearchListingStrategy,
+        _run_id: &str,
+        _next_cursor: Option<&str>,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<bool> {
+        Ok(false)
+    }
+
+    /// Hands an idle listing's chain to one of its readers, which resumes it
+    /// from `expected_cursor`. The previous owner becomes a reader. `false`
+    /// when the chain moved, changed owner or advanced at or after
+    /// `idle_before` since the caller looked.
+    #[allow(clippy::too_many_arguments)]
+    async fn adopt_search_listing(
+        &self,
+        _scope: &IndexerSearchListingScope,
+        _first_page_fingerprint: &str,
+        _previous_owner: &IndexerSearchListingStrategy,
+        _adopter: &IndexerSearchListingStrategy,
+        _expected_cursor: &str,
+        _idle_before: chrono::DateTime<chrono::Utc>,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<bool> {
+        Ok(false)
     }
 
     async fn cleanup_search_diagnostics(

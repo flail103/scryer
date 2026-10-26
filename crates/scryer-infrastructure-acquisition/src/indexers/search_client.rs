@@ -9,14 +9,16 @@ use scryer_application::{
     AppError, AppResult, BackgroundIndexerSearchStrategyState, DownloadSourceKind, EstimatedCost,
     ExpectedValueHint, HashDomain, IndexerClient, IndexerConfigRepository,
     IndexerErrorClassification, IndexerErrorOperation, IndexerErrorRepository,
-    IndexerPluginProvider, IndexerQueryOutcome, IndexerResponseAttributes, IndexerRoutingPlan,
-    IndexerRssCatchUp, IndexerSearchCandidateWrite, IndexerSearchCompletion,
-    IndexerSearchEligibility, IndexerSearchIncompleteReason, IndexerSearchLearningContext,
-    IndexerSearchLearningKey, IndexerSearchLearningRecord, IndexerSearchLearningRepository,
-    IndexerSearchNumberingContext, IndexerSearchOutcome, IndexerSearchPageSink,
-    IndexerSearchPlanRequest, IndexerSearchResponse, IndexerSearchResult, IndexerSearchRunWrite,
-    IndexerSearchStrategyEvent, IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest,
-    IndexerStatsTracker, IndexerSystemBackoff, NewIndexerError, NormalizedIndexerSearchCandidate,
+    IndexerFirstPageGate, IndexerFirstPageVerdict, IndexerPluginProvider, IndexerQueryOutcome,
+    IndexerResponseAttributes, IndexerRoutingPlan, IndexerRssCatchUp, IndexerSearchCandidateWrite,
+    IndexerSearchCompletion, IndexerSearchEligibility, IndexerSearchIncompleteReason,
+    IndexerSearchLearningContext, IndexerSearchLearningKey, IndexerSearchLearningRecord,
+    IndexerSearchLearningRepository, IndexerSearchListing, IndexerSearchListingClaim,
+    IndexerSearchListingScope, IndexerSearchListingStrategy, IndexerSearchNumberingContext,
+    IndexerSearchOutcome, IndexerSearchPageSink, IndexerSearchPlanRequest, IndexerSearchResponse,
+    IndexerSearchResult, IndexerSearchRunWrite, IndexerSearchStrategyEvent,
+    IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, IndexerStatsTracker,
+    IndexerSystemBackoff, NewIndexerError, NormalizedIndexerSearchCandidate,
     NullIndexerErrorRepository, NullIndexerSearchLearningRepository, NullProxyConfigRepository,
     NullUpstreamScheduler, ProxyConfigRepository, RateLimitCooldownAction, RateLimitSignal,
     RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
@@ -409,6 +411,7 @@ fn prepare_search_strategies(
             page_cursor: None,
             page_budget: None,
             result_limit: None,
+            first_page_gate: None,
             strategy_id: strategy_id.clone(),
             labels: vec![strategy.label.clone()],
             query: strategy.request_query,
@@ -671,6 +674,10 @@ struct CandidateReplay {
     config: IndexerConfig,
     run_ids: Vec<String>,
     provenance: ReleaseCandidateProvenance,
+    /// The result guard run again on the replayed candidates. Set for a
+    /// listing strategy, whose runs keep the indexer's whole answer rather
+    /// than only the results the reading scope asked for.
+    filter: Option<Arc<ReplayFilter>>,
 }
 
 impl CandidateReplay {
@@ -701,6 +708,9 @@ impl CandidateReplay {
                         "persisted indexer candidate could not be rehydrated".to_string(),
                     )
                 })?;
+            if let Some(filter) = self.filter.as_deref() {
+                filter.apply(&mut candidates);
+            }
             for candidate in &mut candidates {
                 candidate.provenance = Some(self.provenance.clone());
                 candidate.indexer_id = Some(indexer_id.to_string());
@@ -726,6 +736,720 @@ impl CandidateReplay {
         }
         Ok(count)
     }
+}
+
+/// The local result guard of one strategy, kept so a replay can apply it to
+/// candidates persisted before the guard ran.
+struct ReplayFilter {
+    query: String,
+    season: Option<u32>,
+    episode: Option<u32>,
+    numbering_context: IndexerSearchNumberingContext,
+    tagged_aliases: Vec<scryer_domain::TaggedAlias>,
+    title_guard_mode: TitleGuardMode,
+    strategy_label: String,
+}
+
+impl ReplayFilter {
+    fn apply(&self, results: &mut Vec<IndexerSearchResult>) {
+        filter_strategy_results(
+            results,
+            &FilterStrategyContext {
+                query: &self.query,
+                season: self.season,
+                episode: self.episode,
+                numbering_context: &self.numbering_context,
+                tagged_aliases: &self.tagged_aliases,
+                title_guard_mode: self.title_guard_mode,
+                strategy_label: &self.strategy_label,
+                is_rss_request: false,
+            },
+        );
+    }
+}
+
+/// The scope a search pass guards its results for.
+struct ListingGuardScope {
+    query: String,
+    season: Option<u32>,
+    episode: Option<u32>,
+    absolute_episode: Option<u32>,
+    numbering_context: IndexerSearchNumberingContext,
+    tagged_aliases: Vec<scryer_domain::TaggedAlias>,
+}
+
+impl ListingGuardScope {
+    /// Whether one listed release is evidence that a listing answers this
+    /// scope: it names the scope's season, or, for a scope keyed by absolute
+    /// number, it carries an absolute number or no numbering at all.
+    fn covered_by(&self, result: &IndexerSearchResult) -> bool {
+        let parsed = result
+            .parsed_release_metadata
+            .clone()
+            .unwrap_or_else(|| scryer_application::parse_release_metadata(&result.title));
+        let numbering = parsed.episode.as_ref();
+        let names_season = self.season.is_some_and(|season| {
+            numbering.is_some_and(|numbering| {
+                numbering.season == Some(season) || numbering.season_numbers.contains(&season)
+            })
+        });
+        let fits_absolute = self.absolute_episode.is_some()
+            && numbering.is_none_or(|numbering| {
+                numbering.absolute_episode.is_some()
+                    || !numbering.absolute_episode_numbers.is_empty()
+                    || (numbering.season.is_none()
+                        && numbering.season_numbers.is_empty()
+                        && numbering.episode_numbers.is_empty())
+            });
+        names_season || fits_absolute
+    }
+}
+
+/// The episode-insensitive shape of an id lookup: the strategy request with
+/// its season, episode and absolute number left out, keeping only which of
+/// them it sends. Every scope of a title asks the same shape, so an indexer
+/// that ignores those coordinates answers each of them with one listing.
+/// Text queries are not listings: `None`.
+fn listing_strategy_family(request: &IndexerSearchStrategyRequest) -> Option<String> {
+    if !request.query.trim().is_empty() || request.ids.is_empty() {
+        return None;
+    }
+    let ids = request
+        .ids
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut categories = request.newznab_categories.clone().unwrap_or_default();
+    categories.sort();
+    categories.dedup();
+    let mut aliases = request.tagged_aliases.clone();
+    aliases
+        .sort_by(|left, right| (&left.name, &left.language).cmp(&(&right.name, &right.language)));
+    Some(digest_json(
+        HashDomain::IndexerListingFamily,
+        &serde_json::json!({
+            "ids": ids,
+            "category": request.category,
+            "facet": request.facet,
+            "newznab_categories": categories,
+            "year": request.year,
+            "tagged_aliases": aliases,
+            "coordinates": [
+                request.season.is_some(),
+                request.episode.is_some(),
+                request.absolute_episode.is_some(),
+            ],
+        }),
+    ))
+}
+
+/// How long a listing's chain may sit without recording a page before one of
+/// its readers takes it over and reads on from where it stopped.
+const LISTING_OWNER_IDLE_HOURS: i64 = 1;
+
+/// One listing strategy of a pass, as the probe knows it.
+struct ListingStrategyEntry {
+    family: String,
+    title_guard_mode: TitleGuardMode,
+    label: String,
+    branch: String,
+}
+
+#[derive(Default)]
+struct ListingPassState {
+    /// The listing strategies of this pass, by query signature.
+    strategies: HashMap<String, ListingStrategyEntry>,
+    /// Strategies that own a listing's chain this pass, with the listing's
+    /// first page: their runs keep the indexer's whole answer and advance
+    /// the chain.
+    owned: HashMap<String, String>,
+    /// Strategies whose first page this pass was another strategy's listing,
+    /// with that listing's first page and its owner.
+    followers: Vec<(String, String, IndexerSearchListingStrategy)>,
+    /// Followers whose listing is still being read: their answer is open, not
+    /// contained.
+    riders: HashSet<String>,
+    /// Listings this pass already replayed, by first page.
+    replayed: HashSet<String>,
+}
+
+/// What a tier's listing strategies need before reuse selection.
+struct ListingTierPlan {
+    /// The strategies left for reuse selection and live reading.
+    strategies: Vec<PreparedSearchStrategy>,
+    /// Strategies answered from a listing without asking the indexer.
+    served: usize,
+    /// Of those, the ones whose listing is still being read.
+    served_open: usize,
+    /// Results the listing replays sent.
+    replayed: usize,
+    /// Chains taken over from an idle owner, resumed where it stopped.
+    page_chains: HashMap<String, PageChain>,
+}
+
+/// How a listing strategy stands to a listing.
+enum ListingRelation<'a> {
+    Owns(&'a IndexerSearchListing),
+    Reads(&'a IndexerSearchListing),
+}
+
+/// Same-listing detection for one indexer's background search pass. A
+/// background id strategy that reads from the first page records that page;
+/// when it is the page of a listing another strategy's chain already reads,
+/// the strategy stops there and is answered from that chain. A listing shared
+/// across scopes serves the title's other scopes without asking the indexer,
+/// as long as it lists releases of their season; any other scope reads its
+/// own first page.
+#[derive(Clone)]
+struct ListingProbe {
+    diagnostics: SearchDiagnosticsContext,
+    config: IndexerConfig,
+    title_id: String,
+    facet: String,
+    scope: Arc<ListingGuardScope>,
+    state: Arc<std::sync::Mutex<ListingPassState>>,
+}
+
+impl ListingProbe {
+    fn new(
+        diagnostics: Option<&SearchDiagnosticsContext>,
+        learning_context: Option<&IndexerSearchLearningContext>,
+        config: &IndexerConfig,
+        scope: ListingGuardScope,
+    ) -> Option<Self> {
+        let diagnostics = diagnostics.filter(|diagnostics| diagnostics.background)?;
+        let learning_context = learning_context?;
+        Some(Self {
+            diagnostics: diagnostics.clone(),
+            config: config.clone(),
+            title_id: learning_context.title_id.trim().to_string(),
+            facet: learning_context.facet.trim().to_ascii_lowercase(),
+            scope: Arc::new(scope),
+            state: Arc::new(std::sync::Mutex::new(ListingPassState::default())),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ListingPassState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn listing_scope(&self) -> IndexerSearchListingScope {
+        IndexerSearchListingScope {
+            indexer_id: self.diagnostics.indexer_id.clone(),
+            indexer_fingerprint: self.diagnostics.indexer_fingerprint.clone(),
+            title_id: self.title_id.clone(),
+            facet: self.facet.clone(),
+        }
+    }
+
+    fn strategy(&self, strategy_id: &str) -> IndexerSearchListingStrategy {
+        IndexerSearchListingStrategy {
+            scope_key: self.diagnostics.scope_key.clone(),
+            query_signature: strategy_id.to_string(),
+        }
+    }
+
+    fn warn(&self, error: &AppError, what: &'static str) {
+        warn!(
+            indexer_id = self.diagnostics.indexer_id.as_str(),
+            %error,
+            "{what}"
+        );
+    }
+
+    async fn listings(&self) -> Vec<IndexerSearchListing> {
+        let fresh_after = Utc::now() - Duration::hours(SEARCH_CANDIDATE_REUSE_HOURS);
+        match self
+            .diagnostics
+            .repository
+            .list_search_listings(&self.listing_scope(), fresh_after)
+            .await
+        {
+            Ok(listings) => listings,
+            Err(error) => {
+                self.warn(&error, "failed to read indexer listings");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Notes a tier's listing strategies, gives their own replayable history
+    /// their result guard (a run that owned a listing kept the indexer's
+    /// whole answer), and settles each one's listing: an owner keeps its
+    /// chain, a reader of a finished or still-moving listing is answered
+    /// from it, a reader of an idle one takes the chain over, and anything
+    /// else reads live.
+    async fn plan(
+        &self,
+        strategies: Vec<PreparedSearchStrategy>,
+        reusable: &mut HashMap<String, ReusableStrategyState>,
+        page_sink: &IndexerSearchPageSink,
+    ) -> AppResult<ListingTierPlan> {
+        let mut plan = ListingTierPlan {
+            strategies: Vec::with_capacity(strategies.len()),
+            served: 0,
+            served_open: 0,
+            replayed: 0,
+            page_chains: HashMap::new(),
+        };
+        let mut tracked = false;
+        for strategy in &strategies {
+            let Some(family) = listing_strategy_family(&strategy.request)
+                .filter(|_| strategy.request.page_cursor.is_none())
+            else {
+                continue;
+            };
+            tracked = true;
+            let entry = ListingStrategyEntry {
+                family,
+                title_guard_mode: strategy.title_guard_mode,
+                label: strategy.labels.first().cloned().unwrap_or_default(),
+                branch: strategy.labels.join("|"),
+            };
+            let filter = self.filter_for(&entry);
+            if let Some(replay) = reusable
+                .get_mut(&strategy.strategy_id)
+                .and_then(|reusable| reusable.replay.as_mut())
+            {
+                replay.filter = Some(filter);
+            }
+            self.lock()
+                .strategies
+                .insert(strategy.strategy_id.clone(), entry);
+        }
+        if !tracked {
+            plan.strategies = strategies;
+            return Ok(plan);
+        }
+
+        let listings = self.listings().await;
+        let now = Utc::now();
+        let idle_before = now - Duration::hours(LISTING_OWNER_IDLE_HOURS);
+        for mut strategy in strategies {
+            let family = self
+                .lock()
+                .strategies
+                .get(&strategy.strategy_id)
+                .map(|entry| entry.family.clone());
+            let Some(family) = family else {
+                plan.strategies.push(strategy);
+                continue;
+            };
+            let me = self.strategy(&strategy.strategy_id);
+            let Some(relation) = self.relation(&listings, &me, &family).await? else {
+                plan.strategies.push(strategy);
+                continue;
+            };
+            let listing = match relation {
+                ListingRelation::Owns(listing) => {
+                    self.lock().owned.insert(
+                        strategy.strategy_id.clone(),
+                        listing.first_page_fingerprint.clone(),
+                    );
+                    // The chain's pages are replayed as the listing's, not as
+                    // this strategy's own runs.
+                    if let Some(state) = reusable.get_mut(&strategy.strategy_id) {
+                        state.replay = None;
+                    }
+                    plan.replayed = plan.replayed.saturating_add(
+                        self.replay_listing(listing, &strategy.strategy_id, page_sink)
+                            .await?,
+                    );
+                    plan.strategies.push(strategy);
+                    continue;
+                }
+                ListingRelation::Reads(listing) => listing,
+            };
+            let own_state = reusable.remove(&strategy.strategy_id);
+            let idle = listing.advanced_at < idle_before;
+            if !listing.finished && idle {
+                match listing.page_cursor.as_deref() {
+                    Some(cursor)
+                        if !own_state
+                            .as_ref()
+                            .is_some_and(|state| state.retry_at.is_some_and(|at| at > now)) =>
+                    {
+                        match self
+                            .diagnostics
+                            .repository
+                            .adopt_search_listing(
+                                &self.listing_scope(),
+                                &listing.first_page_fingerprint,
+                                &listing.owner,
+                                &me,
+                                cursor,
+                                idle_before,
+                                now,
+                            )
+                            .await
+                        {
+                            Ok(true) => {
+                                debug!(
+                                    indexer_id = self.diagnostics.indexer_id.as_str(),
+                                    strategy =
+                                        strategy.labels.first().map(String::as_str).unwrap_or(""),
+                                    previous_owner = listing.owner.scope_key.as_str(),
+                                    "indexer listing chain went idle; resuming it here"
+                                );
+                                self.lock().owned.insert(
+                                    strategy.strategy_id.clone(),
+                                    listing.first_page_fingerprint.clone(),
+                                );
+                                plan.replayed = plan.replayed.saturating_add(
+                                    self.replay_listing(listing, &strategy.strategy_id, page_sink)
+                                        .await?,
+                                );
+                                strategy.request.page_cursor = Some(cursor.to_string());
+                                plan.page_chains.insert(
+                                    strategy.strategy_id.clone(),
+                                    PageChain {
+                                        cursor: cursor.to_string(),
+                                        chain_id: uuid::Uuid::new_v4().to_string(),
+                                    },
+                                );
+                                plan.strategies.push(strategy);
+                                continue;
+                            }
+                            Ok(false) => {}
+                            Err(error) => self.warn(&error, "failed to take over indexer listing"),
+                        }
+                    }
+                    Some(_) => {}
+                    // The owner claimed the first page and recorded nothing:
+                    // read it again, which takes the listing over.
+                    None => {
+                        plan.strategies.push(strategy);
+                        continue;
+                    }
+                }
+            }
+            plan.replayed = plan.replayed.saturating_add(
+                self.replay_listing(listing, &strategy.strategy_id, page_sink)
+                    .await?,
+            );
+            plan.served += 1;
+            if !listing.finished {
+                plan.served_open += 1;
+            }
+            debug!(
+                indexer_id = self.diagnostics.indexer_id.as_str(),
+                strategy = strategy.labels.first().map(String::as_str).unwrap_or(""),
+                owner_scope = listing.owner.scope_key.as_str(),
+                open = !listing.finished,
+                "indexer strategy reads a listing already read; served from it"
+            );
+        }
+        Ok(plan)
+    }
+
+    /// The listing a strategy owns or reads. A strategy with neither joins a
+    /// listing already shared across the title's scopes when it lists a
+    /// release of the strategy's scope; without that evidence it reads live.
+    async fn relation<'a>(
+        &self,
+        listings: &'a [IndexerSearchListing],
+        me: &IndexerSearchListingStrategy,
+        family: &str,
+    ) -> AppResult<Option<ListingRelation<'a>>> {
+        if let Some(listing) = listings.iter().find(|listing| listing.owner == *me) {
+            return Ok(Some(ListingRelation::Owns(listing)));
+        }
+        if let Some(listing) = listings
+            .iter()
+            .find(|listing| listing.readers.iter().any(|reader| reader.strategy == *me))
+        {
+            return Ok(Some(ListingRelation::Reads(listing)));
+        }
+        for listing in listings.iter().filter(|listing| {
+            let shared = listing
+                .readers
+                .iter()
+                .any(|reader| reader.strategy.scope_key != listing.owner.scope_key);
+            let same_shape = listing.owner_strategy_family == family
+                || listing
+                    .readers
+                    .iter()
+                    .any(|reader| reader.strategy_family == family);
+            shared && same_shape && !listing.run_ids.is_empty()
+        }) {
+            match self.listing_covers_scope(listing).await {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(error) if error.is_canceled() => return Err(error),
+                Err(error) => {
+                    self.warn(&error, "failed to read indexer listing");
+                    continue;
+                }
+            }
+            if let Err(error) = self
+                .diagnostics
+                .repository
+                .join_search_listing(
+                    &self.listing_scope(),
+                    &listing.first_page_fingerprint,
+                    me,
+                    family,
+                    Utc::now(),
+                )
+                .await
+            {
+                self.warn(&error, "failed to record indexer listing reader");
+                return Ok(None);
+            }
+            return Ok(Some(ListingRelation::Reads(listing)));
+        }
+        Ok(None)
+    }
+
+    /// Whether the listing's recorded pages hold a release of this scope.
+    async fn listing_covers_scope(&self, listing: &IndexerSearchListing) -> AppResult<bool> {
+        let mut cursor = None;
+        loop {
+            let page = self
+                .diagnostics
+                .repository
+                .list_search_run_candidates(
+                    &listing.run_ids,
+                    cursor.as_deref(),
+                    CANDIDATE_REPLAY_BATCH_SIZE,
+                )
+                .await?;
+            if page
+                .candidates
+                .into_iter()
+                .filter_map(|record| reusable_candidate_from_record(record, &self.config))
+                .any(|candidate| self.scope.covered_by(&candidate))
+            {
+                return Ok(true);
+            }
+            match page.next_cursor {
+                Some(next) if cursor.as_ref().is_none_or(|previous| next > *previous) => {
+                    cursor = Some(next);
+                }
+                _ => return Ok(false),
+            }
+        }
+    }
+
+    fn filter_for(&self, entry: &ListingStrategyEntry) -> Arc<ReplayFilter> {
+        Arc::new(ReplayFilter {
+            query: self.scope.query.clone(),
+            season: self.scope.season,
+            episode: self.scope.episode,
+            numbering_context: self.scope.numbering_context.clone(),
+            tagged_aliases: self.scope.tagged_aliases.clone(),
+            title_guard_mode: entry.title_guard_mode,
+            strategy_label: entry.label.clone(),
+        })
+    }
+
+    /// Whether this strategy is an id lookup whose first page is compared.
+    fn tracks(&self, strategy_id: &str) -> bool {
+        self.lock().strategies.contains_key(strategy_id)
+    }
+
+    /// Whether this strategy owns its listing's chain: its runs then keep
+    /// every result the indexer returned, for whichever scope replays them.
+    fn persists_whole_answer(&self, strategy_id: &str) -> bool {
+        self.lock().owned.contains_key(strategy_id)
+    }
+
+    /// Whether this strategy stopped at a first page whose listing another
+    /// chain is still reading: its partial answer moves with that chain.
+    fn rides(&self, strategy_id: &str) -> bool {
+        self.lock().riders.contains(strategy_id)
+    }
+
+    /// The gate a paged read asks after its first page.
+    fn first_page_gate(&self, strategy_id: &str) -> IndexerFirstPageGate {
+        let probe = self.clone();
+        let strategy_id = strategy_id.to_string();
+        IndexerFirstPageGate::new(move |fingerprint| {
+            let probe = probe.clone();
+            let strategy_id = strategy_id.clone();
+            async move { probe.claim(&strategy_id, fingerprint).await }
+        })
+    }
+
+    /// Records a strategy's first page: the strategy owns that listing from
+    /// page one, or stops there as a reader of the chain already reading it.
+    async fn claim(
+        &self,
+        strategy_id: &str,
+        first_page_fingerprint: String,
+    ) -> IndexerFirstPageVerdict {
+        let family = self
+            .lock()
+            .strategies
+            .get(strategy_id)
+            .map(|entry| entry.family.clone());
+        let Some(family) = family else {
+            return IndexerFirstPageVerdict::ReadOn;
+        };
+        let now = Utc::now();
+        match self
+            .diagnostics
+            .repository
+            .claim_search_listing(
+                &self.listing_scope(),
+                &first_page_fingerprint,
+                &self.strategy(strategy_id),
+                &family,
+                now - Duration::hours(SEARCH_CANDIDATE_REUSE_HOURS),
+                now - Duration::hours(LISTING_OWNER_IDLE_HOURS),
+                now,
+            )
+            .await
+        {
+            Ok(IndexerSearchListingClaim::Owner) => {
+                self.lock()
+                    .owned
+                    .insert(strategy_id.to_string(), first_page_fingerprint);
+                IndexerFirstPageVerdict::ReadOn
+            }
+            Ok(IndexerSearchListingClaim::SameListing {
+                owner,
+                listing_open,
+            }) => {
+                let mut state = self.lock();
+                state.owned.remove(strategy_id);
+                if listing_open {
+                    state.riders.insert(strategy_id.to_string());
+                }
+                state
+                    .followers
+                    .push((strategy_id.to_string(), first_page_fingerprint, owner));
+                IndexerFirstPageVerdict::Stop { listing_open }
+            }
+            Err(error) => {
+                self.warn(&error, "failed to record indexer listing page");
+                IndexerFirstPageVerdict::ReadOn
+            }
+        }
+    }
+
+    /// Adds an owner's run to its listing's chain.
+    async fn note_run(&self, strategy_id: &str, run_id: &str, next_cursor: Option<&str>) {
+        let fingerprint = self.lock().owned.get(strategy_id).cloned();
+        let Some(fingerprint) = fingerprint else {
+            return;
+        };
+        match self
+            .diagnostics
+            .repository
+            .link_search_listing_run(
+                &self.listing_scope(),
+                &fingerprint,
+                &self.strategy(strategy_id),
+                run_id,
+                next_cursor,
+                Utc::now(),
+            )
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                self.lock().owned.remove(strategy_id);
+            }
+            Err(error) => self.warn(&error, "failed to record indexer listing page"),
+        }
+    }
+
+    /// Replays the listings the strategies that stopped at their first page
+    /// this pass were found reading. A listing owned in this same scope was
+    /// read live here.
+    async fn replay_followers(&self, page_sink: &IndexerSearchPageSink) -> AppResult<usize> {
+        let followers = std::mem::take(&mut self.lock().followers);
+        let followers = followers
+            .into_iter()
+            .filter(|(_, _, owner)| owner.scope_key != self.diagnostics.scope_key)
+            .collect::<Vec<_>>();
+        if followers.is_empty() {
+            return Ok(0);
+        }
+        let listings = self.listings().await;
+        let mut replayed = 0_usize;
+        for (strategy_id, fingerprint, _) in followers {
+            let Some(listing) = listings
+                .iter()
+                .find(|listing| listing.first_page_fingerprint == fingerprint)
+            else {
+                continue;
+            };
+            replayed = replayed.saturating_add(
+                self.replay_listing(listing, &strategy_id, page_sink)
+                    .await?,
+            );
+        }
+        Ok(replayed)
+    }
+
+    /// Sends a listing's recorded pages through this scope's result guard,
+    /// once per listing per pass. A failed replay is logged; the strategy's
+    /// own first page still stands.
+    async fn replay_listing(
+        &self,
+        listing: &IndexerSearchListing,
+        strategy_id: &str,
+        page_sink: &IndexerSearchPageSink,
+    ) -> AppResult<usize> {
+        let (filter, branch) = {
+            let mut state = self.lock();
+            if listing.run_ids.is_empty()
+                || !state
+                    .replayed
+                    .insert(listing.first_page_fingerprint.clone())
+            {
+                return Ok(0);
+            }
+            let Some(entry) = state.strategies.get(strategy_id) else {
+                return Ok(0);
+            };
+            (self.filter_for(entry), entry.branch.clone())
+        };
+        let replay = CandidateReplay {
+            context: self.diagnostics.clone(),
+            config: self.config.clone(),
+            run_ids: listing.run_ids.clone(),
+            provenance: reusable_strategy_provenance(&branch),
+            filter: Some(filter),
+        };
+        match replay.send(page_sink, &self.diagnostics.indexer_id).await {
+            Ok(count) => Ok(count),
+            Err(error) if error.is_canceled() => Err(error),
+            Err(error) => {
+                self.warn(&error, "indexer listing replay failed");
+                Ok(0)
+            }
+        }
+    }
+}
+
+/// The whole answer a listing strategy persists: every result, annotated as
+/// the guard annotates them but with no scope applied, so any scope that
+/// replays the listing can guard it for itself.
+fn listing_persisted_response(
+    response: &IndexerSearchResponse,
+    title_guard_mode: TitleGuardMode,
+    strategy_label: &str,
+) -> IndexerSearchResponse {
+    let mut persisted = response.clone();
+    filter_strategy_results(
+        &mut persisted.results,
+        &FilterStrategyContext {
+            query: "",
+            season: None,
+            episode: None,
+            numbering_context: &IndexerSearchNumberingContext::default(),
+            tagged_aliases: &[],
+            title_guard_mode,
+            strategy_label,
+            is_rss_request: false,
+        },
+    );
+    persisted
 }
 
 impl ReusableStrategyState {
@@ -1166,6 +1890,7 @@ impl SearchDiagnosticsContext {
                 config: config.clone(),
                 run_ids: vec![run_id],
                 provenance: reusable_strategy_provenance(&state.branch),
+                filter: None,
             });
             reusable.insert(
                 state.query_signature,
@@ -1231,6 +1956,7 @@ impl SearchDiagnosticsContext {
                         config: config.clone(),
                         run_ids: Vec::new(),
                         provenance: reusable_strategy_provenance(&state.branch),
+                        filter: None,
                     });
                 for run_id in &state.chain_run_ids {
                     if !replay.run_ids.contains(run_id) {
@@ -4873,6 +5599,7 @@ impl MultiIndexerSearchClient {
         strategies: Vec<PreparedSearchStrategy>,
         initial_permit: Option<SearchPermit>,
         page_sink: IndexerSearchPageSink,
+        listing_probe: Option<ListingProbe>,
     ) -> tokio::task::JoinSet<StrategyExecutionOutcome> {
         let mut set = tokio::task::JoinSet::<StrategyExecutionOutcome>::new();
         let mut initial_permit = initial_permit;
@@ -4888,7 +5615,13 @@ impl MultiIndexerSearchClient {
             let strategy_labels = strategy.labels.clone();
             let strategy_label = strategy.labels.first().cloned().unwrap_or_default();
             let title_guard_mode = strategy.title_guard_mode;
-            let strategy = strategy.request;
+            let mut strategy = strategy.request;
+            if let Some(probe) = listing_probe.as_ref()
+                && strategy.page_cursor.is_none()
+                && probe.tracks(&strategy.strategy_id)
+            {
+                strategy.first_page_gate = Some(probe.first_page_gate(&strategy.strategy_id));
+            }
             let page_sink = page_sink.clone();
 
             set.spawn(async move {
@@ -5119,6 +5852,7 @@ impl MultiIndexerSearchClient {
         strategies: Vec<PreparedSearchStrategy>,
         initial_permit: Option<SearchPermit>,
         page_sink: IndexerSearchPageSink,
+        listing_probe: Option<ListingProbe>,
     ) -> StrategyTierOutcomes {
         if context
             .client
@@ -5132,6 +5866,7 @@ impl MultiIndexerSearchClient {
                 strategies,
                 initial_permit,
                 page_sink,
+                listing_probe,
             ))
         }
     }
@@ -6662,7 +7397,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                                 let request_cancel_token = task_cancel_token.child_token();
                                 let request_deadline =
                                     effective_request_deadline(search_timeout, deadline_at);
-                                let rss_strategy = IndexerSearchStrategyRequest { page_cursor: None, page_budget: rss_poll_page_budget, result_limit: rss_poll_item_cap,
+                                let rss_strategy = IndexerSearchStrategyRequest { page_cursor: None, page_budget: rss_poll_page_budget, result_limit: rss_poll_item_cap, first_page_gate: None,
                                     strategy_id: String::new(),
                                     labels: Vec::new(),
                                     query,
@@ -7042,6 +7777,26 @@ impl IndexerClient for MultiIndexerSearchClient {
             } else {
                 HashMap::new()
             };
+            // A plan-capable plugin never pages, so it reads no listing twice.
+            let listing_probe = client
+                .search_plan_capability()
+                .is_none_or(|capability| capability.version != 1)
+                .then(|| {
+                    ListingProbe::new(
+                        search_diagnostics.as_ref(),
+                        learning_context.as_ref(),
+                        config,
+                        ListingGuardScope {
+                            query: query.clone(),
+                            season,
+                            episode,
+                            absolute_episode,
+                            numbering_context: numbering_context.clone(),
+                            tagged_aliases: tagged_aliases.clone(),
+                        },
+                    )
+                })
+                .flatten();
             let rss_category_request = request_categories.clone();
             let prowlarr_nab_proxy = Self::is_prowlarr_nab_proxy(config);
             let indexer_id = config.id.clone();
@@ -7182,10 +7937,45 @@ impl IndexerClient for MultiIndexerSearchClient {
                         cancel_token: task_cancel_token.child_token(),
                         deadline_at,
                     };
-                let primary_strategies = with_result_limit(
+                let mut primary_strategies = with_result_limit(
                     prepare_search_strategies(&primary_context, primary_strategies),
                     rss_poll_item_cap,
                 );
+                let mut primary_listing_served = 0_usize;
+                if let Some(probe) = listing_probe.as_ref() {
+                    match probe
+                        .plan(
+                            primary_strategies,
+                            &mut reusable_strategies,
+                            page_sink.as_ref().expect("stream sink is present"),
+                        )
+                        .await
+                    {
+                        Ok(plan) => {
+                            primary_strategies = plan.strategies;
+                            primary_listing_served = plan.served;
+                            primary_usable_result_count =
+                                primary_usable_result_count.saturating_add(plan.replayed);
+                            page_chains.extend(plan.page_chains);
+                            // A listing still being read leaves its readers
+                            // open with it, not contained.
+                            if plan.served_open > 0 {
+                                all_strategies_complete = false;
+                                only_unattested_incompleteness = false;
+                                contained.note_open();
+                            }
+                        }
+                        Err(error) => {
+                            return (
+                                indexer_id,
+                                indexer_name,
+                                scheduler_lease_for_task.clone(),
+                                Err(error),
+                                false,
+                            );
+                        }
+                    }
+                }
                 let primary_selection = match select_reusable_strategies(
                     primary_strategies,
                     &mut reusable_strategies,
@@ -7206,7 +7996,8 @@ impl IndexerClient for MultiIndexerSearchClient {
                         );
                     }
                 };
-                primary_attempted = primary_selection.complete_count > 0
+                primary_attempted = primary_listing_served > 0
+                    || primary_selection.complete_count > 0
                     || primary_selection.deferred_count > 0
                     || !primary_selection.live.is_empty();
                 primary_had_error = primary_selection.deferred_count > 0;
@@ -7227,6 +8018,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                         primary_live,
                         None,
                         page_sink.as_ref().expect("stream sink is present").clone(),
+                        listing_probe.clone(),
                     )
                 } else {
                     primary_had_error = true;
@@ -7298,10 +8090,13 @@ impl IndexerClient for MultiIndexerSearchClient {
                             }
                             let contained_retry_at =
                                 contained.observe(
-&outcome.strategy_id,
-&response.completion,
-response.next_cursor.is_some(),
-);
+                                &outcome.strategy_id,
+                                &response.completion,
+                                response.next_cursor.is_some()
+                                    || listing_probe
+                                        .as_ref()
+                                        .is_some_and(|probe| probe.rides(&outcome.strategy_id)),
+                            );
                             let raw_result_count = response.results.len();
                             let rss_truncated = rss_poll_item_cap.map_or(0, |cap| {
                                 truncate_rss_poll_results(&mut response.results, rss_poll_safety_cap(cap))
@@ -7352,6 +8147,16 @@ response.next_cursor.is_some(),
                                 }
                             }
 
+                            let listing_persisted = listing_probe
+                                .as_ref()
+                                .filter(|probe| probe.persists_whole_answer(&outcome.strategy_id))
+                                .map(|_| {
+                                    listing_persisted_response(
+                                        &response,
+                                        outcome.title_guard_mode,
+                                        &outcome.label,
+                                    )
+                                });
                             filter_strategy_results(
                                 &mut response.results,
                                 &FilterStrategyContext {
@@ -7382,25 +8187,39 @@ response.next_cursor.is_some(),
                                 }
                             }
                             if page_sink.is_some() {
-                                if let Some(diagnostics) = search_diagnostics.as_ref()
-                                    && let Err(error) = diagnostics
+                                if let Some(diagnostics) = search_diagnostics.as_ref() {
+                                    match diagnostics
                                         .persist_response(
                                             &outcome.strategy_id,
                                             &diagnostic_labels,
                                             raw_result_count,
-                                            &response,
+                                            listing_persisted.as_ref().unwrap_or(&response),
                                             contained_retry_at,
                                             page_chains.get(&outcome.strategy_id),
                                         )
                                         .await
-                                {
-                                    return (
-                                        indexer_id,
-                                        indexer_name,
-                                        scheduler_lease_for_task.clone(),
-                                        Err(error),
-                                        true,
-                                    );
+                                    {
+                                        Ok(run_id) => {
+                                            if let Some(probe) = listing_probe.as_ref() {
+                                                probe
+                                                    .note_run(
+                                                        &outcome.strategy_id,
+                                                        &run_id,
+                                                        response.next_cursor.as_deref(),
+                                                    )
+                                                    .await;
+                                            }
+                                        }
+                                        Err(error) => {
+                                            return (
+                                                indexer_id,
+                                                indexer_name,
+                                                scheduler_lease_for_task.clone(),
+                                                Err(error),
+                                                true,
+                                            );
+                                        }
+                                    }
                                 }
                                 let mut persisted = std::mem::take(&mut response.results);
                                 for result in &mut persisted {
@@ -7435,7 +8254,7 @@ response.next_cursor.is_some(),
                                             &outcome.strategy_id,
                                             &diagnostic_labels,
                                             raw_result_count,
-                                            &response,
+                                            listing_persisted.as_ref().unwrap_or(&response),
                                             contained_retry_at,
                                             page_chains.get(&outcome.strategy_id),
                                         )
@@ -7523,6 +8342,29 @@ response.next_cursor.is_some(),
                     }
                 }
 
+                // A strategy whose first page was another scope's listing reads the
+                // rest of it from that owner's chain.
+                if let Some(probe) = listing_probe.as_ref() {
+                    match probe
+                        .replay_followers(page_sink.as_ref().expect("stream sink is present"))
+                        .await
+                    {
+                        Ok(replayed) => {
+                            primary_usable_result_count =
+                                primary_usable_result_count.saturating_add(replayed);
+                        }
+                        Err(error) => {
+                            return (
+                                indexer_id,
+                                indexer_name,
+                                scheduler_lease_for_task.clone(),
+                                Err(error),
+                                true,
+                            );
+                        }
+                    }
+                }
+
                 // An indexer over its query budget is skipped for the rest of
                 // this search: its fallback would be refused the same way.
                 if query_budget_wait.is_none()
@@ -7559,10 +8401,39 @@ response.next_cursor.is_some(),
                             cancel_token: task_cancel_token.child_token(),
                             deadline_at,
                         };
-                    let fallback_strategies = with_result_limit(
+                    let mut fallback_strategies = with_result_limit(
                         prepare_search_strategies(&fallback_context, fallback_strategies),
                         rss_poll_item_cap,
                     );
+                    if let Some(probe) = listing_probe.as_ref() {
+                        match probe
+                            .plan(
+                                fallback_strategies,
+                                &mut reusable_strategies,
+                                page_sink.as_ref().expect("stream sink is present"),
+                            )
+                            .await
+                        {
+                            Ok(plan) => {
+                                fallback_strategies = plan.strategies;
+                                page_chains.extend(plan.page_chains);
+                                if plan.served_open > 0 {
+                                    all_strategies_complete = false;
+                                    only_unattested_incompleteness = false;
+                                    contained.note_open();
+                                }
+                            }
+                            Err(error) => {
+                                return (
+                                    indexer_id,
+                                    indexer_name,
+                                    scheduler_lease_for_task.clone(),
+                                    Err(error),
+                                    false,
+                                );
+                            }
+                        }
+                    }
                     let fallback_selection = match select_reusable_strategies(
                         fallback_strategies,
                         &mut reusable_strategies,
@@ -7598,6 +8469,7 @@ response.next_cursor.is_some(),
                             fallback_live,
                             None,
                             page_sink.as_ref().expect("stream sink is present").clone(),
+                            listing_probe.clone(),
                         )
                     } else {
                         all_strategies_complete = false;
@@ -7668,10 +8540,13 @@ response.next_cursor.is_some(),
                                     );
                                 }
                                 let contained_retry_at = contained.observe(
-&outcome.strategy_id,
-&response.completion,
-response.next_cursor.is_some(),
-);
+                                &outcome.strategy_id,
+                                &response.completion,
+                                response.next_cursor.is_some()
+                                    || listing_probe
+                                        .as_ref()
+                                        .is_some_and(|probe| probe.rides(&outcome.strategy_id)),
+                            );
                                 let raw_result_count = response.results.len();
                                 let rss_truncated = rss_poll_item_cap.map_or(0, |cap| {
                                     truncate_rss_poll_results(&mut response.results, rss_poll_safety_cap(cap))
@@ -7707,6 +8582,16 @@ response.next_cursor.is_some(),
                                     Some(response.results.len()),
                                 );
 
+                                let listing_persisted = listing_probe
+                                    .as_ref()
+                                    .filter(|probe| probe.persists_whole_answer(&outcome.strategy_id))
+                                    .map(|_| {
+                                        listing_persisted_response(
+                                            &response,
+                                            outcome.title_guard_mode,
+                                            &outcome.label,
+                                        )
+                                    });
                                 filter_strategy_results(
                                     &mut response.results,
                                     &FilterStrategyContext {
@@ -7735,25 +8620,39 @@ response.next_cursor.is_some(),
                                     }
                                 }
                                 if page_sink.is_some() {
-                                    if let Some(diagnostics) = search_diagnostics.as_ref()
-                                        && let Err(error) = diagnostics
+                                    if let Some(diagnostics) = search_diagnostics.as_ref() {
+                                        match diagnostics
                                             .persist_response(
                                                 &outcome.strategy_id,
                                                 &diagnostic_labels,
                                                 raw_result_count,
-                                                &response,
+                                                listing_persisted.as_ref().unwrap_or(&response),
                                                 contained_retry_at,
                                                 page_chains.get(&outcome.strategy_id),
                                             )
                                             .await
-                                    {
-                                        return (
-                                            indexer_id,
-                                            indexer_name,
-                                            scheduler_lease_for_task.clone(),
-                                            Err(error),
-                                            true,
-                                        );
+                                        {
+                                            Ok(run_id) => {
+                                                if let Some(probe) = listing_probe.as_ref() {
+                                                    probe
+                                                        .note_run(
+                                                            &outcome.strategy_id,
+                                                            &run_id,
+                                                            response.next_cursor.as_deref(),
+                                                        )
+                                                        .await;
+                                                }
+                                            }
+                                            Err(error) => {
+                                                return (
+                                                    indexer_id,
+                                                    indexer_name,
+                                                    scheduler_lease_for_task.clone(),
+                                                    Err(error),
+                                                    true,
+                                                );
+                                            }
+                                        }
                                     }
                                     let mut persisted = std::mem::take(&mut response.results);
                                     for result in &mut persisted {
@@ -7788,7 +8687,7 @@ response.next_cursor.is_some(),
                                                 &outcome.strategy_id,
                                                 &diagnostic_labels,
                                                 raw_result_count,
-                                                &response,
+                                                listing_persisted.as_ref().unwrap_or(&response),
                                                 contained_retry_at,
                                                 page_chains.get(&outcome.strategy_id),
                                             )
@@ -7851,6 +8750,25 @@ response.next_cursor.is_some(),
                                     "error",
                                     outcome.elapsed,
                                     None,
+                                );
+                            }
+                        }
+                    }
+                    // A strategy whose first page was another scope's listing reads the
+                    // rest of it from that owner's chain.
+                    if let Some(probe) = listing_probe.as_ref() {
+                        match probe
+                            .replay_followers(page_sink.as_ref().expect("stream sink is present"))
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(error) => {
+                                return (
+                                    indexer_id,
+                                    indexer_name,
+                                    scheduler_lease_for_task.clone(),
+                                    Err(error),
+                                    true,
                                 );
                             }
                         }
@@ -11795,6 +12713,7 @@ mod tests {
                 page_cursor: None,
                 page_budget: None,
                 result_limit: None,
+                first_page_gate: None,
                 strategy_id: strategy_id.to_string(),
                 labels: vec![format!("strategy:{strategy_id}")],
                 query: format!("synthetic-{strategy_id}"),
@@ -12063,6 +12982,7 @@ mod tests {
             config: mock_indexer_config(),
             run_ids: vec!["run-1".into(), "run-2".into()],
             provenance: reusable_strategy_provenance("ids"),
+            filter: None,
         }
     }
 
@@ -21466,5 +22386,475 @@ mod tests {
         );
 
         assert!(results.is_empty());
+    }
+
+    /// One page a listing client fetched: the scope it was asked for, where
+    /// the page started, and whether the read carried a first-page gate.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct ListingPageFetch {
+        season: Option<u32>,
+        episode: Option<u32>,
+        query: String,
+        cursor: Option<String>,
+        gated: bool,
+        budget: Option<u32>,
+    }
+
+    type ListingPageFn =
+        dyn Fn(&RecordedCall, Option<&str>) -> (Vec<String>, Option<String>) + Send + Sync;
+
+    /// A paged indexer read as the plugin adapter reads one: page after page
+    /// within the page budget, asking the request's first-page gate after a
+    /// fresh read's first non-empty page.
+    struct ListingIndexerClient {
+        fetches: StdArc<StdMutex<Vec<ListingPageFetch>>>,
+        page: StdArc<ListingPageFn>,
+    }
+
+    #[async_trait]
+    impl IndexerClient for ListingIndexerClient {
+        async fn search(
+            &self,
+            _query: String,
+            _ids: HashMap<String, String>,
+            _category: Option<String>,
+            _facet: Option<String>,
+            _id_search_facet: Option<String>,
+            _newznab_categories: Option<Vec<String>>,
+            _indexer_routing: Option<IndexerRoutingPlan>,
+            _mode: SearchMode,
+            _operation: IndexerErrorOperation,
+            _season: Option<u32>,
+            _episode: Option<u32>,
+            _absolute_episode: Option<u32>,
+            _year: Option<i32>,
+            _tagged_aliases: Vec<scryer_domain::TaggedAlias>,
+            _learning_context: Option<IndexerSearchLearningContext>,
+            _cancel_token: CancellationToken,
+        ) -> AppResult<IndexerSearchResponse> {
+            response_with_titles(&[])
+        }
+
+        async fn search_strategy(
+            &self,
+            request: IndexerSearchStrategyRequest,
+            _mode: SearchMode,
+            _operation: IndexerErrorOperation,
+            _cancel_token: CancellationToken,
+        ) -> AppResult<IndexerSearchResponse> {
+            let call = RecordedCall {
+                query: request.query.clone(),
+                ids: request.ids.clone(),
+                category: request.category.clone(),
+                facet: request.facet.clone(),
+                categories: request.newznab_categories.clone().unwrap_or_default(),
+                season: request.season,
+                episode: request.episode,
+                absolute_episode: request.absolute_episode,
+                rss_catch_up: None,
+                limit: None,
+                page_cursor: request.page_cursor.clone(),
+                page_budget: request.page_budget,
+            };
+            let budget = request.page_budget.unwrap_or(100);
+            let fresh = request.page_cursor.is_none();
+            let mut cursor = request.page_cursor.clone();
+            let mut titles = Vec::new();
+            let mut pages = 0_u32;
+            let finish = |titles: &[String], next: Option<String>, completion| {
+                let titles = titles.iter().map(String::as_str).collect::<Vec<_>>();
+                let mut response = response_with_titles(&titles)?;
+                response.next_cursor = next;
+                response.completion = completion;
+                Ok(response)
+            };
+            loop {
+                let (page, next) = (self.page)(&call, cursor.as_deref());
+                self.fetches
+                    .lock()
+                    .expect("fetch log")
+                    .push(ListingPageFetch {
+                        season: request.season,
+                        episode: request.episode,
+                        query: request.query.clone(),
+                        cursor: cursor.clone(),
+                        gated: request.first_page_gate.is_some(),
+                        budget: request.page_budget,
+                    });
+                pages += 1;
+                titles.extend(page.iter().cloned());
+                if fresh
+                    && pages == 1
+                    && let Some(gate) = request.first_page_gate.as_ref()
+                    && let Some(fingerprint) = scryer_application::indexer_listing_page_fingerprint(
+                        page.iter()
+                            .map(|title| [None, None, None, Some(title.as_str())]),
+                    )
+                    && let IndexerFirstPageVerdict::Stop { listing_open } =
+                        gate.verdict(fingerprint).await
+                {
+                    let completion = if listing_open {
+                        IndexerSearchCompletion::Partial {
+                            reason: None,
+                            retry_after: None,
+                        }
+                    } else {
+                        IndexerSearchCompletion::Complete
+                    };
+                    return finish(&titles, None, completion);
+                }
+                match next {
+                    None => return finish(&titles, None, IndexerSearchCompletion::Complete),
+                    Some(next) if pages >= budget => {
+                        return finish(
+                            &titles,
+                            Some(next),
+                            IndexerSearchCompletion::Partial {
+                                reason: None,
+                                retry_after: None,
+                            },
+                        );
+                    }
+                    Some(next) => cursor = Some(next),
+                }
+            }
+        }
+    }
+
+    /// A search client over one listing indexer backed by the real search
+    /// learning store.
+    async fn listing_search_client(
+        page: impl Fn(&RecordedCall, Option<&str>) -> (Vec<String>, Option<String>)
+        + Send
+        + Sync
+        + 'static,
+    ) -> (
+        MultiIndexerSearchClient,
+        StdArc<StdMutex<Vec<ListingPageFetch>>>,
+        sqlx::SqlitePool,
+    ) {
+        let (store, pool) = super::super::search_learning::tests::sqlite_store().await;
+        let fetches = StdArc::new(StdMutex::new(Vec::new()));
+        let client = Arc::new(ListingIndexerClient {
+            fetches: fetches.clone(),
+            page: StdArc::new(page),
+        });
+        let multi = MultiIndexerSearchClient::new(
+            Arc::new(MockIndexerConfigRepository {
+                configs: vec![mock_indexer_config()],
+            }),
+            Arc::new(MockIndexerStatsTracker),
+            Arc::new(ScriptedIndexerPluginProvider {
+                client,
+                caps: series_caps(),
+            }),
+        )
+        .with_search_learning_repository(StdArc::new(store));
+        (multi, fetches, pool)
+    }
+
+    fn harbor(season: u32, episode: u32) -> String {
+        format!("Quiet.Harbor.S{season:02}E{episode:02}.1080p.WEB-DL")
+    }
+
+    /// A title-level listing of one release per page, `pages` pages long,
+    /// given for every scope the indexer is asked.
+    fn title_level_pages(
+        pages: u32,
+    ) -> impl Fn(&RecordedCall, Option<&str>) -> (Vec<String>, Option<String>) + Send + Sync + 'static
+    {
+        move |call, cursor| {
+            if !call.query.trim().is_empty() {
+                return (Vec::new(), None);
+            }
+            let page = cursor
+                .and_then(|cursor| cursor.strip_prefix('p'))
+                .and_then(|page| page.parse::<u32>().ok())
+                .unwrap_or(1);
+            let next = (page < pages).then(|| format!("p{}", page + 1));
+            (vec![harbor(1, page)], next)
+        }
+    }
+
+    async fn harbor_pass(
+        client: &MultiIndexerSearchClient,
+        mode: SearchMode,
+        background: bool,
+        session: &str,
+        (season, episode): (u32, u32),
+    ) -> IndexerSearchResponse {
+        <MultiIndexerSearchClient as IndexerClient>::search(
+            client,
+            format!("Quiet Harbor S{season:02}E{episode:02}"),
+            HashMap::from([("tvdb_id".to_string(), "70001".to_string())]),
+            Some("series".into()),
+            Some("series".into()),
+            None,
+            None,
+            None,
+            mode,
+            IndexerErrorOperation::AutomaticSearch,
+            Some(season),
+            Some(episode),
+            None,
+            None,
+            vec![],
+            Some(IndexerSearchLearningContext {
+                title_id: "title-1".into(),
+                facet: "series".into(),
+                subject_kind: ReleaseSearchSubjectKind::Episode,
+                search_session_id: session.into(),
+                background_value: None,
+                candidate_reuse_allowed: background,
+            }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("listing search should succeed")
+    }
+
+    async fn background_pass(
+        client: &MultiIndexerSearchClient,
+        session: &str,
+        scope: (u32, u32),
+    ) -> IndexerSearchResponse {
+        harbor_pass(client, SearchMode::Auto, true, session, scope).await
+    }
+
+    /// The id-lookup pages fetched since `from`, as (season, episode, cursor).
+    fn id_fetches(
+        fetches: &StdMutex<Vec<ListingPageFetch>>,
+        from: usize,
+    ) -> Vec<(Option<u32>, Option<u32>, Option<String>)> {
+        fetches.lock().expect("fetch log")[from..]
+            .iter()
+            .filter(|fetch| fetch.query.trim().is_empty())
+            .map(|fetch| (fetch.season, fetch.episode, fetch.cursor.clone()))
+            .collect()
+    }
+
+    fn fetched(fetches: &StdMutex<Vec<ListingPageFetch>>) -> usize {
+        fetches.lock().expect("fetch log").len()
+    }
+
+    fn result_titles(response: &IndexerSearchResponse) -> HashSet<String> {
+        response
+            .results
+            .iter()
+            .map(|result| result.title.clone())
+            .collect()
+    }
+
+    fn page_cursor(page: u32) -> Option<String> {
+        (page > 1).then(|| format!("p{page}"))
+    }
+
+    async fn listing_rows(pool: &sqlx::SqlitePool) -> Vec<(String, String, Option<String>, bool)> {
+        sqlx::query_as::<_, (String, String, Option<String>, bool)>(
+            "SELECT first_page_fingerprint, owner_scope_key, page_cursor, finished
+               FROM indexer_search_listings ORDER BY owner_scope_key",
+        )
+        .fetch_all(pool)
+        .await
+        .expect("listing rows")
+    }
+
+    #[tokio::test]
+    async fn a_scope_reading_another_scopes_listing_rides_its_chain_until_it_ends() {
+        let (client, fetches, _pool) = listing_search_client(title_level_pages(7)).await;
+
+        // The first scope owns the listing and reads a pass's worth of it.
+        let owner = background_pass(&client, "owner-1", (1, 1)).await;
+        assert_eq!(
+            id_fetches(&fetches, 0),
+            (1..=5)
+                .map(|page| (Some(1), Some(1), page_cursor(page)))
+                .collect::<Vec<_>>()
+        );
+        assert!(!owner.completion.is_complete());
+        assert!(result_titles(&owner).contains(&harbor(1, 1)));
+
+        // The second scope reads the same first page and stops there; the
+        // owner's chain answers it, and stays open while pages are left.
+        let asked = fetched(&fetches);
+        let follower = background_pass(&client, "follower-1", (1, 2)).await;
+        assert_eq!(id_fetches(&fetches, asked), vec![(Some(1), Some(2), None)]);
+        assert!(result_titles(&follower).contains(&harbor(1, 2)));
+        assert_eq!(
+            follower.completion,
+            IndexerSearchCompletion::Partial {
+                reason: None,
+                retry_after: None,
+            }
+        );
+
+        // A third scope of the season is served from the shared listing
+        // without asking the indexer at all.
+        let asked = fetched(&fetches);
+        let served = background_pass(&client, "served-1", (1, 3)).await;
+        assert!(id_fetches(&fetches, asked).is_empty());
+        assert!(result_titles(&served).contains(&harbor(1, 3)));
+        assert_eq!(
+            served.completion,
+            IndexerSearchCompletion::Partial {
+                reason: None,
+                retry_after: None,
+            }
+        );
+
+        // The owner reads on to the end of the listing.
+        let asked = fetched(&fetches);
+        let finished = background_pass(&client, "owner-2", (1, 1)).await;
+        assert_eq!(
+            id_fetches(&fetches, asked),
+            vec![
+                (Some(1), Some(1), page_cursor(6)),
+                (Some(1), Some(1), page_cursor(7))
+            ]
+        );
+        assert!(finished.completion.is_complete());
+
+        // Its readers are now answered in full, still without a fetch.
+        let asked = fetched(&fetches);
+        let follower = background_pass(&client, "follower-2", (1, 2)).await;
+        let served = background_pass(&client, "served-2", (1, 3)).await;
+        assert!(id_fetches(&fetches, asked).is_empty());
+        assert!(follower.completion.is_complete());
+        assert!(served.completion.is_complete());
+        assert!(result_titles(&follower).contains(&harbor(1, 2)));
+        assert!(result_titles(&served).contains(&harbor(1, 3)));
+        let late = background_pass(&client, "late-1", (1, 7)).await;
+        assert!(result_titles(&late).contains(&harbor(1, 7)));
+        assert!(id_fetches(&fetches, asked).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_listing_without_the_scopes_season_is_read_live_not_served() {
+        // A title-level listing that only holds season one.
+        let (client, fetches, _pool) = listing_search_client(title_level_pages(2)).await;
+        background_pass(&client, "s1e1", (1, 1)).await;
+        background_pass(&client, "s1e2", (1, 2)).await;
+
+        let asked = fetched(&fetches);
+        background_pass(&client, "s2e1", (2, 1)).await;
+        assert_eq!(
+            id_fetches(&fetches, asked),
+            vec![(Some(2), Some(1), None)],
+            "a scope the listing shows nothing of reads its own first page"
+        );
+
+        // A season-one scope is served from the listing.
+        let asked = fetched(&fetches);
+        background_pass(&client, "s1e2-again", (1, 2)).await;
+        background_pass(&client, "s1e3", (1, 3)).await;
+        assert!(id_fetches(&fetches, asked).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_season_sensitive_indexer_keeps_one_listing_per_season() {
+        let (client, fetches, pool) = listing_search_client(|call, _cursor| {
+            if !call.query.trim().is_empty() {
+                return (Vec::new(), None);
+            }
+            let season = call.season.unwrap_or(1);
+            (
+                (1..=3).map(|episode| harbor(season, episode)).collect(),
+                None,
+            )
+        })
+        .await;
+        for (session, scope) in [
+            ("s1e1", (1, 1)),
+            ("s1e2", (1, 2)),
+            ("s2e1", (2, 1)),
+            ("s2e2", (2, 2)),
+        ] {
+            background_pass(&client, session, scope).await;
+        }
+        let rows = listing_rows(&pool).await;
+        assert_eq!(rows.len(), 2, "rows: {rows:?}");
+        assert!(rows[0].1.ends_with(":1:1:-"), "rows: {rows:?}");
+        assert!(rows[1].1.ends_with(":2:1:-"), "rows: {rows:?}");
+        assert_ne!(rows[0].0, rows[1].0);
+
+        // Each season's later scopes are served from their own listing, and
+        // neither season's reads disturb the other's.
+        let asked = fetched(&fetches);
+        let s1 = background_pass(&client, "s1e3", (1, 3)).await;
+        let s2 = background_pass(&client, "s2e3", (2, 3)).await;
+        assert!(id_fetches(&fetches, asked).is_empty());
+        assert!(result_titles(&s1).contains(&harbor(1, 3)));
+        assert!(result_titles(&s2).contains(&harbor(2, 3)));
+        assert_eq!(listing_rows(&pool).await, rows);
+    }
+
+    #[tokio::test]
+    async fn a_reader_takes_over_an_idle_chain_from_its_cursor() {
+        let (client, fetches, pool) = listing_search_client(title_level_pages(7)).await;
+        background_pass(&client, "owner-1", (1, 1)).await;
+        background_pass(&client, "follower-1", (1, 2)).await;
+        // The owner leaves the walk: its chain goes idle with pages left.
+        sqlx::query("UPDATE indexer_search_listings SET advanced_at = ?")
+            .bind((Utc::now() - Duration::hours(2)).to_rfc3339())
+            .execute(&pool)
+            .await
+            .expect("listing should age");
+
+        let asked = fetched(&fetches);
+        let adopter = background_pass(&client, "adopter-1", (1, 3)).await;
+        assert_eq!(
+            id_fetches(&fetches, asked),
+            vec![
+                (Some(1), Some(3), page_cursor(6)),
+                (Some(1), Some(3), page_cursor(7))
+            ],
+            "the chain resumes where its owner stopped, not at page one"
+        );
+        assert!(adopter.completion.is_complete());
+        assert!(result_titles(&adopter).contains(&harbor(1, 3)));
+        let rows = listing_rows(&pool).await;
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].1.ends_with(":1:3:-"));
+        assert!(rows[0].3, "the adopted chain read to the end");
+
+        // The previous owner reads the listing it left.
+        let asked = fetched(&fetches);
+        let previous = background_pass(&client, "owner-2", (1, 1)).await;
+        assert!(id_fetches(&fetches, asked).is_empty());
+        assert!(previous.completion.is_complete());
+        assert!(result_titles(&previous).contains(&harbor(1, 1)));
+    }
+
+    #[tokio::test]
+    async fn interactive_and_operator_searches_never_meet_the_listing_gate() {
+        let (client, fetches, pool) = listing_search_client(title_level_pages(3)).await;
+        background_pass(&client, "owner-1", (1, 1)).await;
+        background_pass(&client, "follower-1", (1, 2)).await;
+        let rows = listing_rows(&pool).await;
+
+        for (mode, background, session) in [
+            (SearchMode::Interactive, false, "interactive-1"),
+            (SearchMode::Auto, false, "operator-1"),
+        ] {
+            let asked = fetched(&fetches);
+            let response = harbor_pass(&client, mode, background, session, (1, 3)).await;
+            let log = fetches.lock().expect("fetch log")[asked..].to_vec();
+            let id_pages = log
+                .iter()
+                .filter(|fetch| fetch.query.trim().is_empty())
+                .collect::<Vec<_>>();
+            assert_eq!(id_pages.len(), 3, "{session} reads the listing itself");
+            assert!(
+                id_pages
+                    .iter()
+                    .all(|fetch| !fetch.gated && fetch.budget.is_none())
+            );
+            assert!(result_titles(&response).contains(&harbor(1, 3)));
+        }
+        assert_eq!(
+            listing_rows(&pool).await,
+            rows,
+            "nothing they read is recorded"
+        );
     }
 }

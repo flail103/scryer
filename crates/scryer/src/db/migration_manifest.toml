@@ -3544,6 +3544,23 @@ file = "postgres/migrations/0313_indexer_facet_learning.sql"
 engine = "postgres"
 scope = "all"
 
+[[migration]]
+version = 314
+description = "indexer search listings"
+checksum_algo = "blake3"
+
+[[migration.steps]]
+kind = "sql"
+file = "migrations/0314_indexer_search_listings.sql"
+engine = "sqlite"
+scope = "all"
+
+[[migration.steps]]
+kind = "sql"
+file = "postgres/migrations/0314_indexer_search_listings.sql"
+engine = "postgres"
+scope = "all"
+
 [[baseline]]
 through_version = 254
 file = "baselines/0254_baseline.sql"

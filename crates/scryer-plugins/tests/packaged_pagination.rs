@@ -82,6 +82,7 @@ fn strategy(cursor: Option<String>) -> IndexerSearchStrategyRequest {
         page_cursor: cursor,
         page_budget: Some(2),
         result_limit: None,
+        first_page_gate: None,
     }
 }
 
