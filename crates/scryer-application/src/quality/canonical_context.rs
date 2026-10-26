@@ -15,6 +15,12 @@ use crate::quality_profile::CoverageSizeBasis;
 use crate::{AppUseCase, QualityProfile};
 use scryer_domain::Title;
 
+/// Catalog rows used to resolve and score a release's coverage.
+pub(crate) struct ReleaseCoverageCatalog<'a> {
+    pub episodes: &'a [scryer_domain::Episode],
+    pub collections: &'a [scryer_domain::Collection],
+}
+
 /// Owned scoring inputs for one title. Borrow a [`ScoringContext`] from it with
 /// [`ResolvedScoringContext::view`].
 pub(crate) struct ResolvedScoringContext {
@@ -950,8 +956,7 @@ impl AppUseCase {
         title: &Title,
         membership: &crate::acquisition::acquisition::ScopeMembership<'_>,
         context: &ResolvedScoringContext,
-        catalog_episodes: &[scryer_domain::Episode],
-        catalog_collections: &[scryer_domain::Collection],
+        catalog: ReleaseCoverageCatalog<'_>,
         include_recent_missing: bool,
     ) -> crate::AppResult<Vec<crate::admission::QueuedRelease>> {
         let recorded = self
@@ -959,8 +964,8 @@ impl AppUseCase {
                 title,
                 membership,
                 context,
-                catalog_episodes,
-                catalog_collections,
+                catalog.episodes,
+                catalog.collections,
                 include_recent_missing,
             )
             .await?;

@@ -461,8 +461,10 @@ async fn queued_grab_claims_merge_same_release_episode_coverage() {
             &title,
             &membership.view(),
             &context,
-            &[],
-            &[],
+            crate::quality::canonical_context::ReleaseCoverageCatalog {
+                episodes: &[],
+                collections: &[],
+            },
             true,
         )
         .await
@@ -18542,7 +18544,7 @@ async fn exercise_missing_download_recovery(fail_event_append: bool) {
     )));
 
     let reopened = scopes
-        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .list_acquisition_scope_states_for_title_ids(std::slice::from_ref(&row.title_id))
         .await
         .unwrap()
         .remove(0);
@@ -18681,7 +18683,7 @@ async fn exercise_missing_download_recovery(fail_event_append: bool) {
         Some("downloading".into())
     );
     let restored = scopes
-        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .list_acquisition_scope_states_for_title_ids(std::slice::from_ref(&row.title_id))
         .await
         .unwrap()
         .remove(0);
@@ -18707,7 +18709,7 @@ async fn exercise_missing_download_recovery(fail_event_append: bool) {
         "reappearance followed by absence starts a new event episode"
     );
     let missing_again = scopes
-        .list_acquisition_scope_states_for_title_ids(&[row.title_id.clone()])
+        .list_acquisition_scope_states_for_title_ids(std::slice::from_ref(&row.title_id))
         .await
         .unwrap()
         .remove(0);

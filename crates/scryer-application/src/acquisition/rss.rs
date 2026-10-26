@@ -3164,8 +3164,10 @@ impl AppUseCase {
                 title,
                 &membership.view(),
                 &scoring_context,
-                &catalog_episodes,
-                &catalog_collections,
+                crate::quality::canonical_context::ReleaseCoverageCatalog {
+                    episodes: &catalog_episodes,
+                    collections: &catalog_collections,
+                },
                 true,
             )
             .await
@@ -3231,8 +3233,10 @@ impl AppUseCase {
                         title,
                         &membership.view(),
                         &scoring_context,
-                        &catalog_episodes,
-                        &catalog_collections,
+                        crate::quality::canonical_context::ReleaseCoverageCatalog {
+                            episodes: &catalog_episodes,
+                            collections: &catalog_collections,
+                        },
                         true,
                     )
                     .await

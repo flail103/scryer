@@ -2177,8 +2177,10 @@ async fn commit_series_pack_proposal(
         let outcome = try_saved_candidates_with_trigger(
             app,
             anchor,
-            None,
-            Some(claimed_episode_ids),
+            SavedCandidateExclusions {
+                failed_release_title: None,
+                excluded_episode_ids: Some(claimed_episode_ids),
+            },
             dl_snapshot,
             now,
             initiated_by,
@@ -3621,8 +3623,7 @@ async fn process_single_target(
             item,
             episode.as_ref(),
             cycle,
-            &mut session.proposals,
-            !session.options.intent.is_interactive(),
+            session,
         )
         .await;
     }
@@ -3640,8 +3641,10 @@ async fn process_single_target(
         match try_saved_candidates_with_trigger(
             app,
             item,
-            None,
-            Some(&claimed_episode_ids),
+            SavedCandidateExclusions {
+                failed_release_title: None,
+                excluded_episode_ids: Some(&claimed_episode_ids),
+            },
             dl_snapshot,
             now,
             &session.options.initiated_by,
@@ -4926,8 +4929,7 @@ async fn propose_covered_episode_evidence(
     item: &AcquisitionScopeState,
     episode: Option<&Episode>,
     cycle: &BackgroundAcquisitionCycleCoordinator,
-    proposals: &mut Vec<GrabProposal>,
-    automatic: bool,
+    session: &mut TitleWalkSession,
 ) -> AppResult<()> {
     let title = &context.title;
     let Some(season) = episode
@@ -4956,7 +4958,7 @@ async fn propose_covered_episode_evidence(
             extras,
             false,
             &context.reads,
-            automatic,
+            !session.options.intent.is_interactive(),
         )
         .await?;
 
@@ -5005,7 +5007,7 @@ async fn propose_covered_episode_evidence(
     episode_ids.sort();
     episode_ids.dedup();
 
-    proposals.push(GrabProposal {
+    session.proposals.push(GrabProposal {
         stage: BackgroundAcquisitionWorkKind::Scope,
         episode_ids,
         season_key: None,

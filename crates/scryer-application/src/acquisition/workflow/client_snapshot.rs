@@ -2046,8 +2046,10 @@ pub(crate) async fn try_saved_candidates(
     try_saved_candidates_with_trigger(
         app,
         item,
-        failed_release_title,
-        excluded_episode_ids,
+        SavedCandidateExclusions {
+            failed_release_title,
+            excluded_episode_ids,
+        },
         dl_snapshot,
         now,
         initiated_by,
@@ -2056,16 +2058,25 @@ pub(crate) async fn try_saved_candidates(
     .await
 }
 
+/// Releases and episode scopes the saved-candidate walk must leave alone.
+pub(crate) struct SavedCandidateExclusions<'a> {
+    pub failed_release_title: Option<&'a str>,
+    pub excluded_episode_ids: Option<&'a HashSet<String>>,
+}
+
 pub(crate) async fn try_saved_candidates_with_trigger(
     app: &AppUseCase,
     item: &AcquisitionScopeState,
-    failed_release_title: Option<&str>,
-    excluded_episode_ids: Option<&HashSet<String>>,
+    exclusions: SavedCandidateExclusions<'_>,
     dl_snapshot: &DownloadClientSnapshot,
     now: &DateTime<Utc>,
     initiated_by: &DomainEventActor,
     trigger: super::pending::PendingGrabTrigger,
 ) -> StandbyRecoveryOutcome {
+    let SavedCandidateExclusions {
+        failed_release_title,
+        excluded_episode_ids,
+    } = exclusions;
     // A waiting row is already the chosen best candidate. Never claim a
     // lower-ranked standby release while the delay-promotion lane owns it.
     // A row the client refused is not that lane's (see

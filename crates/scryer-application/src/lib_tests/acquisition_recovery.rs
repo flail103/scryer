@@ -860,8 +860,10 @@ async fn missing_grab_keeps_saved_candidates_until_expiry_or_explicit_search() {
             crate::acquisition_workflow::try_saved_candidates_with_trigger(
                 &app,
                 &wanted,
-                None,
-                None,
+                crate::acquisition_workflow::SavedCandidateExclusions {
+                    failed_release_title: None,
+                    excluded_episode_ids: None,
+                },
                 &snapshot,
                 &now,
                 &crate::domain_events::DomainEventActor::system(),

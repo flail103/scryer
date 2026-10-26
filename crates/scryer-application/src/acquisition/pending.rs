@@ -443,8 +443,10 @@ impl AppUseCase {
             title,
             &membership.view(),
             context,
-            catalog_episodes,
-            catalog_collections,
+            crate::quality::canonical_context::ReleaseCoverageCatalog {
+                episodes: catalog_episodes,
+                collections: catalog_collections,
+            },
             include_recent_missing,
         )
         .await
