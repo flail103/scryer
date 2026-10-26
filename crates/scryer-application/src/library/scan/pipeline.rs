@@ -299,7 +299,7 @@ async fn run_library_scan_pipeline_with_discovery(
         discovered,
     )?;
 
-    let worker_handle = tokio::spawn(run_scan_match_worker(
+    let worker_handle = app.restore_coordinator().spawn_task(run_scan_match_worker(
         ScanMatchWorkerContext {
             app: app.clone(),
             actor: actor.clone(),
@@ -1838,33 +1838,37 @@ fn spawn_candidate_jobs(
     ctx: CandidateJobContext,
     discovered: Option<TitleBoundaryBatchReceiver>,
 ) -> AppResult<tokio::task::JoinHandle<AppResult<()>>> {
-    Ok(tokio::spawn(async move {
-        let result = match (ctx.kind, discovered) {
-            (LibraryScanPipelineKind::Movie, Some(discovered)) => {
-                run_movie_candidate_jobs_from_discovery(&ctx, discovered).await
+    Ok(ctx
+        .app
+        .restore_coordinator()
+        .clone()
+        .spawn_task(async move {
+            let result = match (ctx.kind, discovered) {
+                (LibraryScanPipelineKind::Movie, Some(discovered)) => {
+                    run_movie_candidate_jobs_from_discovery(&ctx, discovered).await
+                }
+                (LibraryScanPipelineKind::Series, Some(discovered)) => {
+                    run_series_candidate_jobs_from_discovery(
+                        &ctx,
+                        PathBuf::from(&ctx.library_path),
+                        discovered,
+                    )
+                    .await
+                }
+                (LibraryScanPipelineKind::Movie, None) => run_movie_candidate_jobs(&ctx).await,
+                (LibraryScanPipelineKind::Series, None) => run_series_candidate_jobs(&ctx).await,
+            };
+            if let Err(error) = &result {
+                let _ = ctx
+                    .candidate_events
+                    .send(ScanCandidateJobEvent::DiscoveryFailed {
+                        error: AppError::Repository(format!(
+                            "library scan candidate producer failed: {error}"
+                        )),
+                    });
             }
-            (LibraryScanPipelineKind::Series, Some(discovered)) => {
-                run_series_candidate_jobs_from_discovery(
-                    &ctx,
-                    PathBuf::from(&ctx.library_path),
-                    discovered,
-                )
-                .await
-            }
-            (LibraryScanPipelineKind::Movie, None) => run_movie_candidate_jobs(&ctx).await,
-            (LibraryScanPipelineKind::Series, None) => run_series_candidate_jobs(&ctx).await,
-        };
-        if let Err(error) = &result {
-            let _ = ctx
-                .candidate_events
-                .send(ScanCandidateJobEvent::DiscoveryFailed {
-                    error: AppError::Repository(format!(
-                        "library scan candidate producer failed: {error}"
-                    )),
-                });
-        }
-        result
-    }))
+            result
+        }))
 }
 
 enum EvidenceJobOutput {

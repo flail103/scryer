@@ -840,6 +840,7 @@ struct IndexerErrorConnectionPayload {
 #[derive(MergedObject, Default)]
 /// Read-only GraphQL query root for authenticated HTTP requests.
 pub struct QueryRoot(
+    scryer_interface_system::BackupQueries,
     CatalogQueries,
     ActivityQueries,
     JobAndDownloadQueries,

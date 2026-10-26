@@ -165,11 +165,14 @@ impl AppUseCase {
     pub fn subscribe_events(&self) -> broadcast::Receiver<HistoryEvent> {
         let (tx, rx) = broadcast::channel(128);
         let app = self.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let mut wake_rx = app.runtime.events.domain_event_broadcast.subscribe();
             let mut cursor = 0_i64;
 
             loop {
+                if app.restore_coordinator().shutdown_workers.is_cancelled() {
+                    break;
+                }
                 let events = match app
                     .services
                     .events
@@ -178,7 +181,10 @@ impl AppUseCase {
                     .await
                 {
                     Ok(events) if !events.is_empty() => events,
-                    Ok(_) => match wake_rx.recv().await {
+                    Ok(_) => match tokio::select! {
+                        _ = app.restore_coordinator().shutdown_workers.cancelled() => break,
+                        event = wake_rx.recv() => event,
+                    } {
                         Ok(sequence) => {
                             if sequence > cursor {
                                 cursor = sequence.saturating_sub(1);

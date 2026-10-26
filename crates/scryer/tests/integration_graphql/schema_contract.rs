@@ -781,8 +781,11 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // Value-dependent indexer config fields add `pluginConfigFields`, the read
     // the indexer form repeats as trigger fields change: 194->195.
     assert!(query_field_names.contains(&"pluginConfigFields"));
+    // Background restore adds `restoreStatus`, the read a caller polls while
+    // the restore it started runs on its own: 195->196.
+    assert!(query_field_names.contains(&"restoreStatus"));
     assert_eq!(
-        query_field_count, 195,
+        query_field_count, 196,
         "query fields: {query_field_names:?}"
     );
     // First-class proxies (WP4) add one mutation, resetProxyHostKey: SSH host
@@ -829,8 +832,13 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // Episode-level Fix Match adds `reassignEpisodeFile`, which moves one
     // imported file to other episodes of its title: 273->274.
     assert!(mutation_field_names.contains(&"reassignEpisodeFile"));
+    // Background restore adds `startInspectRestoreBundle` and
+    // `startApplyRestoreBundle`, which return as soon as the work is accepted;
+    // the inline operations stay as compatibility wrappers: 274->276.
+    assert!(mutation_field_names.contains(&"startInspectRestoreBundle"));
+    assert!(mutation_field_names.contains(&"startApplyRestoreBundle"));
     assert_eq!(
-        mutation_field_count, 274,
+        mutation_field_count, 276,
         "mutation fields: {mutation_field_names:?}"
     );
     // Cross-library transfer (T082, FR-055/FR-056) surfaces destination-title
@@ -1187,12 +1195,15 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // Structured rule diagnostics share one object across release, request,
     // and maintenance validation: public types 972->973, OBJECT 526->527.
     assert!(public_type_names.contains(&"RuleValidationDiagnosticPayload"));
+    // Background restore adds the attempt it reports, `RestoreJobPayload`:
+    // public types 973->974, OBJECT 527->528.
+    assert!(public_type_names.contains(&"RestoreJobPayload"));
     assert_eq!(
         public_types.len(),
-        973,
+        974,
         "public types: {public_type_names:?}"
     );
-    assert_eq!(kind_count("OBJECT"), 527);
+    assert_eq!(kind_count("OBJECT"), 528);
     assert_eq!(kind_count("INPUT_OBJECT"), 238);
     assert_eq!(kind_count("ENUM"), 196);
     assert_eq!(kind_count("SCALAR"), 10);

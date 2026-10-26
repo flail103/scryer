@@ -20651,7 +20651,7 @@ type MutationRoot {
 	Inspect and stage an uploaded restore bundle while setup mode is active.
 	The returned upload ID remains temporary and must be supplied to the apply operation.
 	"""
-	inspectRestoreBundle(
+	startInspectRestoreBundle(
 		"""
 		Backup bundle supplied through GraphQL multipart upload.
 		"""
@@ -20660,9 +20660,35 @@ type MutationRoot {
 		Bundle password; null or blank selects an unencrypted bundle.
 		"""
 		password: String
+	): RestoreJobPayload!
+	"""
+	Compatibility operation; accepted work survives a disconnected caller.
+	"""
+	inspectRestoreBundle(
+		"""
+		Backup bundle supplied through GraphQL multipart upload.
+		"""
+		bundleUpload: Upload!,
+		"""
+		Bundle password; null selects an unencrypted bundle.
+		"""
+		password: String
 	): RestoreInspectPayload!
 	"""
 	Stage an inspected restore bundle for application on restart and schedule that restart.
+	"""
+	startApplyRestoreBundle(
+		"""
+		Temporary upload ID returned by inspectRestoreBundle.
+		"""
+		uploadId: ID!,
+		"""
+		Bundle password; null or blank selects an unencrypted bundle.
+		"""
+		password: String
+	): RestoreJobPayload!
+	"""
+	Compatibility operation; restoration is owned by the coordinator.
 	"""
 	applyRestoreBundle(
 		"""
@@ -20670,7 +20696,7 @@ type MutationRoot {
 		"""
 		uploadId: ID!,
 		"""
-		Bundle password; null or blank selects an unencrypted bundle.
+		Bundle password; null selects an unencrypted bundle.
 		"""
 		password: String
 	): RestoreApplyPayload!
@@ -23526,6 +23552,10 @@ type QualityProfileSettingsPayload {
 Read-only GraphQL query root for authenticated HTTP requests.
 """
 type QueryRoot {
+	"""
+	Observe the current restore without extending its deadline or starting work.
+	"""
+	restoreStatus: RestoreJobPayload
 	"""
 	List a permission-filtered title catalog page with optional facet, filter, search, sort, and pagination controls.
 	"""
@@ -26771,6 +26801,53 @@ type RestoreInspectPayload {
 	Inspected backup contents and source metadata.
 	"""
 	summary: RestoreSummaryPayload!
+}
+
+"""
+An independently owned restore attempt and its current processing phase.
+"""
+type RestoreJobPayload {
+	"""
+	Stable identifier for this accepted attempt.
+	"""
+	id: ID!
+	"""
+	Staged upload associated with this attempt.
+	"""
+	uploadId: ID!
+	"""
+	Whether this attempt inspects or applies the backup.
+	"""
+	kind: String!
+	"""
+	Current processing or recovery phase.
+	"""
+	phase: String!
+	"""
+	UTC time when the processing budget began.
+	"""
+	startedAt: DateTime!
+	"""
+	Original UTC deadline, preserved through restart.
+	"""
+	expiresAt: DateTime!
+	"""
+	Stable failure reason code, if processing stopped.
+	"""
+	reason: String
+	"""
+	Server sentence for the failure, when this process observed it; clients
+	translate `reason` and show this only for a code they do not know.
+	"""
+	message: String
+	"""
+	Approximate database import percentage; 100 still requires finalization.
+	"""
+	importPercent: Int
+	"""
+	Inspected contents when available; never contains backup secrets.
+	"""
+	summary: RestoreSummaryPayload
 }
 
 """

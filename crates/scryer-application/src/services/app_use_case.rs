@@ -14,6 +14,16 @@ pub struct AppUseCase {
 }
 
 impl AppUseCase {
+    /// Shared restore ownership for host admission and background processing.
+    pub fn restore_coordinator(&self) -> &Arc<crate::RestoreCoordinator> {
+        &self.runtime.jobs.restore
+    }
+
+    /// Install startup-recovered ownership before sharing this application.
+    pub fn install_restore_coordinator(&mut self, coordinator: Arc<crate::RestoreCoordinator>) {
+        self.runtime.jobs.restore = coordinator;
+    }
+
     /// Install the executable-host restart callback used by application upgrades.
     pub fn set_application_upgrade_restart_handle(
         &self,

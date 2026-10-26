@@ -1038,7 +1038,7 @@ impl AppUseCase {
         let app = self.clone();
         let actor = actor.clone();
         let session_id = session.session_id.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let request = StartedLibraryScanRequest {
                 actor,
                 facet: facet.clone(),
@@ -1115,7 +1115,7 @@ impl AppUseCase {
         let session_id = session.session_id.clone();
         let facet = library.facet.clone();
         let library_id = library.id.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let request = StartedLibraryScanRequest {
                 actor,
                 facet: facet.clone(),

@@ -1,4 +1,3 @@
-import { userFacingGraphQlErrorMessage } from '../../lib/graphql/error-message.ts';
 import * as React from "react";
 import { DatabaseBackup, LockKeyhole, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,10 +22,13 @@ import { getAuthToken } from "@/lib/hooks/use-auth";
 import { getRuntimeBasePath, getRuntimeGraphqlUrl } from "@/lib/runtime-config";
 import { cn } from "@/lib/utils";
 import { LoadingMark } from "@/components/common/loading-mark";
+import { restoreErrorMessage, restoreJobError } from "@/lib/utils/restore-error-message";
 
 const INSPECT_RESTORE_BUNDLE_OPERATION = `
   mutation InspectRestoreBundle($bundleUpload: Upload!, $password: String) {
-    inspectRestoreBundle(bundleUpload: $bundleUpload, password: $password) {
+    inspectRestoreBundle: startInspectRestoreBundle(bundleUpload: $bundleUpload, password: $password) {
+      id
+      phase
       uploadId
       summary {
         formatVersion
@@ -47,10 +49,8 @@ const INSPECT_RESTORE_BUNDLE_OPERATION = `
 
 const APPLY_RESTORE_BUNDLE_OPERATION = `
   mutation ApplyRestoreBundle($uploadId: ID!, $password: String) {
-    applyRestoreBundle(uploadId: $uploadId, password: $password) {
-      summary {
-        formatVersion
-      }
+    applyRestoreBundle: startApplyRestoreBundle(uploadId: $uploadId, password: $password) {
+      id
     }
   }
 `;
@@ -69,29 +69,32 @@ type RestoreSummaryPayload = {
   totalRows: number;
 };
 
+type GraphQlErrorEntry = {
+  message: string;
+  extensions?: Record<string, unknown>;
+};
+
 type RestoreInspectResponse = {
   data?: {
     inspectRestoreBundle?: {
+      id: string;
+      phase: string;
       uploadId: string;
-      summary: RestoreSummaryPayload;
+      reason?: string | null;
+      message?: string | null;
+      summary: RestoreSummaryPayload | null;
     } | null;
   };
-  errors?: Array<{
-    message: string;
-  }>;
+  errors?: GraphQlErrorEntry[];
 };
 
 type RestoreApplyResponse = {
   data?: {
     applyRestoreBundle?: {
-      summary: {
-        formatVersion: string;
-      };
+      id: string;
     } | null;
   };
-  errors?: Array<{
-    message: string;
-  }>;
+  errors?: GraphQlErrorEntry[];
 };
 
 interface SetupRestoreViewProps {
@@ -100,7 +103,6 @@ interface SetupRestoreViewProps {
     values?: Record<string, string | number | boolean | null | undefined>,
   ) => string;
   onBack: () => void;
-  onBackendRestarting: () => void;
 }
 
 function buildFrontendUrl(path: string): string {
@@ -124,10 +126,20 @@ function createAuthHeaders(init?: HeadersInit): Headers {
   return headers;
 }
 
-function graphqlErrorMessage(
-  payload: { errors?: Array<{ message: string }> } | undefined,
-): string | null {
-  return payload?.errors?.find((entry) => entry.message.trim())?.message.trim() ?? null;
+/**
+ * A failed request in the shape the shared GraphQL error translation reads, so
+ * its reason codes stay beside the server's sentence.
+ */
+function graphqlRequestError(
+  payload: { errors?: GraphQlErrorEntry[] } | undefined,
+  fallback: string,
+): Error {
+  const errors = payload?.errors?.filter((entry) => entry.message.trim()) ?? [];
+  const error = new Error(errors[0]?.message.trim() ?? fallback) as Error & {
+    graphQLErrors: GraphQlErrorEntry[];
+  };
+  error.graphQLErrors = errors;
+  return error;
 }
 
 async function parseJsonResponse<T>(response: Response): Promise<T | undefined> {
@@ -137,6 +149,57 @@ async function parseJsonResponse<T>(response: Response): Promise<T | undefined> 
   }
 
   return JSON.parse(text) as T;
+}
+
+const INSPECTION_ATTEMPT_KEY = "scryer_restore_inspection_attempt";
+
+async function waitForInspection(id: string, fallback: string, signal: AbortSignal) {
+  for (;;) {
+    signal.throwIfAborted();
+    const response = await scryerFetch(graphqlUrl(), {
+      method: "POST",
+      signal,
+      headers: createAuthHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ query: `query RestoreInspectionStatus {
+        inspectRestoreBundle: restoreStatus {
+          id phase uploadId reason message
+          summary { formatVersion createdAt sourceScryerVersion sourceEngine sourceMigrationKey
+            encrypted totalRows rowCounts { table rowCount } }
+        }
+      }` }),
+    });
+    const payload = await parseJsonResponse<RestoreInspectResponse>(response);
+    if (!response.ok || payload?.errors?.length) {
+      throw graphqlRequestError(payload, fallback);
+    }
+    const job = payload?.data?.inspectRestoreBundle;
+    if (!job || job.id !== id) {
+      // The server no longer knows this attempt (or has started another), so
+      // a reload must not resume waiting for it.
+      sessionStorage.removeItem(INSPECTION_ATTEMPT_KEY);
+      throw restoreJobError(
+        { reason: "RESTORE_ATTEMPT_NOT_FOUND", message: null },
+        fallback,
+      );
+    }
+    if (["complete", "failed", "interrupted"].includes(job.phase)) {
+      sessionStorage.removeItem(INSPECTION_ATTEMPT_KEY);
+      if (job.phase === "complete" && job.summary) return job;
+      throw restoreJobError(
+        { reason: job.reason ?? null, message: job.message ?? null },
+        fallback,
+      );
+    }
+    await new Promise<void>((resolve, reject) => {
+      const cancel = () => { window.clearTimeout(timer); reject(signal.reason); };
+      const timer = window.setTimeout(() => {
+        signal.removeEventListener("abort", cancel);
+        resolve();
+      }, 1000);
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+  }
 }
 
 function formatDateTime(value: string): string {
@@ -150,7 +213,6 @@ function formatDateTime(value: string): string {
 export function SetupRestoreView({
   t,
   onBack,
-  onBackendRestarting,
 }: SetupRestoreViewProps) {
   const [selectedBundle, setSelectedBundle] = React.useState<File | null>(null);
   const [password, setPassword] = React.useState("");
@@ -162,6 +224,27 @@ export function SetupRestoreView({
   const [summary, setSummary] = React.useState<RestoreSummaryPayload | null>(null);
   const [isDragActive, setIsDragActive] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const inspectionAbort = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    inspectionAbort.current = controller;
+    const id = sessionStorage.getItem(INSPECTION_ATTEMPT_KEY);
+    if (id) {
+      setInspecting(true);
+      void waitForInspection(id, t("status.failedToLoad"), controller.signal)
+        .then((job) => {
+          if (controller.signal.aborted) return;
+          setUploadId(job.uploadId);
+          setSummary(job.summary);
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) setError(restoreErrorMessage(error, t, t("status.failedToLoad")));
+        })
+        .finally(() => { if (!controller.signal.aborted) setInspecting(false); });
+    }
+    return () => inspectionAbort.current?.abort();
+  }, [t]);
 
   const bundleLooksEncrypted
     = selectedBundle?.name.toLowerCase().endsWith(".enc") ?? false;
@@ -202,6 +285,9 @@ export function SetupRestoreView({
 
     setInspecting(true);
     setError(null);
+    inspectionAbort.current?.abort();
+    const controller = new AbortController();
+    inspectionAbort.current = controller;
     try {
       const formData = new FormData();
       formData.append(
@@ -223,24 +309,21 @@ export function SetupRestoreView({
         body: formData,
       });
       const payload = await parseJsonResponse<RestoreInspectResponse>(response);
-      if (!response.ok) {
-        throw new Error(
-          graphqlErrorMessage(payload) ?? t("status.failedToLoad"),
-        );
-      }
       const result = payload?.data?.inspectRestoreBundle;
-      if (!result) {
-        throw new Error(graphqlErrorMessage(payload) ?? t("status.failedToLoad"));
+      if (!response.ok || !result) {
+        throw graphqlRequestError(payload, t("status.failedToLoad"));
       }
 
-      setUploadId(result.uploadId);
-      setSummary(result.summary);
+      sessionStorage.setItem(INSPECTION_ATTEMPT_KEY, result.id);
+      const inspected = await waitForInspection(result.id, t("status.failedToLoad"), controller.signal);
+      if (controller.signal.aborted) return;
+      setUploadId(inspected.uploadId);
+      setSummary(inspected.summary);
     } catch (nextError) {
-      setError(
-        userFacingGraphQlErrorMessage(nextError, t("status.failedToLoad"), t),
-      );
+      if (controller.signal.aborted) return;
+      setError(restoreErrorMessage(nextError, t, t("status.failedToLoad")));
     } finally {
-      setInspecting(false);
+      if (!controller.signal.aborted) setInspecting(false);
     }
   }, [password, requiresPassword, selectedBundle, t]);
 
@@ -266,24 +349,16 @@ export function SetupRestoreView({
         }),
       });
       const payload = await parseJsonResponse<RestoreApplyResponse>(response);
-      if (!response.ok) {
-        throw new Error(
-          graphqlErrorMessage(payload) ?? t("status.failedToUpdate"),
-        );
-      }
-      if (!payload?.data?.applyRestoreBundle) {
-        throw new Error(graphqlErrorMessage(payload) ?? t("status.failedToUpdate"));
+      if (!response.ok || !payload?.data?.applyRestoreBundle) {
+        throw graphqlRequestError(payload, t("status.failedToUpdate"));
       }
 
-      window.history.replaceState(null, "", buildFrontendUrl("/"));
-      onBackendRestarting();
+      window.location.replace(buildFrontendUrl("/"));
     } catch (nextError) {
       setApplying(false);
-      setError(
-        userFacingGraphQlErrorMessage(nextError, t("status.failedToUpdate"), t),
-      );
+      setError(restoreErrorMessage(nextError, t, t("status.failedToUpdate")));
     }
-  }, [onBackendRestarting, password, summary, t, uploadId]);
+  }, [password, summary, t, uploadId]);
 
   return (
     <SetupPanel className="w-full space-y-6 bg-[linear-gradient(180deg,rgba(12,18,35,0.82),rgba(8,13,26,0.72))]">

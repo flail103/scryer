@@ -3,7 +3,7 @@ fn maybe_trigger_subtitle_search(app: &AppUseCase, title_id: &str, media_file_id
     let app = app.clone();
     let title_id = title_id.to_string();
     let media_file_id = media_file_id.to_string();
-    tokio::spawn(async move {
+    app.restore_coordinator().clone().spawn_task(async move {
         let auto = app
             .subtitle_settings()
             .await
@@ -1217,8 +1217,12 @@ pub(crate) async fn run_claimed_download_cleanup(
                 == Some(crate::error_reasons::import::CLEANUP_LOCATOR_REUSED_IDENTITY_AMBIGUOUS);
             let abandon = permanent
                 || ambiguous
-                || (matches!(error, AppError::Validation(_) | AppError::ValidationRefused { .. } | AppError::ValidationRefusedWithCount { .. })
-                    && record.attempts >= HOST_PAYLOAD_CLEANUP_ATTEMPTS_BEFORE_ENTRY_REMOVAL);
+                || (matches!(
+                    error,
+                    AppError::Validation(_)
+                        | AppError::ValidationRefused { .. }
+                        | AppError::ValidationRefusedWithCount { .. }
+                ) && record.attempts >= HOST_PAYLOAD_CLEANUP_ATTEMPTS_BEFORE_ENTRY_REMOVAL);
             if abandon {
                 // A row that can never be attributed is a legacy artefact, not
                 // an incident: it holds no title scope and thousands of them
@@ -1327,7 +1331,13 @@ pub(crate) const CLEANUP_UNATTRIBUTED: &str = "cleanup has no valid routing attr
 pub(crate) const CLEANUP_INVALID_STATE: &str = "invalid durable cleanup state";
 
 fn cleanup_error_is_permanent(error: &AppError) -> bool {
-    matches!(error.validation_reason(), Some(crate::error_reasons::import::CLEANUP_STATE_INVALID | crate::error_reasons::import::CLEANUP_ATTRIBUTION_MISSING))
+    matches!(
+        error.validation_reason(),
+        Some(
+            crate::error_reasons::import::CLEANUP_STATE_INVALID
+                | crate::error_reasons::import::CLEANUP_ATTRIBUTION_MISSING
+        )
+    )
 }
 
 /// Delays a retryable cleanup failure is rescheduled with, in order: fast at
@@ -1420,7 +1430,9 @@ async fn resolve_import_quality_profile(
     })
     .await
     .map_err(|error| match error {
-        crate::AppError::Validation(_) | AppError::ValidationRefused { .. } | AppError::ValidationRefusedWithCount { .. } => error,
+        crate::AppError::Validation(_)
+        | AppError::ValidationRefused { .. }
+        | AppError::ValidationRefusedWithCount { .. } => error,
         other => crate::AppError::Repository(format!(
             "quality profile resolution temporarily unavailable: {other}"
         )),

@@ -130,7 +130,7 @@ impl AppUseCase {
             .await;
         let app = self.clone();
         let actor = actor.clone();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let id = run.id.clone();
             if let Err(error) = app
                 .run_score_refresh(&actor, run.clone(), selection, token)

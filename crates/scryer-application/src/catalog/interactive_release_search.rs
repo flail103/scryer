@@ -679,7 +679,7 @@ impl AppUseCase {
             );
         });
         let app = self.clone();
-        tokio::spawn(
+        self.restore_coordinator().spawn_task(
             async move {
                 app.run_interactive_release_search_job(context).await;
             }
