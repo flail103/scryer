@@ -1791,8 +1791,11 @@ mod grab_time_release_title_tests {
     async fn manual_queue_persists_the_indexer_release_title_on_the_submission_row() {
         let (base_app, user) = crate::lib_tests::bootstrap();
         let submissions = Arc::new(RecordingDownloadSubmissionRepo::default());
+        let scope_states = crate::lib_tests::in_memory_acquisition_scope_states();
         let app = base_app.with_test_overrides(|services| {
-            services.with_download_submissions(submissions.clone())
+            services
+                .with_download_submissions(submissions.clone())
+                .with_acquisition_scope_states(scope_states.clone())
         });
         let title = app
             .add_title(&user, movie_request("Paper Lantern"))
@@ -1829,6 +1832,17 @@ mod grab_time_release_title_tests {
             Some("Paper.Lantern.2012.1080p.WEB-DL-GRP"),
             "the indexer release title must be persisted (trimmed) at grab time"
         );
+        let grabbed = scope_states
+            .get_acquisition_scope_state_for_title(&title.id, None)
+            .await
+            .expect("read recorded grab")
+            .expect("manual submission records its scope");
+        assert_eq!(grabbed.status, crate::AcquisitionScopeStatus::Grabbed);
+        let record: serde_json::Value = serde_json::from_str(
+            grabbed.grabbed_release.as_deref().expect("recorded release"),
+        ).expect("parse recorded release");
+        assert_eq!(record["title"].as_str(), rows[0].source_title.as_deref());
+        assert_eq!(record["download_id"].as_str(), Some(rows[0].download_id.to_string().as_str()));
     }
 
     #[tokio::test]
@@ -1838,8 +1852,11 @@ mod grab_time_release_title_tests {
         // import degrades only the parsed name, see ReleaseEvidence).
         let (base_app, user) = crate::lib_tests::bootstrap();
         let submissions = Arc::new(RecordingDownloadSubmissionRepo::default());
+        let scope_states = crate::lib_tests::in_memory_acquisition_scope_states();
         let app = base_app.with_test_overrides(|services| {
-            services.with_download_submissions(submissions.clone())
+            services
+                .with_download_submissions(submissions.clone())
+                .with_acquisition_scope_states(scope_states.clone())
         });
 
         let (title, _job_id) = app
@@ -1868,5 +1885,16 @@ mod grab_time_release_title_tests {
         assert!(crate::import_parameters::submission_has_scryer_origin(
             &rows[0]
         ));
+        let grabbed = scope_states
+            .get_acquisition_scope_state_for_title(&title.id, None)
+            .await
+            .expect("read recorded grab")
+            .expect("source-only submission records its scope");
+        assert_eq!(grabbed.status, crate::AcquisitionScopeStatus::Grabbed);
+        let record: serde_json::Value = serde_json::from_str(
+            grabbed.grabbed_release.as_deref().expect("recorded release"),
+        ).expect("parse recorded release");
+        assert!(record.get("title").expect("title field is recorded").is_null());
+        assert_eq!(record["download_id"].as_str(), Some(rows[0].download_id.to_string().as_str()));
     }
 }

@@ -2093,10 +2093,12 @@ async fn an_assigned_grab_needs_only_title_management() {
         inner: app.services.integrations.download_client.clone(),
         requests: requests.clone(),
     });
+    let scope_states = in_memory_acquisition_scope_states();
     let app = app.with_test_overrides(|services| {
         services
             .with_download_client(listed)
             .with_download_submissions(Arc::new(TrackingDownloadSubmissionRepo::default()))
+            .with_acquisition_scope_states(scope_states.clone())
     });
 
     let clients = app
@@ -2139,6 +2141,20 @@ async fn an_assigned_grab_needs_only_title_management() {
         .expect("an assigned grab needs only ManageTitles");
     assert!(matches!(outcome, QueueDownloadOutcome::Queued(_)));
     assert_eq!(requests.lock().await.len(), 1);
+    let grabbed = scope_states
+        .get_acquisition_scope_state_for_title(&title.id, None)
+        .await
+        .expect("read assigned grab")
+        .expect("assigned submission records its scope");
+    assert_eq!(grabbed.status, AcquisitionScopeStatus::Grabbed);
+    let record: serde_json::Value = serde_json::from_str(
+        grabbed
+            .grabbed_release
+            .as_deref()
+            .expect("recorded release"),
+    )
+    .expect("parse recorded release");
+    assert_eq!(record["title"].as_str(), Some(release.title.as_str()));
 }
 
 // ── Download to browser ───────────────────────────────────────

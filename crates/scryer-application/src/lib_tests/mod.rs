@@ -118,6 +118,11 @@ use support_indexers_metadata::*;
 use support_library_show::*;
 use support_settings_scan::*;
 
+/// An isolated writable acquisition ledger for fixtures that record grabs.
+pub(crate) fn in_memory_acquisition_scope_states() -> Arc<dyn AcquisitionScopeStateRepository> {
+    Arc::new(TrackingAcquisitionScopeStateRepo::default())
+}
+
 /// Answer a movie `titles` request the way SMG answers it for TVDB-backed
 /// movies, from a test double's TVDB-keyed bulk answer. A ref without a TVDB
 /// id, or one the double has no movie for, is reported missing.

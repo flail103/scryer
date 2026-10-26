@@ -4777,6 +4777,9 @@ enum DomainEventTypeValue {
 	A download was ignored.
 	"""
 	DOWNLOAD_IGNORED
+	"""
+	A successful client listing omitted an accepted download.
+	"""
 	DOWNLOAD_MISSING
 	"""
 	A release was blocklisted.
@@ -30481,6 +30484,9 @@ enum TitleHistoryEventTypeValue {
 	Download was ignored.
 	"""
 	DOWNLOAD_IGNORED
+	"""
+	A successful client listing omitted an accepted download.
+	"""
 	DOWNLOAD_MISSING
 	"""
 	Title or file was rematched.

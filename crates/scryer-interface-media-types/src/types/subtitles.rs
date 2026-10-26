@@ -243,6 +243,7 @@ pub enum TitleHistoryEventTypeValue {
     TitleMoved,
     /// Download was ignored.
     DownloadIgnored,
+    /// A successful client listing omitted an accepted download.
     DownloadMissing,
     /// Title or file was rematched.
     Rematched,
