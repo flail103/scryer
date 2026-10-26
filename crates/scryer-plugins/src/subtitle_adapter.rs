@@ -967,6 +967,8 @@ fn audio_codec_matches(left: Option<&str>, parsed: &ParsedReleaseMetadata) -> bo
 }
 
 fn guest_input_path(input_path: &Path) -> AppResult<PathBuf> {
+    // The SDK field is a `PathBuf`, but its contents are the guest's
+    // `/`-separated spelling, never a host join.
     let file_name = input_path.file_name().ok_or_else(|| {
         AppError::validation_refused(
             crate::error_reasons::PLUGIN_SUBTITLE_INPUT_FILENAME_REQUIRED,
@@ -976,12 +978,32 @@ fn guest_input_path(input_path: &Path) -> AppResult<PathBuf> {
             ),
         )
     })?;
-    Ok(Path::new(GUEST_INPUT_ROOT).join(file_name))
+    Ok(PathBuf::from(crate::guest_path::guest_child_path(
+        GUEST_INPUT_ROOT,
+        Path::new(file_name),
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generator_input_guest_path_uses_forward_slashes_on_every_host() {
+        let host_path = std::env::temp_dir()
+            .join("Synthetic Library")
+            .join("synthetic-feature.mkv");
+        let guest = guest_input_path(&host_path).expect("guest path");
+        assert_eq!(guest.to_str(), Some("/input/synthetic-feature.mkv"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn generator_input_guest_path_from_a_windows_path_uses_forward_slashes() {
+        let guest = guest_input_path(Path::new(r"C:\Synthetic Library\synthetic-feature.mkv"))
+            .expect("guest path");
+        assert_eq!(guest.to_str(), Some("/input/synthetic-feature.mkv"));
+    }
 
     #[test]
     fn a_failed_subtitle_call_names_the_plugin_reason() {

@@ -9,6 +9,7 @@ use scryer_plugin_sdk::{
     ArchivePluginProcessResponse, PluginDescriptor,
 };
 
+use crate::guest_path::guest_child_path;
 use crate::runtime_backing::{PluginInstanceSpec, PluginRuntimeBacking, PreopenSpec};
 use crate::wasmtime_host::ArchiveInvocation;
 use crate::wasmtime_host::archive_component_host::process_archive_component_with_limits;
@@ -267,21 +268,6 @@ fn map_child_path(root: &Path, path: &Path) -> AppResult<String> {
         ));
     }
     Ok(guest_child_path(GUEST_SOURCE_ROOT, relative))
-}
-
-/// A guest path under `root`. Guest paths are always `/`-separated: the
-/// guest's libc matches a path to its preopen on `/` alone, so a host
-/// separator such as Windows' `\` leaves the path matching no preopen and
-/// the guest reports the file missing.
-fn guest_child_path(root: &str, relative: &Path) -> String {
-    let mut guest_path = root.trim_end_matches('/').to_string();
-    for component in relative.components() {
-        if let std::path::Component::Normal(part) = component {
-            guest_path.push('/');
-            guest_path.push_str(&part.to_string_lossy());
-        }
-    }
-    guest_path
 }
 
 fn is_safe_relative_plugin_path(path: &Path) -> bool {

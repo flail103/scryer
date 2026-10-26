@@ -63,6 +63,7 @@ use scryer_plugin_sdk::{
     SubtitleSyncPluginResponse, SubtitleSyncRewrittenSubtitle,
 };
 
+use crate::guest_path::guest_child_path;
 use crate::runtime_backing::{PluginInstanceSpec, PluginRuntimeBacking, PreopenSpec};
 use crate::types::PluginDescriptor;
 use crate::wasmtime_host::command_host::CommandHost;
@@ -200,7 +201,7 @@ struct PreparedSubtitleSyncCommand {
     reference_dir: Option<tempfile::TempDir>,
     output_dir: tempfile::TempDir,
     scratch_dir: tempfile::TempDir,
-    guest_output_path: PathBuf,
+    guest_output_path: String,
     host_output_path: PathBuf,
 }
 
@@ -227,7 +228,8 @@ impl PreparedSubtitleSyncCommand {
                 host_subtitle_path.display()
             ))
         })?;
-        let guest_subtitle_path = Path::new(GUEST_SUBTITLE_ROOT).join(&subtitle_file_name);
+        let guest_subtitle_path =
+            guest_child_path(GUEST_SUBTITLE_ROOT, Path::new(&subtitle_file_name));
 
         let (reference_subtitle, reference_dir) = if let Some(reference) = job.reference_subtitle {
             let dir = tempfile::tempdir().map_err(|error| {
@@ -245,7 +247,10 @@ impl PreparedSubtitleSyncCommand {
             })?;
             (
                 Some(SubtitleSyncCommandSubtitleFile {
-                    path: Path::new(GUEST_REFERENCE_ROOT).join(&file_name),
+                    path: PathBuf::from(guest_child_path(
+                        GUEST_REFERENCE_ROOT,
+                        Path::new(&file_name),
+                    )),
                     format: reference.format,
                     file_name: reference.file_name,
                     encoding_hint: reference.encoding_hint,
@@ -268,21 +273,21 @@ impl PreparedSubtitleSyncCommand {
         })?;
         let output_file_name = format!("rewritten.{}", output_extension(&job.subtitle_format));
         let host_output_path = output_dir.path().join(&output_file_name);
-        let guest_output_path = Path::new(GUEST_OUTPUT_ROOT).join(&output_file_name);
+        let guest_output_path = guest_child_path(GUEST_OUTPUT_ROOT, Path::new(&output_file_name));
 
         let align = SubtitleSyncCommandAlignRequest {
             input: SubtitleSyncCommandInputFile {
-                path: guest_input_path,
+                path: PathBuf::from(guest_input_path),
             },
             subtitle: SubtitleSyncCommandSubtitleFile {
-                path: guest_subtitle_path,
+                path: PathBuf::from(guest_subtitle_path),
                 format: job.subtitle_format.clone(),
                 file_name: job.subtitle_file_name,
                 encoding_hint: job.subtitle_encoding_hint,
             },
             reference_subtitle,
             output: SubtitleSyncCommandOutputTarget {
-                path: guest_output_path.clone(),
+                path: PathBuf::from(&guest_output_path),
                 format: job.subtitle_format,
             },
             scratch_dir: PathBuf::from(GUEST_SCRATCH_ROOT),
@@ -381,7 +386,7 @@ impl PreparedSubtitleSyncCommand {
     }
 }
 
-fn guest_file_path(root: &str, host_path: &Path) -> AppResult<PathBuf> {
+fn guest_file_path(root: &str, host_path: &Path) -> AppResult<String> {
     let file_name = host_path.file_name().ok_or_else(|| {
         AppError::validation_refused(
             crate::error_reasons::PLUGIN_SUBTITLE_SYNC_FILENAME_REQUIRED,
@@ -391,7 +396,7 @@ fn guest_file_path(root: &str, host_path: &Path) -> AppResult<PathBuf> {
             ),
         )
     })?;
-    Ok(Path::new(root).join(file_name))
+    Ok(guest_child_path(root, Path::new(file_name)))
 }
 
 fn safe_guest_file_name(file_name: Option<&str>, fallback: &str) -> String {
@@ -419,9 +424,12 @@ fn output_extension(format: &str) -> String {
 
 fn validate_rewritten_output_path(
     rewritten: &SubtitleSyncCommandOutputSubtitle,
-    expected_path: &Path,
+    expected_path: &str,
 ) -> AppResult<()> {
-    if rewritten.path != expected_path {
+    // Compare the guest's own `/`-separated spelling: a host `Path`
+    // comparison would treat `\` as a separator on Windows and accept a path
+    // the guest never wrote.
+    if rewritten.path.as_os_str() != std::ffi::OsStr::new(expected_path) {
         return Err(AppError::validation_refused(
             crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_PATH_MISMATCH,
             format!(
@@ -543,7 +551,7 @@ mod tests {
         std::fs::write(&prepared.host_output_path, b"rewritten-subtitle-bytes")
             .expect("stage guest output");
 
-        let response = applied_response(prepared.guest_output_path.clone());
+        let response = applied_response(PathBuf::from(&prepared.guest_output_path));
         let port = prepared
             .align_response_to_port(response)
             .expect("port response");
@@ -572,7 +580,7 @@ mod tests {
         std::os::unix::fs::symlink(&secret_path, &prepared.host_output_path)
             .expect("create malicious symlink");
 
-        let response = applied_response(prepared.guest_output_path.clone());
+        let response = applied_response(PathBuf::from(&prepared.guest_output_path));
         let error = prepared
             .align_response_to_port(response)
             .expect_err("symlink escape must be rejected");
@@ -602,7 +610,7 @@ mod tests {
         std::fs::write(&real_path, b"contained").expect("write contained file");
         std::os::unix::fs::symlink(&real_path, &prepared.host_output_path).expect("create symlink");
 
-        let response = applied_response(prepared.guest_output_path.clone());
+        let response = applied_response(PathBuf::from(&prepared.guest_output_path));
         let error = prepared
             .align_response_to_port(response)
             .expect_err("symlink output must be rejected");
@@ -637,6 +645,77 @@ mod tests {
                 ("/scratch", true),
                 ("/subtitle", false),
             ]
+        );
+    }
+
+    fn align_request(prepared: &PreparedSubtitleSyncCommand) -> &SubtitleSyncCommandAlignRequest {
+        let SubtitleSyncPluginOperation::Align { request } = &prepared.request.operation else {
+            panic!("prepared command is an align request");
+        };
+        request
+    }
+
+    /// Every guest path in the align request is `/`-joined, even when the
+    /// host built the media path with its own separator.
+    #[test]
+    fn guest_paths_use_forward_slashes_on_every_host() {
+        let mut job = sample_job();
+        job.input_path = std::env::temp_dir()
+            .join("Synthetic Library")
+            .join("synthetic-feature.mkv");
+        job.subtitle_file_name = Some("synthetic-track.srt".to_string());
+        let prepared = PreparedSubtitleSyncCommand::new(job).expect("prepare command");
+        let align = align_request(&prepared);
+
+        let guest_paths = [
+            align.input.path.to_str().expect("utf-8 guest path"),
+            align.subtitle.path.to_str().expect("utf-8 guest path"),
+            align.output.path.to_str().expect("utf-8 guest path"),
+        ];
+        assert_eq!(
+            guest_paths,
+            [
+                "/input/synthetic-feature.mkv",
+                "/subtitle/synthetic-track.srt",
+                "/output/rewritten.srt",
+            ]
+        );
+        assert_eq!(prepared.guest_output_path, "/output/rewritten.srt");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn guest_paths_from_windows_names_use_forward_slashes() {
+        let mut job = sample_job();
+        job.input_path = PathBuf::from(r"C:\Synthetic Library\synthetic-feature.mkv");
+        job.subtitle_file_name = Some(r"C:\Synthetic Library\synthetic-track.srt".to_string());
+        let prepared = PreparedSubtitleSyncCommand::new(job).expect("prepare command");
+        let align = align_request(&prepared);
+        assert_eq!(
+            align.input.path.to_str(),
+            Some("/input/synthetic-feature.mkv")
+        );
+        assert_eq!(
+            align.subtitle.path.to_str(),
+            Some("/subtitle/synthetic-track.srt")
+        );
+    }
+
+    /// The reported path is checked against the guest's `/` spelling, so a
+    /// host-separated spelling of the same file is refused on every host.
+    #[test]
+    fn rewritten_path_with_a_host_separator_is_refused() {
+        let prepared = PreparedSubtitleSyncCommand::new(sample_job()).expect("prepare command");
+        std::fs::write(&prepared.host_output_path, b"rewritten-subtitle-bytes")
+            .expect("stage guest output");
+
+        let response = applied_response(PathBuf::from(r"/output\rewritten.srt"));
+        let error = prepared
+            .align_response_to_port(response)
+            .expect_err("host-separated path is refused");
+        assert_eq!(
+            error.validation_reason(),
+            Some(crate::error_reasons::PLUGIN_SUBTITLE_SYNC_OUTPUT_PATH_MISMATCH)
         );
     }
 
