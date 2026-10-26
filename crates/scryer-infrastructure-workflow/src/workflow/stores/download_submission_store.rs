@@ -6553,6 +6553,83 @@ mod seed_goal_tests {
         }
     }
 
+    // A claim carries the delay a directly preceding retryable failure was
+    // given, so the next failure can back off further; any other outcome in
+    // between starts the ladder again.
+    #[tokio::test]
+    async fn claim_carries_the_previous_failure_retry_delay() {
+        let store = store().await;
+        let id = DownloadId::new();
+        store
+            .record_submission_with_identity(
+                submission(id, "job-backoff", "title-1"),
+                submission_identity(id),
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .record_identity_tracked_state_for_download(
+                Some(&id),
+                &submission_identity(id),
+                Some(&identity()),
+                "imported",
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        // Brings the row due again while keeping the delay it was given.
+        async fn make_due(store: &DownloadSubmissionStore, id: DownloadId, delay: i64) {
+            let finished = Utc::now() - chrono::Duration::seconds(delay + 60);
+            SqlRuntime::execute_write(
+                &store.datastore,
+                "test_make_cleanup_due",
+                "UPDATE download_cleanup SET updated_at = {}, next_attempt_at = {} WHERE download_id = {}",
+                vec![
+                    SqlArg::Timestamp(finished),
+                    SqlArg::Timestamp(finished + chrono::Duration::seconds(delay)),
+                    SqlArg::Text(id.to_string()),
+                ],
+            )
+            .await
+            .unwrap();
+        }
+        let DownloadCleanupClaim::Claimed(first) = store.claim_download_cleanup(&id).await.unwrap()
+        else {
+            panic!("cleanup must be claimed");
+        };
+        assert_eq!(first.previous_failure_retry_seconds, None);
+        store
+            .finish_download_cleanup(
+                &id,
+                "cleanup_failed",
+                false,
+                3_600,
+                0,
+                Some("client offline"),
+            )
+            .await
+            .unwrap();
+        make_due(&store, id, 3_600).await;
+        let DownloadCleanupClaim::Claimed(retry) = store.claim_download_cleanup(&id).await.unwrap()
+        else {
+            panic!("the failed cleanup must be claimable once due");
+        };
+        assert_eq!(retry.previous_failure_retry_seconds, Some(3_600));
+        store
+            .finish_download_cleanup(&id, "seeding_hold", false, 300, 0, None)
+            .await
+            .unwrap();
+        make_due(&store, id, 300).await;
+        let DownloadCleanupClaim::Claimed(after_hold) =
+            store.claim_download_cleanup(&id).await.unwrap()
+        else {
+            panic!("the held cleanup must be claimable once due");
+        };
+        assert_eq!(after_hold.previous_failure_retry_seconds, None);
+    }
+
     #[tokio::test]
     async fn cleanup_intent_survives_retry_and_keeps_import_history() {
         let store = store().await;

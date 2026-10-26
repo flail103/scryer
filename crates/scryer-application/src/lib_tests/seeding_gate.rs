@@ -520,6 +520,7 @@ fn cleanup_record_for(tracked: &TrackedDownload) -> crate::DownloadCleanupRecord
         attempts: 1,
         history_offset: 0,
         payload_checkpoint: None,
+        previous_failure_retry_seconds: None,
     }
 }
 
@@ -753,10 +754,8 @@ async fn durable_torrent_cleanup_uses_frozen_info_hash_when_the_internal_name_di
         items[0].title_name = title.name.clone();
         drop(items);
         submissions.store.lock().await[0].info_hash = Some("a".repeat(40));
-        assert!(
-            crate::import::import::run_claimed_download_cleanup(&app, record, None)
-                .await
-                .is_none()
+        assert_cleanup_abandoned(
+            crate::import::import::run_claimed_download_cleanup(&app, record, None).await,
         );
         assert!(client.deleted_requests.lock().await.is_empty());
     }
@@ -797,10 +796,8 @@ async fn durable_cleanup_recovers_an_untrackable_import_and_rejects_a_reused_loc
     assert_eq!(client.deleted_requests.lock().await.len(), 1);
     client.history_items.lock().await[0].download_id =
         Some(scryer_domain::download_identity::DownloadId::new().to_wire());
-    assert!(
-        crate::import::import::run_claimed_download_cleanup(&app, record, None)
-            .await
-            .is_none()
+    assert_cleanup_abandoned(
+        crate::import::import::run_claimed_download_cleanup(&app, record, None).await,
     );
     assert_eq!(client.deleted_requests.lock().await.len(), 1);
 }
@@ -1791,10 +1788,8 @@ async fn cleanup_identity_survives_a_client_rewritten_job_name() {
 
     // A different release under the same locator is still refused.
     client.history_items.lock().await[0].title_name = "Some.Other.Release.2026".into();
-    assert!(
-        crate::import::import::run_claimed_download_cleanup(&app, record.clone(), None)
-            .await
-            .is_none()
+    assert_cleanup_abandoned(
+        crate::import::import::run_claimed_download_cleanup(&app, record.clone(), None).await,
     );
     assert!(client.deleted_requests.lock().await.is_empty());
 
@@ -2451,6 +2446,22 @@ async fn stored_client_payload(
         .map(str::to_owned)
 }
 
+/// An identity refusal abandons the row at once and leaves the entry alone.
+fn assert_cleanup_abandoned(
+    result: Option<(
+        scryer_domain::download_identity::DownloadId,
+        Option<TrackedDownload>,
+        crate::import::import::TerminalDownloadCleanup,
+    )>,
+) {
+    let (_, tracked, cleanup) = result.expect("an abandoned row settles");
+    assert!(tracked.is_none());
+    assert_eq!(
+        cleanup.outcome,
+        TerminalDownloadCleanupOutcome::NotConfigured
+    );
+}
+
 fn last_finished_cleanup(
     finished: &[(scryer_domain::download_identity::DownloadId, String, bool)],
 ) -> Option<(String, bool)> {
@@ -2620,6 +2631,126 @@ async fn a_failed_client_removal_retries_with_data_before_the_host_backup() {
         last_finished_cleanup(&repository.finished_cleanup.lock().await),
         Some(("payload_and_entry_removed".to_string(), true))
     );
+}
+
+// A client still finishing its own delete of the entry (Weaver holding the job
+// in an earlier history operation) is work in progress: the attempt sends
+// nothing more and settles for a long recheck. The recheck finds the entry
+// gone and settles without asking the client again.
+#[tokio::test(start_paused = true)]
+async fn a_client_still_deleting_the_entry_is_rechecked_later_and_never_asked_again() {
+    let (app, _user, client, repository, _config, tracked) =
+        client_failure_fixture("weaver", true).await;
+    *client.delete_app_error.lock().await = Some(AppError::temporary_unavailable_reason(
+        crate::error_reasons::acquisition::DOWNLOAD_CLIENT_DELETE_IN_PROGRESS,
+        "synthetic: an earlier delete still holds this job",
+        Some(std::time::Duration::from_secs(20 * 60)),
+    ));
+    let mut record = cleanup_record_for(&tracked);
+    let first = crate::import::import::run_claimed_download_cleanup(&app, record.clone(), None)
+        .await
+        .expect("the attempt reports its outcome");
+    assert_eq!(first.2, TerminalDownloadCleanupOutcome::RetryableFailure);
+    assert!(first.2.client_delete_in_progress);
+    assert_eq!(
+        last_finished_cleanup(&repository.finished_cleanup.lock().await),
+        Some(("client_delete_in_progress".to_string(), false))
+    );
+    let recheck = *repository
+        .finished_cleanup_retry_seconds
+        .lock()
+        .await
+        .last()
+        .expect("the attempt is rescheduled");
+    assert!(
+        (15 * 60..=30 * 60).contains(&recheck),
+        "recheck {recheck}s is outside 15-30 minutes"
+    );
+    assert_eq!(client.delete_attempts.lock().await.len(), 1);
+
+    // The client finished its delete: the entry is gone.
+    client.history_items.lock().await.clear();
+    record.payload_checkpoint = repository
+        .cleanup_checkpoints
+        .lock()
+        .await
+        .get(&record.download_id)
+        .cloned();
+    record.attempts = 2;
+    let second = crate::import::import::run_claimed_download_cleanup(&app, record, None)
+        .await
+        .expect("an absent entry settles");
+    assert_eq!(second.2, TerminalDownloadCleanupOutcome::AlreadyGone);
+    assert_eq!(
+        client.delete_attempts.lock().await.len(),
+        1,
+        "the delete is never re-issued"
+    );
+    let (outcome, complete) =
+        last_finished_cleanup(&repository.finished_cleanup.lock().await).unwrap();
+    assert!(complete);
+    assert_eq!(outcome, "native_removal_recovered");
+}
+
+// A locator whose identity cannot be confirmed is refused before anything
+// reaches the client, and waiting cannot prove it, so the row is abandoned at
+// the first refusal with the entry left where it is.
+#[tokio::test(start_paused = true)]
+async fn an_ambiguous_cleanup_locator_is_abandoned_at_the_first_refusal() {
+    let (app, _user, client, repository, _config, tracked) =
+        client_failure_fixture("sabnzbd", true).await;
+    // The client now reports the locator under another download's token.
+    client.history_items.lock().await[0].download_id =
+        Some(scryer_domain::download_identity::DownloadId::new().to_wire());
+    let record = cleanup_record_for(&tracked);
+    assert_eq!(record.attempts, 1);
+    let result = crate::import::import::run_claimed_download_cleanup(&app, record, None)
+        .await
+        .expect("an abandoned row settles");
+    assert_eq!(result.2, TerminalDownloadCleanupOutcome::NotConfigured);
+    assert_eq!(
+        last_finished_cleanup(&repository.finished_cleanup.lock().await),
+        Some(("cleanup_abandoned".to_string(), true))
+    );
+    assert!(client.delete_attempts.lock().await.is_empty());
+    assert!(client.deleted_requests.lock().await.is_empty());
+}
+
+// Consecutive retryable failures back off further each time.
+#[tokio::test(start_paused = true)]
+async fn repeated_client_removal_failures_back_off_further_each_time() {
+    let (app, _user, client, repository, _config, tracked) =
+        client_failure_fixture("sabnzbd", true).await;
+    client
+        .set_delete_error(Some("synthetic: client offline"))
+        .await;
+    let mut record = cleanup_record_for(&tracked);
+    let mut delays = Vec::new();
+    for attempt in 1..=8 {
+        record.attempts = attempt;
+        let result =
+            crate::import::import::run_claimed_download_cleanup(&app, record.clone(), None).await;
+        assert!(result.is_none_or(
+            |(_, _, cleanup)| cleanup == TerminalDownloadCleanupOutcome::RetryableFailure
+        ));
+        let delay = *repository
+            .finished_cleanup_retry_seconds
+            .lock()
+            .await
+            .last()
+            .unwrap();
+        // What the store hands the next claim after a failure.
+        record.previous_failure_retry_seconds = Some(delay);
+        record.payload_checkpoint = repository
+            .cleanup_checkpoints
+            .lock()
+            .await
+            .get(&record.download_id)
+            .cloned();
+        delays.push(delay);
+    }
+    assert_eq!(delays, [30, 60, 120, 240, 300, 3_600, 21_600, 21_600]);
+    assert!(client.deleted_requests.lock().await.is_empty());
 }
 
 // A retry that finds the entry gone runs the host backup from the location

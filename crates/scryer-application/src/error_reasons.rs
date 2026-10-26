@@ -1911,6 +1911,9 @@ pub mod acquisition {
     pub const SCOPE_NOT_FOUND: &str = "ACQUISITION_SCOPE_NOT_FOUND";
     /// Acquisition was paused while this search was waiting. Resume it before searching.
     pub const PAUSED_WHILE_SEARCH_WAITING: &str = "ACQUISITION_PAUSED_WHILE_SEARCH_WAITING";
+    /// The download client is still finishing an earlier operation that holds this entry, such as its own delete.
+    pub const DOWNLOAD_CLIENT_DELETE_IN_PROGRESS: &str =
+        "ACQUISITION_DOWNLOAD_CLIENT_DELETE_IN_PROGRESS";
     /// Every reason owned by this policy area.
     pub const ALL: &[&str] = &[
         SEARCH_RUNNING,
@@ -1956,6 +1959,7 @@ pub mod acquisition {
         MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING,
         SCOPE_NOT_FOUND,
         PAUSED_WHILE_SEARCH_WAITING,
+        DOWNLOAD_CLIENT_DELETE_IN_PROGRESS,
     ];
 }
 

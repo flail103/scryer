@@ -11449,6 +11449,10 @@ pub struct DownloadCleanupRecord {
     pub attempts: u32,
     pub history_offset: usize,
     pub payload_checkpoint: Option<String>,
+    /// When the previous attempt ended in a retryable failure, the delay it
+    /// was rescheduled with; `None` after any other outcome. Lets the next
+    /// failure back off further without counting holds and deferrals.
+    pub previous_failure_retry_seconds: Option<i64>,
 }
 
 /// The catalog references one download submission holds, exactly as stored.
