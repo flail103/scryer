@@ -2465,6 +2465,11 @@ where
 #[derive(Clone)]
 pub struct AppRuntimeIntegrationState {
     pub managed_indexer_sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Managed children whose caps a pass asked for and did not get, so the
+    /// next passes wait before asking again. In memory on purpose: a restart
+    /// simply asks once more.
+    pub(crate) managed_caps_unanswered:
+        Arc<crate::integration::indexer_caps_cache::UnansweredCapsRequests>,
     pub(crate) navigation_badge_facts: NavigationBadgeFactsCache,
 }
 
@@ -2720,6 +2725,7 @@ impl AppRuntimeState {
             },
             integrations: AppRuntimeIntegrationState {
                 managed_indexer_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+                managed_caps_unanswered: Arc::default(),
                 navigation_badge_facts: NavigationBadgeFactsCache::default(),
             },
         }

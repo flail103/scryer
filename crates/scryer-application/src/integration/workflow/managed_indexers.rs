@@ -133,6 +133,7 @@ impl AppUseCase {
             .collect::<HashMap<_, _>>();
         let system_backoffs = indexer_configs.list_system_backoffs().await?;
         let now = Utc::now();
+        let unanswered = &self.runtime.integrations.managed_caps_unanswered;
         let caps_due = existing_by_key
             .iter()
             .filter(|(_, child)| child.is_enabled)
@@ -156,6 +157,16 @@ impl AppUseCase {
                     );
                 }
                 !backed_off
+            })
+            .filter(|(_, child)| {
+                let waiting = unanswered.waiting(child, now);
+                if waiting {
+                    tracing::debug!(
+                        config_id = %child.id,
+                        "skipping managed child caps fetch until its unanswered request is due again"
+                    );
+                }
+                !waiting
             })
             .map(|(child_key, _)| child_key.clone())
             .collect::<HashSet<_>>();
@@ -181,13 +192,16 @@ impl AppUseCase {
                     parent.provider_type
                 ))
             })?;
-        let Some(plan) = client.enrichment_sync_plan(&parent.id, &caps_due).await? else {
-            return Ok(());
+        let plan = client.enrichment_sync_plan(&parent.id, &caps_due).await?;
+        let desired_children = match plan {
+            Some(plan) => {
+                self.prepare_managed_indexer_sync_plan(&parent, plan)
+                    .await?
+            }
+            None => Vec::new(),
         };
-        let desired_children = self
-            .prepare_managed_indexer_sync_plan(&parent, plan)
-            .await?;
 
+        let mut answered = HashSet::new();
         let mut enriched = 0_usize;
         let mut changed = false;
         for desired in desired_children {
@@ -250,6 +264,24 @@ impl AppUseCase {
             }
             changed |= content_changed;
             enriched = enriched.saturating_add(1);
+            answered.insert(desired.child_key.clone());
+        }
+        // A due child the pass got no caps for waits before it is asked again,
+        // rather than being asked on every sync.
+        for child_key in &caps_due {
+            let Some(child) = existing_by_key.get(child_key) else {
+                continue;
+            };
+            if answered.contains(child_key) {
+                unanswered.record_answered(&child.id);
+            } else {
+                let retry_at = unanswered.record_unanswered(child, now);
+                tracing::debug!(
+                    config_id = %child.id,
+                    retry_at = %retry_at,
+                    "managed child returned no caps; asking again later"
+                );
+            }
         }
         // A refetch that only renews the fetch time changes nothing anyone sees.
         if changed {

@@ -20,6 +20,24 @@ const BACKGROUND_ACQUISITION_TITLE_LIMIT: usize = 4;
 /// how far one cycle follows them.
 const BACKGROUND_ACQUISITION_TOP_UP_FACTOR: usize = 4;
 
+/// How many indexer searches one title may issue in one background walk.
+///
+/// The walk's time budget alone cannot keep a walk light: several titles run
+/// at once, and a long-running series with dozens of uncovered episodes keeps
+/// its slot searching for as long as it has scopes left, one search per
+/// scope, each fanned out across every indexer the scope still needs. This
+/// bound caps what any one title spends per walk; a title that reaches it
+/// stops at its next stage and the next walk resumes it from the first scope
+/// it did not reach, so a large backlog is eaten a slice at a time.
+///
+/// The walk's time budget is the primary bound; this one is generous on
+/// purpose. One hundred and twenty still walks a title missing a hundred
+/// episodes in one pass (a series pack, its season packs and one search per
+/// episode), which the walk has to manage once per walk interval, and leaves
+/// room for an ordinary title many times over. Only a title missing more than
+/// that is spread over several walks.
+pub(crate) const BACKGROUND_TITLE_WALK_QUERY_BUDGET: usize = 120;
+
 /// How far apart two instances' maintenance evaluation passes can drift. Much
 /// smaller than the eight-hour cadence on purpose: the jitter is there to keep
 /// a fleet from sweeping in lockstep, not to postpone the first pass.
@@ -171,6 +189,45 @@ pub(crate) struct BackgroundAcquisitionCycleOutcome {
     /// named one. An exhausted quota carries no instant at all, and an untimed
     /// deferral waits for the poller's own tick rather than guessing.
     pub retry_after: Option<std::time::Duration>,
+    /// Whether the pass went on to walk, whatever pass it was started as: a
+    /// failure-check pass walks when failure handling re-opened a scope. The
+    /// walk cadence measures its idle gap from the end of any walk.
+    pub walked: bool,
+    /// Titles this walk stopped before their last scope, for the deadline or
+    /// for their search budget. The next walk resumes each of them.
+    pub titles_stopped_midway: usize,
+    /// Indexer searches the walk issued across all of its titles.
+    pub indexer_queries: usize,
+    /// Why the walk stopped short of its selection, if it did.
+    pub stop: Option<WalkStopReason>,
+}
+
+/// Why a background walk, or one title inside it, stopped before the end of
+/// its work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WalkStopReason {
+    /// The walk's time budget ran out.
+    Deadline,
+    /// A title spent [`BACKGROUND_TITLE_WALK_QUERY_BUDGET`] searches.
+    QueryBudget,
+}
+
+impl WalkStopReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Deadline => "deadline",
+            Self::QueryBudget => "query_budget",
+        }
+    }
+
+    /// The stop that describes a walk two stops happened in: running out of
+    /// time ends the whole walk, a spent search budget only ends one title.
+    fn combine(current: Option<Self>, next: Self) -> Option<Self> {
+        match current {
+            Some(Self::Deadline) => Some(Self::Deadline),
+            _ => Some(next),
+        }
+    }
 }
 
 impl BackgroundAcquisitionCycleOutcome {
@@ -198,8 +255,9 @@ impl BackgroundAcquisitionCycleOutcome {
 }
 
 /// `budget` bounds the walk: once it has run that long the cycle starts no
-/// further title, lets the titles in flight finish, and leaves the rotation
-/// cursor on the first title it did not reach. `None` walks without a bound.
+/// further title, the titles in flight stop at their next stage, and the
+/// rotation cursor is left on the first scope the walk did not reach. `None`
+/// walks without a bound.
 async fn run_background_acquisition_cycle(
     app: &AppUseCase,
     pass: BackgroundAcquisitionPass,
@@ -234,6 +292,11 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
     // its own cadence. The walk never runs on its own: it always follows a
     // fetch and failure check in the same pass, so it decides on a snapshot
     // exactly as fresh as it did before the split.
+    // A pass inside the walk cadence's idle gap leaves a re-opened scope for
+    // the first walk after it rather than walking now.
+    if pass == BackgroundAcquisitionPass::FailureCheckWalkHeld {
+        return BackgroundAcquisitionCycleOutcome::default();
+    }
     let scope_reopened = app
         .runtime
         .acquisition
@@ -317,10 +380,12 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
     let mut budget = max_scopes;
     let mut titles_walked = 0usize;
     let mut skipped_locked_titles = 0usize;
-    let mut stopped_for_budget = false;
+    let mut titles_stopped_midway = 0usize;
+    let mut indexer_queries = 0usize;
+    let mut stop: Option<WalkStopReason> = None;
     while budget > 0 {
         if titles_walked > 0 && deadline_passed(deadline) {
-            stopped_for_budget = true;
+            stop = WalkStopReason::combine(stop, WalkStopReason::Deadline);
             break;
         }
         let selection = crate::acquisition::targets::select_background_acquisition_batch(
@@ -372,10 +437,14 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
         };
         titles_walked += round.titles_walked;
         skipped_locked_titles += round.skipped_locked_titles;
+        titles_stopped_midway += round.titles_stopped_midway;
+        indexer_queries += round.indexer_queries;
         if !round.undispatched.is_empty() {
             // The cursors already moved past this whole selection; put them
             // back on the first scope the walk did not reach so the next cycle
             // continues from there instead of skipping it for a full rotation.
+            // A title stopped mid-way leaves its remaining scopes here too, so
+            // the next cycle resumes it at its first unwalked scope.
             let rewound_hot = rewound_lane_cursor(
                 &targets,
                 &selection.indices,
@@ -415,7 +484,7 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
                 .interrupted_walk_scope_keys
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = carried;
-            stopped_for_budget = true;
+            stop = WalkStopReason::combine(stop, round.stop.unwrap_or(WalkStopReason::Deadline));
             break;
         }
         // Indexers that are cooling down or out of quota defer every scope
@@ -435,13 +504,39 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
         retry_after: (deferred_scopes > 0)
             .then(|| availability.earliest_recovery_in(&now))
             .flatten(),
+        walked: true,
+        titles_stopped_midway,
+        indexer_queries,
+        stop,
     };
-    if stopped_for_budget {
-        info!(
+    // One INFO line per walk, worded for why it ended.
+    let stop_reason = stop.map_or("none", WalkStopReason::as_str);
+    let elapsed_secs = cycle_started.elapsed().as_secs();
+    match stop {
+        Some(WalkStopReason::Deadline) => info!(
             titles_walked,
-            elapsed_secs = cycle_started.elapsed().as_secs(),
+            titles_stopped_midway,
+            indexer_queries,
+            elapsed_secs,
+            stop_reason,
             "background acquisition walk reached its time budget; the next cycle continues from its cursor"
-        );
+        ),
+        Some(WalkStopReason::QueryBudget) => info!(
+            titles_walked,
+            titles_stopped_midway,
+            indexer_queries,
+            elapsed_secs,
+            stop_reason,
+            "background acquisition walk stopped a title at its search budget; the next cycle continues from its cursor"
+        ),
+        None => info!(
+            titles_walked,
+            titles_stopped_midway,
+            indexer_queries,
+            elapsed_secs,
+            stop_reason,
+            "background acquisition walk finished its selection"
+        ),
     }
     // One line per cycle, above the per-title summaries.
     tracing::debug!(
@@ -465,9 +560,16 @@ struct SelectedScopesWalk {
     /// [`TitleWalkStats::spent_nothing`]). A title the walk could not run for
     /// — held by an interactive walk, or failed — gives none back.
     unspent_scopes: usize,
-    /// Selected scopes whose title was never started because the cycle ran out
-    /// of time first.
+    /// Selected scopes the walk did not reach: their title was never started
+    /// because the cycle ran out of time first, or their title stopped before
+    /// them (see [`TitleWalkStats::unwalked_target_indices`]).
     undispatched: HashSet<usize>,
+    /// Titles that stopped before their last scope.
+    titles_stopped_midway: usize,
+    /// Indexer searches the selection's titles issued.
+    indexer_queries: usize,
+    /// Why the selection was cut short, if it was.
+    stop: Option<WalkStopReason>,
 }
 
 fn deadline_passed(deadline: Option<tokio::time::Instant>) -> bool {
@@ -564,8 +666,9 @@ async fn walk_selected_scopes(
     let mut out_of_time = false;
     loop {
         while in_flight.len() < BACKGROUND_ACQUISITION_TITLE_LIMIT {
-            // The budget is checked between titles, never inside one, and a
-            // cycle always walks at least one title so it cannot stall.
+            // The budget is checked here between titles, and again inside each
+            // title between its stages. A cycle always walks at least one
+            // title so it cannot stall.
             if titles_walked_before + dispatched > 0 && deadline_passed(deadline) {
                 out_of_time = true;
             }
@@ -632,7 +735,7 @@ async fn walk_selected_scopes(
                     &cycle,
                     season_due_counts,
                     dl_snapshot,
-                    TitleWalkOptions::background(yield_token.clone()),
+                    TitleWalkOptions::background(yield_token.clone(), deadline),
                     |_, _| {},
                 )
                 .await;
@@ -644,6 +747,9 @@ async fn walk_selected_scopes(
             break;
         };
         round.titles_walked += 1;
+        if let Ok(stats) = &result {
+            round.indexer_queries += stats.queries;
+        }
         if yielded {
             // The operator's walk now owns the title; whatever this walk left
             // undone is neither a failure nor unspent work to top the batch up
@@ -657,7 +763,24 @@ async fn walk_selected_scopes(
                 .increment(1);
             continue;
         }
-        if result.as_ref().is_ok_and(TitleWalkStats::spent_nothing) {
+        if let Ok(stats) = &result
+            && let Some(title_stop) = stats.stopped
+        {
+            // The title walked part of its selection; the rest goes back on
+            // the cursor with the titles the cycle never started.
+            debug!(
+                title_id = title_id.as_str(),
+                stop_reason = title_stop.as_str(),
+                queries = stats.queries,
+                unwalked_scopes = stats.unwalked_target_indices.len(),
+                "background acquisition: title stopped before its last scope"
+            );
+            round.titles_stopped_midway += 1;
+            round.stop = WalkStopReason::combine(round.stop, title_stop);
+            round
+                .undispatched
+                .extend(stats.unwalked_target_indices.iter().copied());
+        } else if result.as_ref().is_ok_and(TitleWalkStats::spent_nothing) {
             round.unspent_scopes += scope_count;
         }
         if let Err(err) = result {
@@ -679,11 +802,13 @@ async fn walk_selected_scopes(
             .iter()
             .map(|work| work.title_id.as_str())
             .collect::<HashSet<_>>();
-        round.undispatched = indices
-            .iter()
-            .copied()
-            .filter(|index| unreached.contains(targets[*index].title_id.as_str()))
-            .collect();
+        round.undispatched.extend(
+            indices
+                .iter()
+                .copied()
+                .filter(|index| unreached.contains(targets[*index].title_id.as_str())),
+        );
+        round.stop = WalkStopReason::combine(round.stop, WalkStopReason::Deadline);
     }
     Some(round)
 }
@@ -1427,16 +1552,38 @@ pub(crate) struct TitleWalkOptions {
     /// was authorized before it started. The background cycle and searches run
     /// as the system execution actor record the system.
     initiated_by: DomainEventActor,
+    /// The background cycle's time budget. Once it has passed the walk starts
+    /// no further stage; the stage in flight finishes. `None` for an
+    /// interactive walk, which the operator asked to run to the end.
+    deadline: Option<tokio::time::Instant>,
+    /// How many indexer searches the walk may issue before it stops at its
+    /// next stage. `None` for an interactive walk.
+    query_budget: Option<usize>,
 }
 
 impl TitleWalkOptions {
-    fn background(yield_token: tokio_util::sync::CancellationToken) -> Self {
+    fn background(
+        yield_token: tokio_util::sync::CancellationToken,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Self {
         Self {
             intent: AcquisitionWalkIntent::Background,
             season_filter: None,
             cancellation: yield_token,
             initiated_by: DomainEventActor::system(),
+            deadline,
+            query_budget: Some(BACKGROUND_TITLE_WALK_QUERY_BUDGET),
         }
+    }
+
+    /// Why the walk should start no further stage, given what it has spent.
+    fn stop_reason(&self, stats: &TitleWalkStats) -> Option<WalkStopReason> {
+        if deadline_passed(self.deadline) {
+            return Some(WalkStopReason::Deadline);
+        }
+        self.query_budget
+            .is_some_and(|budget| stats.queries >= budget)
+            .then_some(WalkStopReason::QueryBudget)
     }
 
     /// The search token for a query this walk issues.
@@ -1477,6 +1624,12 @@ pub(crate) struct TitleWalkStats {
     /// job outright rather than warning, because nothing the operator asked for
     /// could even be attempted.
     pub submit_unavailable: bool,
+    /// Why the walk stopped before its last stage, when the background
+    /// cycle's deadline or the title's search budget cut it short.
+    pub stopped: Option<WalkStopReason>,
+    /// The episode or movie scopes a stopped walk never reached, as indices
+    /// into the cycle's targets. The cycle puts them back on its cursor.
+    pub unwalked_target_indices: Vec<usize>,
 }
 
 /// What one work item's submission attempts amounted to.
@@ -3023,6 +3176,10 @@ where
         .await;
     }
     let mut session = TitleWalkSession::new(options);
+    // A title stops for the cycle's deadline or its own search budget only
+    // after it has walked a scope, so a resumed title always gets further than
+    // its pack stages and the backlog keeps moving.
+    let mut scopes_walked = 0usize;
 
     while let Some(work) = title_work.ready.pop_front() {
         if session.options.cancellation.is_cancelled() {
@@ -3030,6 +3187,21 @@ where
                 title_id = title_work.title_id.as_str(),
                 "acquisition title walk cancelled"
             );
+            break;
+        }
+        if scopes_walked > 0
+            && let Some(stop) = session.options.stop_reason(&session.stats)
+        {
+            // In-flight work has finished; nothing further is admitted. The
+            // scopes left in the queue go back on the cycle's cursor.
+            title_work.ready.push_front(work);
+            session.stats.unwalked_target_indices = title_work
+                .ready
+                .iter()
+                .filter(|work| matches!(work.kind, BackgroundAcquisitionWorkKind::Scope))
+                .map(|work| work.target_index)
+                .collect();
+            session.stats.stopped = Some(stop);
             break;
         }
         let target = &targets[work.target_index];
@@ -3092,7 +3264,7 @@ where
             BackgroundAcquisitionWorkKind::SeasonPack { season } => {
                 cycle.complete_season_pack_stage(&(title_work.title_id.clone(), season));
             }
-            BackgroundAcquisitionWorkKind::Scope => {}
+            BackgroundAcquisitionWorkKind::Scope => scopes_walked += 1,
         }
 
         session.stats.stages += 1;
@@ -3143,6 +3315,8 @@ where
         committed = session.stats.committed,
         set_aside = session.stats.set_aside,
         failed = session.stats.failed,
+        stopped = session.stats.stopped.map(WalkStopReason::as_str),
+        unwalked_scopes = session.stats.unwalked_target_indices.len(),
         elapsed_ms = started.elapsed().as_millis() as u64,
         "acquisition title walk complete"
     );
@@ -3409,6 +3583,8 @@ where
             season_filter,
             cancellation,
             initiated_by,
+            deadline: None,
+            query_budget: None,
         },
         |kind, target| {
             processed += 1;
@@ -5565,6 +5741,10 @@ fn arm_deferred_acquisition_retry(
 pub(crate) enum BackgroundAcquisitionPass {
     /// Read the download clients and handle failed grabs, then stop.
     FailureCheckOnly,
+    /// The failure check, while the walk is held back: inside the idle gap
+    /// after a walk, or while an RSS sync runs. Unlike [`Self::FailureCheckOnly`]
+    /// it does not walk for a re-opened scope; that waits for the next walk.
+    FailureCheckWalkHeld,
     /// The failure check, then the catalog scan, batch selection and walk.
     Full,
 }
@@ -5593,6 +5773,12 @@ enum BackgroundAcquisitionTrigger {
 /// A tick between walks also walks when failure handling has re-opened a
 /// scope since the last walk (see `scope_reopened_since_walk`); that decision
 /// is made inside the pass and does not move this count.
+///
+/// Whatever asks for it, a walk never starts inside the idle gap: the walk
+/// interval, floored at the poll interval, measured from the end of the last
+/// walk. A walk that overran its budget still leaves the machine that long
+/// before the next one. Nor does a walk start while an RSS sync runs. A walk
+/// held back for either reason runs on the first tick after the hold lifts.
 #[derive(Debug)]
 struct AcquisitionWalkCadence {
     poll_period: std::time::Duration,
@@ -5602,8 +5788,14 @@ struct AcquisitionWalkCadence {
     /// Deferred work whose cooldown lifts after the next tick but before the
     /// next scheduled walk. The first tick at or after it walks, so the scope
     /// is not left waiting for the rest of the walk interval. Shorter
-    /// deferrals keep their exact re-arm timer, which runs a full pass.
+    /// deferrals keep their exact re-arm timer, which runs a full pass. Both
+    /// still wait out the idle gap.
     walk_retry_at: Option<tokio::time::Instant>,
+    /// When the last walk ended; the idle gap is measured from here.
+    last_walk_ended_at: Option<tokio::time::Instant>,
+    /// A walk was asked for while it was held back, so the first tick after
+    /// the hold lifts walks.
+    walk_held: bool,
 }
 
 impl AcquisitionWalkCadence {
@@ -5614,6 +5806,8 @@ impl AcquisitionWalkCadence {
             ticks_per_walk: 1,
             ticks_since_walk: 0,
             walk_retry_at: None,
+            last_walk_ended_at: None,
+            walk_held: false,
         };
         cadence.set_walk_period(walk_period);
         cadence
@@ -5629,24 +5823,55 @@ impl AcquisitionWalkCadence {
         self.ticks_per_walk = walk_secs.div_ceil(poll_secs).max(1);
     }
 
+    /// The shortest rest between the end of one walk and the start of the next.
+    fn min_walk_gap(&self) -> std::time::Duration {
+        self.walk_period.max(self.poll_period)
+    }
+
+    fn in_walk_gap(&self, now: tokio::time::Instant) -> bool {
+        self.last_walk_ended_at
+            .is_some_and(|ended| now.saturating_duration_since(ended) < self.min_walk_gap())
+    }
+
+    #[cfg(test)]
     fn pass_for(
         &mut self,
         trigger: BackgroundAcquisitionTrigger,
         now: tokio::time::Instant,
     ) -> BackgroundAcquisitionPass {
-        match trigger {
+        self.pass_for_beside_rss(trigger, now, false)
+    }
+
+    /// The pass `trigger` runs. `rss_running` holds the walk back the way the
+    /// idle gap does.
+    fn pass_for_beside_rss(
+        &mut self,
+        trigger: BackgroundAcquisitionTrigger,
+        now: tokio::time::Instant,
+        rss_running: bool,
+    ) -> BackgroundAcquisitionPass {
+        let wants_walk = match trigger {
             BackgroundAcquisitionTrigger::Wake | BackgroundAcquisitionTrigger::DeferredRetry => {
-                BackgroundAcquisitionPass::Full
+                true
             }
             BackgroundAcquisitionTrigger::PollTick => {
                 self.ticks_since_walk = self.ticks_since_walk.saturating_add(1);
                 let retry_due = self.walk_retry_at.is_some_and(|at| at <= now);
-                if self.ticks_since_walk >= self.ticks_per_walk || retry_due {
-                    BackgroundAcquisitionPass::Full
-                } else {
-                    BackgroundAcquisitionPass::FailureCheckOnly
-                }
+                self.ticks_since_walk >= self.ticks_per_walk || retry_due || self.walk_held
             }
+        };
+        let held = rss_running || self.in_walk_gap(now);
+        match (wants_walk, held) {
+            (true, false) => {
+                self.walk_held = false;
+                BackgroundAcquisitionPass::Full
+            }
+            (true, true) => {
+                self.walk_held = true;
+                BackgroundAcquisitionPass::FailureCheckWalkHeld
+            }
+            (false, true) => BackgroundAcquisitionPass::FailureCheckWalkHeld,
+            (false, false) => BackgroundAcquisitionPass::FailureCheckOnly,
         }
     }
 
@@ -5657,6 +5882,9 @@ impl AcquisitionWalkCadence {
         outcome: BackgroundAcquisitionCycleOutcome,
         now: tokio::time::Instant,
     ) {
+        if pass == BackgroundAcquisitionPass::Full || outcome.walked {
+            self.last_walk_ended_at = Some(now);
+        }
         if pass != BackgroundAcquisitionPass::Full {
             return;
         }
@@ -5683,6 +5911,9 @@ fn acquisition_walk_interval_may_have_changed(
 /// The background acquisition cycle's task name; one cycle runs at a time no
 /// matter which trigger started it.
 const BACKGROUND_ACQUISITION_CYCLE_TASK: &str = "background_acquisition_cycle";
+
+/// The scheduled RSS sync's task name. A walk does not start while it runs.
+const RSS_SYNC_TASK: &str = "rss_sync";
 
 /// How often the scheduler loop checks its in-flight jobs against their
 /// overdue budgets.
@@ -5863,7 +6094,10 @@ where
         supervisor.note_skipped(BACKGROUND_ACQUISITION_CYCLE_TASK);
         return None;
     }
-    let pass = walk_cadence.pass_for(trigger, tokio::time::Instant::now());
+    // RSS runs through this supervisor too, so whether it is running is known
+    // here for free; the walk yields the indexers to it.
+    let rss_running = supervisor.is_running(RSS_SYNC_TASK);
+    let pass = walk_cadence.pass_for_beside_rss(trigger, tokio::time::Instant::now(), rss_running);
     let budget = scheduled_task_overdue_budget(walk_cadence.walk_period);
     supervisor
         .try_spawn(BACKGROUND_ACQUISITION_CYCLE_TASK, budget, run(pass, budget))
@@ -6524,7 +6758,7 @@ pub async fn start_background_acquisition_poller(
             }
             _ = rss_sync_interval.tick() => {
                 let next_run_in = rss_sync_next_run_delta(rss_sync_tick);
-                admit_scheduled_job(&app, &mut supervisor, "rss_sync", rss_sync_tick, Some((JobKey::RssSync, next_run_in)), move |app| async move {
+                admit_scheduled_job(&app, &mut supervisor, RSS_SYNC_TASK, rss_sync_tick, Some((JobKey::RssSync, next_run_in)), move |app| async move {
                     app.advertise_job_next_run_at(
                         JobKey::RssSync,
                         Utc::now() + next_run_in,
@@ -6800,7 +7034,7 @@ mod task_runner_tests {
 
     #[tokio::test(start_paused = true)]
     async fn supervisor_admits_one_background_acquisition_pass_whatever_its_variant() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly, Full};
+        use BackgroundAcquisitionPass::{FailureCheckWalkHeld, Full};
         use BackgroundAcquisitionTrigger::{DeferredRetry, PollTick, Wake};
 
         tokio::time::timeout(SUPERVISOR_TEST_BOUND, async {
@@ -6848,14 +7082,15 @@ mod task_runner_tests {
                 tokio::time::Instant::now(),
             );
 
-            // With the walk finished the next tick runs, as a failure check.
+            // With the walk finished the next tick runs, as a failure check
+            // inside the walk's idle gap.
             let next = admit_background_acquisition_pass(
                 &mut supervisor,
                 &mut cadence,
                 PollTick,
                 |_, _| async {},
             );
-            assert_eq!(next, Some((PollTick, FailureCheckOnly)));
+            assert_eq!(next, Some((PollTick, FailureCheckWalkHeld)));
             supervisor.join_next().await.unwrap().result.unwrap();
         })
         .await
@@ -6965,7 +7200,9 @@ mod task_runner_tests {
 
     #[test]
     fn default_cadence_checks_failures_every_tick_and_walks_every_fifth() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly as Check, Full};
+        use BackgroundAcquisitionPass::{
+            FailureCheckOnly as Check, FailureCheckWalkHeld as Held, Full,
+        };
         let poll = secs(crate::settings::runtime::DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS as u64);
         let walk = secs(crate::settings::runtime::DEFAULT_ACQUISITION_WALK_INTERVAL_SECONDS as u64);
         assert_eq!((poll, walk), (secs(60), secs(300)));
@@ -6973,12 +7210,13 @@ mod task_runner_tests {
 
         let passes = drive_poll_ticks(&mut cadence, tokio::time::Instant::now(), poll, 10);
 
-        // Every tick runs the failure check (both kinds of pass do); only
-        // every fifth one goes on to walk.
+        // Every tick runs the failure check (every kind of pass does); only
+        // every fifth one goes on to walk. The ticks inside the idle gap after
+        // a walk hold back a walk for a re-opened scope too.
         assert_eq!(
             passes,
             vec![
-                Check, Check, Check, Check, Full, Check, Check, Check, Check, Full
+                Check, Check, Check, Check, Full, Held, Held, Held, Held, Full
             ]
         );
     }
@@ -7005,18 +7243,22 @@ mod task_runner_tests {
 
     #[test]
     fn a_walk_interval_that_is_not_a_multiple_rounds_up_to_the_next_tick() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly as Check, Full};
+        use BackgroundAcquisitionPass::{
+            FailureCheckOnly as Check, FailureCheckWalkHeld as Held, Full,
+        };
         let mut cadence = AcquisitionWalkCadence::new(secs(30), secs(100));
         let passes = drive_poll_ticks(&mut cadence, tokio::time::Instant::now(), secs(30), 8);
         assert_eq!(
             passes,
-            vec![Check, Check, Check, Full, Check, Check, Check, Full]
+            vec![Check, Check, Check, Full, Held, Held, Held, Full]
         );
     }
 
     #[test]
     fn a_wake_walks_at_once_and_restarts_the_walk_count() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly as Check, Full};
+        use BackgroundAcquisitionPass::{
+            FailureCheckOnly as Check, FailureCheckWalkHeld as Held, Full,
+        };
         let start = tokio::time::Instant::now();
         let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
         assert_eq!(
@@ -7030,28 +7272,134 @@ mod task_runner_tests {
         assert_eq!(pass, Full);
         cadence.record(pass, BackgroundAcquisitionCycleOutcome::default(), woken_at);
 
-        // The walk it ran restarts the count: the next scheduled walk is a
-        // full interval later, not two ticks later.
+        // The walk it ran restarts the count and opens the idle gap. The fifth
+        // tick after it still falls inside the gap, so its walk is held to the
+        // first tick past the gap.
         assert_eq!(
-            drive_poll_ticks(&mut cadence, start + secs(120), secs(60), 5),
-            vec![Check, Check, Check, Check, Full]
+            drive_poll_ticks(&mut cadence, start + secs(120), secs(60), 6),
+            vec![Held, Held, Held, Held, Held, Full]
         );
 
-        // A wake right after a walk still walks.
-        let pass = cadence.pass_for(BackgroundAcquisitionTrigger::Wake, start + secs(421));
-        assert_eq!(pass, Full);
+        // A wake or a deferred retry right after a walk waits out the gap,
+        // and the first tick after it walks for them.
+        let walked_at = start + secs(480);
+        assert_eq!(
+            cadence.pass_for(BackgroundAcquisitionTrigger::Wake, walked_at + secs(1)),
+            Held
+        );
         assert_eq!(
             cadence.pass_for(
                 BackgroundAcquisitionTrigger::DeferredRetry,
-                start + secs(422)
+                walked_at + secs(2)
+            ),
+            Held
+        );
+        assert_eq!(
+            cadence.pass_for(BackgroundAcquisitionTrigger::PollTick, walked_at + secs(60)),
+            Held
+        );
+        assert_eq!(
+            cadence.pass_for(
+                BackgroundAcquisitionTrigger::PollTick,
+                walked_at + secs(300)
             ),
             Full
         );
     }
 
+    /// The gap is measured from the end of the last walk, not its start: a walk
+    /// that ran far past its budget still leaves the machine a full gap before
+    /// the next one, whatever asked for it in the meantime.
     #[test]
-    fn deferred_work_lifting_before_the_next_walk_walks_on_the_first_tick_after_it() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly as Check, Full};
+    fn the_idle_gap_holds_the_next_walk_back_after_an_overrun() {
+        use BackgroundAcquisitionPass::{FailureCheckWalkHeld as Held, Full};
+        use BackgroundAcquisitionTrigger::{DeferredRetry, PollTick, Wake};
+        let start = tokio::time::Instant::now();
+        let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
+        assert_eq!(cadence.pass_for(Wake, start), Full);
+        // The walk overran: it ends forty minutes after it started, by which
+        // time its own interval has long passed.
+        let ended = start + secs(2400);
+        cadence.record(
+            Full,
+            BackgroundAcquisitionCycleOutcome {
+                walked: true,
+                ..BackgroundAcquisitionCycleOutcome::default()
+            },
+            ended,
+        );
+
+        // A wake queued during the walk, a deferred retry and every tick of
+        // the gap run the failure check only.
+        assert_eq!(cadence.pass_for(Wake, ended), Held);
+        assert_eq!(cadence.pass_for(DeferredRetry, ended + secs(5)), Held);
+        for tick in 1..=4 {
+            assert_eq!(
+                cadence.pass_for(PollTick, ended + secs(60) * tick),
+                Held,
+                "tick {tick} is inside the gap"
+            );
+        }
+        // One second short of the gap is still inside it.
+        assert_eq!(cadence.pass_for(PollTick, ended + secs(299)), Held);
+        // The first tick at the gap's end walks.
+        assert_eq!(cadence.pass_for(PollTick, ended + secs(300)), Full);
+    }
+
+    /// A walk does not start while the scheduled RSS sync runs, and the first
+    /// tick after it walks instead.
+    #[tokio::test(start_paused = true)]
+    async fn a_walk_waits_for_a_running_rss_sync() {
+        use BackgroundAcquisitionPass::{FailureCheckWalkHeld as Held, Full};
+        use BackgroundAcquisitionTrigger::{PollTick, Wake};
+
+        tokio::time::timeout(SUPERVISOR_TEST_BOUND, async {
+            let mut supervisor = ScheduledTaskSupervisor::<()>::new();
+            let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
+            let (release, held) = tokio::sync::oneshot::channel::<()>();
+            assert!(supervisor.try_spawn(
+                RSS_SYNC_TASK,
+                scheduled_task_overdue_budget(secs(60)),
+                async move {
+                    let _ = held.await;
+                },
+            ));
+
+            let wake = admit_background_acquisition_pass(
+                &mut supervisor,
+                &mut cadence,
+                Wake,
+                |_, _| async {},
+            );
+            assert_eq!(wake, Some((Wake, Held)));
+            supervisor.join_next().await.unwrap().result.unwrap();
+            assert!(supervisor.is_running(RSS_SYNC_TASK));
+
+            release.send(()).unwrap();
+            let done = supervisor.join_next().await.unwrap();
+            assert_eq!(done.name, RSS_SYNC_TASK);
+
+            tokio::time::advance(secs(60)).await;
+            let tick = admit_background_acquisition_pass(
+                &mut supervisor,
+                &mut cadence,
+                PollTick,
+                |_, _| async {},
+            );
+            assert_eq!(
+                tick,
+                Some((PollTick, Full)),
+                "the held walk runs once RSS is done"
+            );
+            supervisor.join_next().await.unwrap().result.unwrap();
+        })
+        .await
+        .expect("the held RSS sync must finish once released");
+    }
+
+    #[test]
+    fn deferred_work_lifting_inside_the_idle_gap_walks_when_the_gap_ends() {
+        use BackgroundAcquisitionPass::{FailureCheckWalkHeld as Held, Full};
         let start = tokio::time::Instant::now();
         let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
         let walked_at = start;
@@ -7064,15 +7412,17 @@ mod task_runner_tests {
             },
             walked_at,
         );
-        // 60 s: still cooling. 120 s: lifted at 90 s, so this tick walks.
+        // 60 s: still cooling. 120 s: lifted at 90 s, but the walk that
+        // deferred it ended only two minutes ago, so the retry waits out the
+        // idle gap and the first tick past it walks.
         assert_eq!(
-            drive_poll_ticks(&mut cadence, start, secs(60), 2),
-            vec![Check, Full]
+            drive_poll_ticks(&mut cadence, start, secs(60), 5),
+            vec![Held, Held, Held, Held, Full]
         );
         // That walk found nothing deferred, so the retry is spent.
         assert_eq!(
-            drive_poll_ticks(&mut cadence, start + secs(120), secs(60), 5),
-            vec![Check, Check, Check, Check, Full]
+            drive_poll_ticks(&mut cadence, start + secs(300), secs(60), 5),
+            vec![Held, Held, Held, Held, Full]
         );
 
         // A deferral shorter than the tick is left to the exact re-arm timer,
@@ -7094,7 +7444,9 @@ mod task_runner_tests {
 
     #[test]
     fn a_changed_walk_interval_applies_to_the_running_cadence() {
-        use BackgroundAcquisitionPass::{FailureCheckOnly as Check, Full};
+        use BackgroundAcquisitionPass::{
+            FailureCheckOnly as Check, FailureCheckWalkHeld as Held, Full,
+        };
         let start = tokio::time::Instant::now();
         let mut cadence = AcquisitionWalkCadence::new(secs(60), secs(300));
         assert_eq!(
@@ -7109,10 +7461,11 @@ mod task_runner_tests {
             vec![Full, Full, Full]
         );
 
+        // The longer interval lengthens the idle gap with it.
         cadence.set_walk_period(secs(180));
         assert_eq!(
             drive_poll_ticks(&mut cadence, start + secs(300), secs(60), 3),
-            vec![Check, Check, Full]
+            vec![Held, Held, Full]
         );
 
         let key = crate::settings::runtime::ACQUISITION_WALK_INTERVAL_SECONDS_KEY;

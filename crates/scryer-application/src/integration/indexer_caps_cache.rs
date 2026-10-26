@@ -98,6 +98,89 @@ pub(crate) fn same_snapshot_content(left: Option<&str>, right: Option<&str>) -> 
     }
 }
 
+/// The wait before asking again for a managed child's caps after a pass asked
+/// for them and got none. Each further unanswered pass doubles it, up to
+/// [`UNANSWERED_CAPS_MAX_RETRY`], so a child whose manager never returns caps
+/// (one disabled upstream, say) is asked about once a day instead of on every
+/// sync, while a child that missed one fetch is asked again within the hour.
+const UNANSWERED_CAPS_FIRST_RETRY: chrono::Duration = chrono::Duration::hours(1);
+const UNANSWERED_CAPS_MAX_RETRY: chrono::Duration = chrono::Duration::days(1);
+
+#[derive(Debug)]
+struct UnansweredCaps {
+    connection: String,
+    misses: u32,
+    retry_at: DateTime<Utc>,
+}
+
+/// Managed children whose caps were asked for and not returned, by config id.
+/// An entry only holds while the child's connection is the one it was asked
+/// over: a connection change makes the child due again at once.
+#[derive(Debug, Default)]
+pub(crate) struct UnansweredCapsRequests {
+    by_child: Mutex<HashMap<String, UnansweredCaps>>,
+}
+
+impl UnansweredCapsRequests {
+    /// Whether `child` is still waiting out an unanswered request at `now`.
+    pub(crate) fn waiting(&self, child: &IndexerConfig, now: DateTime<Utc>) -> bool {
+        let connection = connection_key(child);
+        self.by_child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&child.id)
+            .is_some_and(|entry| entry.connection == connection && now < entry.retry_at)
+    }
+
+    /// Note that a pass asked for `child`'s caps at `now` and got none.
+    /// Returns when it is due again.
+    pub(crate) fn record_unanswered(
+        &self,
+        child: &IndexerConfig,
+        now: DateTime<Utc>,
+    ) -> DateTime<Utc> {
+        let connection = connection_key(child);
+        let mut by_child = self
+            .by_child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = by_child
+            .entry(child.id.clone())
+            .or_insert_with(|| UnansweredCaps {
+                connection: connection.clone(),
+                misses: 0,
+                retry_at: now,
+            });
+        if entry.connection != connection {
+            entry.connection = connection;
+            entry.misses = 0;
+        }
+        entry.misses = entry.misses.saturating_add(1);
+        let doublings = entry.misses.saturating_sub(1).min(16);
+        let wait = UNANSWERED_CAPS_FIRST_RETRY
+            .checked_mul(1_i32 << doublings)
+            .unwrap_or(UNANSWERED_CAPS_MAX_RETRY)
+            .min(UNANSWERED_CAPS_MAX_RETRY);
+        entry.retry_at = now + wait;
+        entry.retry_at
+    }
+
+    /// Forget any unanswered request for the child: its caps arrived.
+    pub(crate) fn record_answered(&self, child_id: &str) {
+        self.by_child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(child_id);
+    }
+}
+
+fn connection_key(config: &IndexerConfig) -> String {
+    crate::helpers::blake3_identity_hex(
+        crate::helpers::HashDomain::IndexerSecret,
+        &connection_identity(config).to_string(),
+    )
+}
+
 type SharedFetch = tokio::sync::Mutex<Option<Result<Option<String>, AppError>>>;
 
 /// Only overlapping callers share a result. Durable snapshots own the seven-day cache.
@@ -159,6 +242,34 @@ mod tests {
             "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn an_unanswered_caps_request_waits_longer_each_time_and_resets_on_change() {
+        let requests = UnansweredCapsRequests::default();
+        let mut child = config();
+        let start = child.created_at;
+        assert!(!requests.waiting(&child, start));
+
+        let mut asked_at = start;
+        for expected in [1, 2, 4, 8, 16, 24, 24] {
+            let retry_at = requests.record_unanswered(&child, asked_at);
+            assert_eq!(retry_at - asked_at, chrono::Duration::hours(expected));
+            assert!(requests.waiting(&child, retry_at - chrono::Duration::seconds(1)));
+            assert!(!requests.waiting(&child, retry_at));
+            asked_at = retry_at;
+        }
+
+        child.base_url = "https://moved.example.test".into();
+        assert!(
+            !requests.waiting(&child, asked_at),
+            "a connection change makes the child due at once"
+        );
+        let retry_at = requests.record_unanswered(&child, asked_at);
+        assert_eq!(retry_at - asked_at, chrono::Duration::hours(1));
+
+        requests.record_answered(&child.id);
+        assert!(!requests.waiting(&child, asked_at));
     }
 
     #[test]

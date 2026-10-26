@@ -266,8 +266,22 @@ fn map_child_path(root: &Path, path: &Path) -> AppResult<String> {
             ),
         ));
     }
-    let guest_path = Path::new(GUEST_SOURCE_ROOT).join(relative);
-    Ok(guest_path.to_string_lossy().into_owned())
+    Ok(guest_child_path(GUEST_SOURCE_ROOT, relative))
+}
+
+/// A guest path under `root`. Guest paths are always `/`-separated: the
+/// guest's libc matches a path to its preopen on `/` alone, so a host
+/// separator such as Windows' `\` leaves the path matching no preopen and
+/// the guest reports the file missing.
+fn guest_child_path(root: &str, relative: &Path) -> String {
+    let mut guest_path = root.trim_end_matches('/').to_string();
+    for component in relative.components() {
+        if let std::path::Component::Normal(part) = component {
+            guest_path.push('/');
+            guest_path.push_str(&part.to_string_lossy());
+        }
+    }
+    guest_path
 }
 
 fn is_safe_relative_plugin_path(path: &Path) -> bool {
@@ -316,6 +330,19 @@ mod tests {
         assert_eq!(
             map_child_path(root, Path::new("release{{synthetic-secret}}.rar")).unwrap(),
             "/scryer/source/release{{synthetic-secret}}.rar"
+        );
+    }
+
+    #[test]
+    fn guest_archive_paths_use_forward_slashes_on_every_host() {
+        let root = std::env::temp_dir().join("synthetic-subtitle-scratch");
+        let nested = root.join("Season Pack").join("synthetic-pack.zip");
+        let guest = map_child_path(&root, &nested).unwrap();
+        assert_eq!(guest, "/scryer/source/Season Pack/synthetic-pack.zip");
+        assert!(!guest.contains('\\'), "{guest}");
+        assert_eq!(
+            guest_child_path(GUEST_SOURCE_ROOT, Path::new("./synthetic-pack.zip")),
+            "/scryer/source/synthetic-pack.zip"
         );
     }
 }

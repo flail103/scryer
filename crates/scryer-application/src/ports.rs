@@ -5368,6 +5368,35 @@ pub enum IndexerSearchListingClaim {
     },
 }
 
+/// Every learning outcome one search observed from one indexer for one
+/// title, written together once the indexer's part of the search is done.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexerSearchLearningBatch {
+    pub indexer_id: String,
+    pub title_id: String,
+    pub facet: String,
+    /// Strategy outcomes as `(strategy_key, usable_hits)`, in the order the
+    /// search observed them. Each lands as one
+    /// [`IndexerSearchLearningRepository::record_outcome`] would.
+    pub strategy_outcomes: Vec<(String, u32)>,
+    /// Strategy keys marked suppressed after the outcomes land.
+    pub suppress: Vec<String>,
+    /// Facet outcomes in observation order, applied in one step as
+    /// [`IndexerSearchLearningRepository::record_facet_search_outcome`]
+    /// would apply them one by one.
+    pub facet_outcomes: Vec<IndexerFacetSearchOutcome>,
+    pub now: DateTime<Utc>,
+    pub facet_policy: IndexerFacetLearningPolicy,
+}
+
+impl IndexerSearchLearningBatch {
+    pub fn is_empty(&self) -> bool {
+        self.strategy_outcomes.is_empty()
+            && self.suppress.is_empty()
+            && self.facet_outcomes.is_empty()
+    }
+}
+
 #[async_trait]
 pub trait IndexerSearchLearningRepository: Send + Sync {
     async fn list_for_title(
@@ -5376,6 +5405,71 @@ pub trait IndexerSearchLearningRepository: Send + Sync {
         title_id: &str,
         facet: &str,
     ) -> AppResult<Vec<IndexerSearchLearningRecord>>;
+
+    /// The learning rows of one title for each listed indexer, keyed by
+    /// indexer. An indexer without rows maps to an empty list.
+    async fn list_for_title_by_indexer(
+        &self,
+        indexer_ids: &[String],
+        title_id: &str,
+        facet: &str,
+    ) -> AppResult<HashMap<String, Vec<IndexerSearchLearningRecord>>> {
+        let mut records = HashMap::with_capacity(indexer_ids.len());
+        for indexer_id in indexer_ids {
+            records.insert(
+                indexer_id.clone(),
+                self.list_for_title(indexer_id, title_id, facet).await?,
+            );
+        }
+        Ok(records)
+    }
+
+    /// Lands one indexer's learning outcomes from one search and reports the
+    /// facet transition of each facet outcome, in order.
+    async fn record_learning_batch(
+        &self,
+        batch: &IndexerSearchLearningBatch,
+    ) -> AppResult<Vec<IndexerFacetTransition>> {
+        for (strategy_key, usable_hits) in &batch.strategy_outcomes {
+            self.record_outcome(
+                &IndexerSearchLearningKey {
+                    indexer_id: batch.indexer_id.clone(),
+                    title_id: batch.title_id.clone(),
+                    facet: batch.facet.clone(),
+                    strategy_key: strategy_key.clone(),
+                },
+                *usable_hits,
+            )
+            .await?;
+        }
+        for strategy_key in &batch.suppress {
+            self.set_suppressed(
+                &IndexerSearchLearningKey {
+                    indexer_id: batch.indexer_id.clone(),
+                    title_id: batch.title_id.clone(),
+                    facet: batch.facet.clone(),
+                    strategy_key: strategy_key.clone(),
+                },
+                true,
+            )
+            .await?;
+        }
+        let mut transitions = Vec::with_capacity(batch.facet_outcomes.len());
+        for outcome in &batch.facet_outcomes {
+            transitions.push(
+                self.record_facet_search_outcome(
+                    &batch.indexer_id,
+                    &batch.facet,
+                    &batch.title_id,
+                    *outcome,
+                    batch.now,
+                    batch.facet_policy,
+                )
+                .await?,
+            );
+        }
+        Ok(transitions)
+    }
 
     async fn record_outcome(
         &self,
@@ -11355,6 +11449,10 @@ pub struct DownloadCleanupRecord {
     pub attempts: u32,
     pub history_offset: usize,
     pub payload_checkpoint: Option<String>,
+    /// When the previous attempt ended in a retryable failure, the delay it
+    /// was rescheduled with; `None` after any other outcome. Lets the next
+    /// failure back off further without counting holds and deferrals.
+    pub previous_failure_retry_seconds: Option<i64>,
 }
 
 /// The catalog references one download submission holds, exactly as stored.

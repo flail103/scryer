@@ -4505,6 +4505,24 @@ async fn seed_series_pack_scope_fixture_with_download_client(
     Arc<TrackingIndexerClient>,
     Vec<(u32, String)>,
 ) {
+    seed_series_scope_fixture(indexer_client, persisted_seasons, download_client, 5, 1).await
+}
+
+/// A monitored series of `season_count` seasons of `episodes_per_season`
+/// aired episodes each, with a wanted row for every episode of each season in
+/// `persisted_seasons`. Returns each episode as `(season, episode id)`.
+async fn seed_series_scope_fixture(
+    indexer_client: Arc<TrackingIndexerClient>,
+    persisted_seasons: &[u32],
+    download_client: Arc<StubDownloadClient>,
+    season_count: u32,
+    episodes_per_season: u32,
+) -> (
+    AppUseCase,
+    Title,
+    Arc<TrackingIndexerClient>,
+    Vec<(u32, String)>,
+) {
     let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
     let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
         download_client,
@@ -4530,7 +4548,7 @@ async fn seed_series_pack_scope_fixture_with_download_client(
         .expect("create series-pack title");
 
     let mut episode_ids = Vec::new();
-    for season_number in 1..=5 {
+    for season_number in 1..=season_count {
         let season = app
             .services
             .catalog
@@ -4544,75 +4562,186 @@ async fn seed_series_pack_scope_fixture_with_download_client(
                 ordered_path: None,
                 narrative_order: Some(season_number.to_string()),
                 first_episode_number: Some("1".to_string()),
-                last_episode_number: Some("1".to_string()),
+                last_episode_number: Some(episodes_per_season.to_string()),
                 monitored: true,
                 created_at: Utc::now(),
             })
             .await
             .expect("create series-pack season");
-        let episode = app
-            .services
-            .catalog
-            .shows
-            .create_episode(Episode {
-                id: Id::new().0,
-                title_id: title.id.clone(),
-                collection_id: Some(season.id.clone()),
-                episode_type: scryer_domain::EpisodeType::Standard,
-                episode_number: Some("1".to_string()),
-                season_number: Some(season_number.to_string()),
-                episode_label: Some(format!("S{season_number:02}E01")),
-                title: Some(format!("S{season_number:02}E01")),
-                air_date: Some("2024-01-01".to_string()),
-                duration_seconds: Some(1_440),
-                has_multi_audio: false,
-                has_subtitle: false,
-                is_filler: false,
-                is_recap: false,
-                absolute_number: None,
-                contiguous_absolute_number: None,
-                overview: None,
-                tvdb_id: None,
-                tmdb_id: None,
-                image_url: None,
-                monitored: true,
-                created_at: Utc::now(),
-            })
-            .await
-            .expect("create series-pack episode");
-        if persisted_seasons.contains(&season_number) {
-            wanted_items
-                .upsert_acquisition_scope_state(&AcquisitionScopeState {
+        for episode_number in 1..=episodes_per_season {
+            let episode = app
+                .services
+                .catalog
+                .shows
+                .create_episode(Episode {
                     id: Id::new().0,
                     title_id: title.id.clone(),
-                    title_name: Some(title.name.clone()),
-                    title_slug: None,
-                    title_facet: None,
-                    library_id: None,
-                    library_name: None,
-                    library_slug: None,
-                    episode_id: Some(episode.id.clone()),
-                    collection_id: Some(season.id),
-                    series_movie_link_id: None,
+                    collection_id: Some(season.id.clone()),
+                    episode_type: scryer_domain::EpisodeType::Standard,
+                    episode_number: Some(episode_number.to_string()),
                     season_number: Some(season_number.to_string()),
-                    episode_number: Some("1".to_string()),
-                    media_type: "episode".to_string(),
-                    last_search_at: None,
-                    status: AcquisitionScopeStatus::Wanted,
-                    grabbed_release: None,
-                    landed_bar: None,
-                    latest_release_decision: None,
-                    mismatch_recovery_eligible: false,
-                    created_at: Utc::now().to_rfc3339(),
-                    updated_at: Utc::now().to_rfc3339(),
+                    episode_label: Some(format!("S{season_number:02}E{episode_number:02}")),
+                    title: Some(format!("S{season_number:02}E{episode_number:02}")),
+                    air_date: Some("2024-01-01".to_string()),
+                    duration_seconds: Some(1_440),
+                    has_multi_audio: false,
+                    has_subtitle: false,
+                    is_filler: false,
+                    is_recap: false,
+                    absolute_number: None,
+                    contiguous_absolute_number: None,
+                    overview: None,
+                    tvdb_id: None,
+                    tmdb_id: None,
+                    image_url: None,
+                    monitored: true,
+                    created_at: Utc::now(),
                 })
                 .await
-                .expect("seed series-pack wanted episode");
+                .expect("create series-pack episode");
+            if persisted_seasons.contains(&season_number) {
+                wanted_items
+                    .upsert_acquisition_scope_state(&AcquisitionScopeState {
+                        id: Id::new().0,
+                        title_id: title.id.clone(),
+                        title_name: Some(title.name.clone()),
+                        title_slug: None,
+                        title_facet: None,
+                        library_id: None,
+                        library_name: None,
+                        library_slug: None,
+                        episode_id: Some(episode.id.clone()),
+                        collection_id: Some(season.id.clone()),
+                        series_movie_link_id: None,
+                        season_number: Some(season_number.to_string()),
+                        episode_number: Some(episode_number.to_string()),
+                        media_type: "episode".to_string(),
+                        last_search_at: None,
+                        status: AcquisitionScopeStatus::Wanted,
+                        grabbed_release: None,
+                        landed_bar: None,
+                        latest_release_decision: None,
+                        mismatch_recovery_eligible: false,
+                        created_at: Utc::now().to_rfc3339(),
+                        updated_at: Utc::now().to_rfc3339(),
+                    })
+                    .await
+                    .expect("seed series-pack wanted episode");
+            }
+            episode_ids.push((season_number, episode.id));
         }
-        episode_ids.push((season_number, episode.id));
     }
 
     (app, title, indexer_client, episode_ids)
+}
+
+/// The episode searches issued so far, in order, as `(season, episode)`.
+async fn episode_searches(indexer_client: &TrackingIndexerClient) -> Vec<(u32, u32)> {
+    indexer_client
+        .searches
+        .lock()
+        .await
+        .iter()
+        .filter_map(|search| Some((search.season?, search.episode?)))
+        .collect()
+}
+
+/// A walk whose time is up stops inside the title it is walking, not only
+/// between titles, and the next walk picks the title up at its first unwalked
+/// scope instead of starting it over. A spent budget still gets one scope of
+/// the title in per walk, so the backlog keeps moving.
+#[tokio::test]
+async fn a_walk_out_of_time_stops_inside_a_title_and_the_next_walk_resumes_at_its_next_scope() {
+    use crate::acquisition_workflow::WalkStopReason;
+    let indexer_client = Arc::new(TrackingIndexerClient::default().returning_no_results());
+    let (app, _, indexer_client, _) = seed_series_pack_scope_fixture(indexer_client).await;
+
+    for season in 1..=4u32 {
+        let before = episode_searches(&indexer_client).await.len();
+        let outcome = app
+            .run_background_acquisition_cycle_with_budget_once(std::time::Duration::ZERO)
+            .await;
+        assert_eq!(outcome.titles_walked, 1, "walk {season}");
+        assert_eq!(
+            outcome.titles_stopped_midway, 1,
+            "walk {season} stops the title before its last scope"
+        );
+        assert_eq!(
+            outcome.stop,
+            Some(WalkStopReason::Deadline),
+            "walk {season}"
+        );
+        assert_eq!(
+            episode_searches(&indexer_client).await[before..].to_vec(),
+            vec![(season, 1)],
+            "walk {season} searches only the first scope the earlier walks did not reach"
+        );
+    }
+
+    // The fifth walk reaches the title's last scope, so nothing is left over.
+    let before = episode_searches(&indexer_client).await.len();
+    let last = app
+        .run_background_acquisition_cycle_with_budget_once(std::time::Duration::ZERO)
+        .await;
+    assert_eq!(last.titles_stopped_midway, 0);
+    assert_eq!(last.stop, None);
+    assert_eq!(
+        episode_searches(&indexer_client).await[before..].to_vec(),
+        vec![(5, 1)]
+    );
+    assert_eq!(
+        episode_searches(&indexer_client).await,
+        (1..=5).map(|season| (season, 1)).collect::<Vec<_>>(),
+        "every scope is searched exactly once across the walks"
+    );
+}
+
+/// A title with more scopes than one walk's search budget stops once it has
+/// spent the budget, even with time to spare, and the next walk searches the
+/// rest of it and nothing it already searched.
+#[tokio::test]
+async fn a_title_stops_at_its_search_budget_and_the_next_walk_searches_the_rest() {
+    use crate::acquisition_workflow::{BACKGROUND_TITLE_WALK_QUERY_BUDGET, WalkStopReason};
+    let episode_count = BACKGROUND_TITLE_WALK_QUERY_BUDGET as u32 + 5;
+    let indexer_client = Arc::new(TrackingIndexerClient::default().returning_no_results());
+    let (app, _, indexer_client, _) = seed_series_scope_fixture(
+        indexer_client,
+        &[1],
+        Arc::new(StubDownloadClient::default().with_unique_job_ids()),
+        1,
+        episode_count,
+    )
+    .await;
+
+    let first = app.run_background_acquisition_cycle_once().await;
+    assert_eq!(first.titles_walked, 1);
+    assert_eq!(first.titles_stopped_midway, 1);
+    assert_eq!(first.stop, Some(WalkStopReason::QueryBudget));
+    assert_eq!(first.indexer_queries, BACKGROUND_TITLE_WALK_QUERY_BUDGET);
+    let first_episodes = episode_searches(&indexer_client).await;
+    let reached = first_episodes.len() as u32;
+    assert!(
+        (1..episode_count).contains(&reached),
+        "the budget stops the title part-way: {first_episodes:?}"
+    );
+    assert_eq!(
+        first_episodes,
+        (1..=reached)
+            .map(|episode| (1, episode))
+            .collect::<Vec<_>>(),
+        "the title is walked in episode order up to where it stopped"
+    );
+
+    let second = app.run_background_acquisition_cycle_once().await;
+    assert_eq!(second.titles_stopped_midway, 0);
+    assert_eq!(second.stop, None);
+    assert_eq!(
+        episode_searches(&indexer_client).await[first_episodes.len()..].to_vec(),
+        (reached + 1..=episode_count)
+            .map(|episode| (1, episode))
+            .collect::<Vec<_>>(),
+        "the next walk searches exactly the scopes the first did not reach"
+    );
 }
 
 fn series_pack_anchor_standby(
@@ -17567,4 +17696,276 @@ async fn an_rss_cycle_past_its_budget_leaves_the_remaining_titles_to_the_next_cy
         .map(|submission| submission.title_id.clone())
         .collect::<HashSet<_>>();
     assert_eq!(grabbed_titles, HashSet::from([alpha.id, beta.id]));
+}
+
+/// Answers each RSS poll with the next feed in line, and with an empty feed
+/// once the line runs out.
+struct SequencedFeedRssIndexerClient {
+    feeds: std::sync::Mutex<std::collections::VecDeque<Vec<IndexerSearchResult>>>,
+}
+
+impl SequencedFeedRssIndexerClient {
+    fn new(feeds: Vec<Vec<IndexerSearchResult>>) -> Self {
+        Self {
+            feeds: std::sync::Mutex::new(feeds.into()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl IndexerClient for SequencedFeedRssIndexerClient {
+    async fn search(
+        &self,
+        _query: String,
+        _ids: std::collections::HashMap<String, String>,
+        _category: Option<String>,
+        _facet: Option<String>,
+        _id_search_facet: Option<String>,
+        _newznab_categories: Option<Vec<String>>,
+        _indexer_routing: Option<IndexerRoutingPlan>,
+        _mode: SearchMode,
+        _operation: IndexerErrorOperation,
+        _season: Option<u32>,
+        _episode: Option<u32>,
+        _absolute_episode: Option<u32>,
+        _year: Option<i32>,
+        _tagged_aliases: Vec<TaggedAlias>,
+        _learning_context: Option<crate::IndexerSearchLearningContext>,
+        _cancel_token: tokio_util::sync::CancellationToken,
+    ) -> AppResult<IndexerSearchResponse> {
+        let results = self
+            .feeds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .unwrap_or_default();
+        Ok(IndexerSearchResponse {
+            next_cursor: None,
+            completion: crate::IndexerSearchCompletion::Complete,
+            indexer_outcomes: Vec::new(),
+            results,
+            api_current: None,
+            api_max: None,
+            grab_current: None,
+            grab_max: None,
+        })
+    }
+}
+
+/// A synthetic movie for the carry-over tests, with the feed item that
+/// matches it.
+struct CarryOverFixtureTitle {
+    id: String,
+    release: IndexerSearchResult,
+}
+
+/// Seed one wanted movie per name and return them in title-id order, which
+/// is the order a cycle takes fresh titles up in.
+async fn seed_carry_over_titles(
+    app: &AppUseCase,
+    user: &User,
+    wanted_items: &Arc<TrackingAcquisitionScopeStateRepo>,
+    names: &[&str],
+) -> Vec<CarryOverFixtureTitle> {
+    let mut titles = Vec::with_capacity(names.len());
+    for name in names {
+        let (title, _) =
+            seed_movie_wanted_for_acquisition(app, user, wanted_items, name, 2024).await;
+        let release_name = format!("{}.2024.1080p.WEB-DL-GRP", name.replace(' ', "."));
+        let guid = format!("carry-guid-{}", name.replace(' ', "-").to_lowercase());
+        titles.push(CarryOverFixtureTitle {
+            id: title.id,
+            release: streamed_rss_result("indexer-a", &guid, &release_name),
+        });
+    }
+    titles.sort_by(|left, right| left.id.cmp(&right.id));
+    titles
+}
+
+/// The title ids the durable carry-over record holds.
+async fn persisted_rss_carry_over(app: &AppUseCase) -> Vec<String> {
+    app.services
+        .config
+        .settings
+        .get_setting_json_explicit(
+            SETTINGS_SCOPE_SYSTEM,
+            crate::acquisition::rss::RSS_CARRY_OVER_TITLE_IDS_KEY,
+            None,
+        )
+        .await
+        .expect("read the carry-over record")
+        .and_then(|value| serde_json::from_str::<Option<Vec<String>>>(&value).ok())
+        .flatten()
+        .unwrap_or_default()
+}
+
+/// The title of the one download a cycle submitted.
+async fn the_title_one_cycle_grabbed(
+    submissions: &TrackingDownloadSubmissionRepo,
+    before: usize,
+) -> String {
+    let store = submissions.store.lock().await;
+    assert_eq!(store.len(), before + 1, "the cycle grabs exactly one title");
+    store[before].title_id.clone()
+}
+
+/// A cycle that runs out of budget keeps its carry-over durably, and a new
+/// process takes the carried title up before a fresh one that sorts ahead of
+/// it, even though the restart emptied the seen set and the releases with it.
+#[tokio::test(start_paused = true)]
+async fn an_rss_carry_over_survives_a_restart_and_keeps_its_turn() {
+    let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let feeds = Arc::new(SequencedFeedRssIndexerClient::new(Vec::new()));
+    let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default()),
+        download_submissions.clone(),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+        wanted_items.clone(),
+        feeds.clone(),
+    );
+    let titles = seed_carry_over_titles(
+        &app,
+        &user,
+        &wanted_items,
+        &[
+            "Synthetic Amber Quay",
+            "Synthetic Birch Quay",
+            "Synthetic Cedar Quay",
+        ],
+    )
+    .await;
+    let (first, middle, last) = (&titles[0], &titles[1], &titles[2]);
+    feeds.feeds.lock().unwrap().extend([
+        vec![first.release.clone(), last.release.clone()],
+        // The first poll after a restart sees the carried title's item again,
+        // next to a fresh title that would otherwise sort ahead of it.
+        vec![middle.release.clone(), last.release.clone()],
+    ]);
+
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 0).await,
+        first.id
+    );
+    assert_eq!(persisted_rss_carry_over(&app).await, vec![last.id.clone()]);
+
+    // A new process: fresh coordination over the same durable stores.
+    let restarted = AppUseCase {
+        runtime: crate::services::AppRuntimeState::default(),
+        ..app.clone()
+    };
+    restarted
+        .run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle after the restart");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 1).await,
+        last.id,
+        "the restored title takes its turn ahead of the fresh one"
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&restarted).await,
+        vec![middle.id.clone()]
+    );
+
+    // The feed is quiet now; the title the restarted cycle left is still
+    // taken up, and a cycle that reaches every title clears the record.
+    restarted
+        .run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("second RSS cycle after the restart");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 2).await,
+        middle.id
+    );
+    assert!(persisted_rss_carry_over(&restarted).await.is_empty());
+    assert!(
+        restarted
+            .runtime
+            .acquisition
+            .rss_unprocessed_titles
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Carried titles that alone would fill every cycle do not hold a fresh title
+/// back: the cycle after a budget overrun gives the fresh lane the first
+/// turn, and the carried titles follow in the order they were left.
+#[tokio::test(start_paused = true)]
+async fn a_fresh_rss_title_gets_a_turn_while_carried_titles_fill_the_budget() {
+    let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let feeds = Arc::new(SequencedFeedRssIndexerClient::new(Vec::new()));
+    let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default()),
+        download_submissions.clone(),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+        wanted_items.clone(),
+        feeds.clone(),
+    );
+    let carried = seed_carry_over_titles(
+        &app,
+        &user,
+        &wanted_items,
+        &[
+            "Synthetic Alder Reach",
+            "Synthetic Basalt Reach",
+            "Synthetic Cobalt Reach",
+        ],
+    )
+    .await;
+    let fresh = seed_carry_over_titles(&app, &user, &wanted_items, &["Synthetic Dune Reach"])
+        .await
+        .remove(0);
+    feeds.feeds.lock().unwrap().extend([
+        carried
+            .iter()
+            .map(|title| title.release.clone())
+            .collect::<Vec<_>>(),
+        vec![fresh.release.clone()],
+    ]);
+
+    // A spent budget processes one title per cycle, so the two carried
+    // titles alone would fill the next two cycles.
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("first RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 0).await,
+        carried[0].id
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&app).await,
+        vec![carried[1].id.clone(), carried[2].id.clone()]
+    );
+
+    app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+        .await
+        .expect("second RSS cycle");
+    assert_eq!(
+        the_title_one_cycle_grabbed(&download_submissions, 1).await,
+        fresh.id,
+        "the fresh title is not queued behind every carried one"
+    );
+    assert_eq!(
+        persisted_rss_carry_over(&app).await,
+        vec![carried[1].id.clone(), carried[2].id.clone()],
+        "the carried titles keep their order"
+    );
+
+    for (cycle, expected) in [(2, &carried[1].id), (3, &carried[2].id)] {
+        app.run_scheduled_rss_sync_within(std::time::Duration::ZERO)
+            .await
+            .expect("carried RSS cycle");
+        assert_eq!(
+            &the_title_one_cycle_grabbed(&download_submissions, cycle).await,
+            expected
+        );
+    }
+    assert!(persisted_rss_carry_over(&app).await.is_empty());
 }

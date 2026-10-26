@@ -1274,16 +1274,32 @@ fn rss_sync_cycle_budget() -> std::time::Duration {
     super::acquisition_workflow::scheduled_task_overdue_budget(rss_sync_tick_period())
 }
 
+/// System-settings key holding the ids of the titles an RSS cycle ran out of
+/// budget for, in the order the next cycle takes them up, so a restart resumes
+/// them instead of starting over.
+pub(crate) const RSS_CARRY_OVER_TITLE_IDS_KEY: &str = "acquisition.rss_carry_over_title_ids";
+
 /// Matched releases whose titles a cycle did not reach before its budget ran
 /// out, in the order the next cycle takes them up.
 ///
 /// Their GUIDs are already in the seen set and the indexers' markers have
 /// moved past them, so no later poll would offer them again: they are carried
-/// here instead, and the next cycle processes them before anything new.
-/// Process-local, like the seen set.
+/// here instead. The releases are process-local, like the seen set; the title
+/// ids are also kept under [`RSS_CARRY_OVER_TITLE_IDS_KEY`]. A restart empties
+/// the seen set, so its first poll matches the feed afresh, and the restored
+/// ids give those titles back their place ahead of the rest.
 #[derive(Debug, Default)]
 pub(crate) struct RssUnprocessedTitles {
     titles: Vec<(String, Vec<IndexerSearchResult>)>,
+    /// Whether this cycle's fresh titles take the first turn. Every cycle that
+    /// runs out of budget hands the first turn to the other lane, so a cycle
+    /// that can only process one title still lets a fresh title in.
+    fresh_leads: bool,
+    /// Whether the durable record has been read into this process yet.
+    restored: bool,
+    /// The ids last read from or written to the durable record, so an
+    /// unchanged carry-over is not written again.
+    persisted: Vec<String>,
 }
 
 impl RssUnprocessedTitles {
@@ -1295,6 +1311,44 @@ impl RssUnprocessedTitles {
     pub(crate) fn len(&self) -> usize {
         self.titles.len()
     }
+}
+
+/// The order a cycle takes its titles up in: carried and fresh titles take
+/// turns, starting with `fresh_leads`'s lane, and whichever lane is longer
+/// finishes the order. Neither lane can hold the other back for a whole cycle.
+fn interleave_rss_title_lanes(
+    carried: Vec<String>,
+    fresh: Vec<String>,
+    fresh_leads: bool,
+) -> Vec<String> {
+    let mut order = Vec::with_capacity(carried.len() + fresh.len());
+    let (lead, follow) = if fresh_leads {
+        (fresh, carried)
+    } else {
+        (carried, fresh)
+    };
+    let mut lead = lead.into_iter();
+    let mut follow = follow.into_iter();
+    loop {
+        let (first, second) = (lead.next(), follow.next());
+        if first.is_none() && second.is_none() {
+            break;
+        }
+        order.extend(first);
+        order.extend(second);
+    }
+    order
+}
+
+/// The nearest-rank percentile of `sorted`, in milliseconds; zero when empty.
+fn rss_title_duration_percentile_ms(sorted: &[std::time::Duration], percentile: usize) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = (sorted.len() * percentile)
+        .div_ceil(100)
+        .clamp(1, sorted.len());
+    u64::try_from(sorted[rank - 1].as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Active unknown-age pending rows, by the identities a feed item can match
@@ -1370,6 +1424,7 @@ impl AppUseCase {
     /// The indexers that could answer this cycle, or `None` when the cycle has
     /// nothing to ask and nothing held back to re-evaluate.
     async fn rss_cycle_due_indexers(&self) -> Option<crate::RssDueIndexers> {
+        self.restore_rss_carry_over().await;
         let due = match self
             .services
             .integrations
@@ -1581,6 +1636,108 @@ impl AppUseCase {
             "RSS sync: matched one feed page"
         );
         Ok(())
+    }
+
+    /// Read the carry-over a previous process left into this one, once. The
+    /// restored titles carry no releases: the first poll after a restart
+    /// matches the feed afresh, and the ids only give those titles their turn
+    /// back. A failed read is retried on the next cycle.
+    async fn restore_rss_carry_over(&self) {
+        let restored = self
+            .runtime
+            .acquisition
+            .rss_unprocessed_titles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .restored;
+        if restored {
+            return;
+        }
+        let value_json = match self
+            .services
+            .config
+            .settings
+            .get_setting_json_explicit(SETTINGS_SCOPE_SYSTEM, RSS_CARRY_OVER_TITLE_IDS_KEY, None)
+            .await
+        {
+            Ok(value_json) => value_json,
+            Err(error) => {
+                warn!(error = %error, "RSS sync: failed to read the carried-over titles");
+                return;
+            }
+        };
+        let title_ids = value_json
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<Option<Vec<String>>>(value).ok())
+            .flatten()
+            .unwrap_or_default();
+        let mut state = self
+            .runtime
+            .acquisition
+            .rss_unprocessed_titles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.restored {
+            return;
+        }
+        state.restored = true;
+        if state.titles.is_empty() && !title_ids.is_empty() {
+            debug!(
+                carried = title_ids.len(),
+                "RSS sync: resuming the titles a previous run left"
+            );
+            state.titles = title_ids
+                .iter()
+                .map(|title_id| (title_id.clone(), Vec::new()))
+                .collect();
+        }
+        state.persisted = title_ids;
+    }
+
+    /// Keep the carry-over's title ids for a restart. An unchanged list is not
+    /// written again; a failed write is logged and retried by the next cycle
+    /// whose carry-over differs from the last one written.
+    async fn persist_rss_carry_over(&self, title_ids: Vec<String>) {
+        let unchanged = self
+            .runtime
+            .acquisition
+            .rss_unprocessed_titles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .persisted
+            == title_ids;
+        if unchanged {
+            return;
+        }
+        let Ok(value_json) = serde_json::to_string(&title_ids) else {
+            return;
+        };
+        match self
+            .services
+            .config
+            .settings
+            .upsert_setting_json(
+                SETTINGS_SCOPE_SYSTEM,
+                RSS_CARRY_OVER_TITLE_IDS_KEY,
+                None,
+                value_json,
+                "system",
+                None,
+            )
+            .await
+        {
+            Ok(()) => {
+                self.runtime
+                    .acquisition
+                    .rss_unprocessed_titles
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .persisted = title_ids;
+            }
+            Err(error) => {
+                warn!(error = %error, "RSS sync: failed to keep the carried-over titles");
+            }
+        }
     }
 
     fn rss_unprocessed_titles_snapshot_is_empty(&self) -> bool {
@@ -1899,30 +2056,35 @@ impl AppUseCase {
             }
         }
 
-        // Titles an earlier cycle matched but ran out of budget for go first,
-        // in the order it left them; this cycle's own titles follow in a
-        // stable order.
-        let carried = std::mem::take(
-            &mut self
+        // Titles an earlier cycle matched but ran out of budget for keep the
+        // order it left them in; this cycle's own titles are in a stable
+        // order. The two lanes take turns, so carried titles alone can never
+        // fill a cycle while a fresh one waits.
+        let (carried, fresh_leads) = {
+            let mut state = self
                 .runtime
                 .acquisition
                 .rss_unprocessed_titles
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .titles,
-        );
-        let mut title_order: Vec<String> = Vec::with_capacity(matched_by_title.len());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (std::mem::take(&mut state.titles), state.fresh_leads)
+        };
+        let mut carried_titles: Vec<String> = Vec::with_capacity(carried.len());
         let mut ordered: HashSet<String> = HashSet::new();
         for (title_id, releases) in carried {
-            let identities = matched_identities.entry(title_id.clone()).or_default();
-            let target = matched_by_title.entry(title_id.clone()).or_default();
-            for release in releases {
-                if identities.insert(rss_release_identity(&release)) {
-                    target.push(release);
+            if !releases.is_empty() {
+                let identities = matched_identities.entry(title_id.clone()).or_default();
+                let target = matched_by_title.entry(title_id.clone()).or_default();
+                for release in releases {
+                    if identities.insert(rss_release_identity(&release)) {
+                        target.push(release);
+                    }
                 }
             }
-            if ordered.insert(title_id.clone()) {
-                title_order.push(title_id);
+            // A title restored after a restart carries no releases of its
+            // own: it keeps its turn only when this cycle matched it again.
+            if matched_by_title.contains_key(&title_id) && ordered.insert(title_id.clone()) {
+                carried_titles.push(title_id);
             }
         }
         let mut fresh_titles = matched_by_title
@@ -1931,8 +2093,10 @@ impl AppUseCase {
             .cloned()
             .collect::<Vec<_>>();
         fresh_titles.sort();
-        title_order.extend(fresh_titles);
         drop(ordered);
+        let carried_count = carried_titles.len();
+        let fresh_count = fresh_titles.len();
+        let title_order = interleave_rss_title_lanes(carried_titles, fresh_titles, fresh_leads);
 
         debug!(
             matched = matched_count,
@@ -1958,9 +2122,15 @@ impl AppUseCase {
         // upgrade state and is created on the first anchored write.
         let locked_titles = self.location_owned_title_ids().await?;
         let mut titles_processed = 0usize;
+        let mut carry_over = Vec::new();
+        let mut title_durations = Vec::with_capacity(title_order.len());
+        let mut title_started: Option<std::time::Instant> = None;
         for (index, title_id) in title_order.iter().enumerate() {
+            if let Some(started) = title_started.take() {
+                title_durations.push(started.elapsed());
+            }
             if index > 0 && std::time::Instant::now() >= deadline {
-                let remaining = title_order[index..]
+                carry_over = title_order[index..]
                     .iter()
                     .filter_map(|title_id| {
                         matched_by_title
@@ -1970,19 +2140,14 @@ impl AppUseCase {
                     .collect::<Vec<_>>();
                 info!(
                     processed = titles_processed,
-                    remaining = remaining.len(),
+                    remaining = carry_over.len(),
                     budget_secs = budget.as_secs(),
                     "RSS sync: cycle budget reached; the remaining titles continue next cycle"
                 );
-                self.runtime
-                    .acquisition
-                    .rss_unprocessed_titles
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .titles = remaining;
                 break;
             }
             titles_processed += 1;
+            title_started = Some(std::time::Instant::now());
             let Some(releases) = matched_by_title.get(title_id) else {
                 continue;
             };
@@ -2062,15 +2227,43 @@ impl AppUseCase {
             }
         }
 
+        if let Some(started) = title_started.take() {
+            title_durations.push(started.elapsed());
+        }
+        let carried_over = carry_over.len();
+        let carry_over_ids = carry_over
+            .iter()
+            .map(|(title_id, _)| title_id.clone())
+            .collect::<Vec<_>>();
+        {
+            let mut state = self
+                .runtime
+                .acquisition
+                .rss_unprocessed_titles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // A cycle out of budget hands the first turn to the other lane;
+            // one that reached every title leaves nothing to take turns over.
+            state.fresh_leads = !carry_over.is_empty() && !fresh_leads;
+            state.titles = carry_over;
+        }
+        self.persist_rss_carry_over(carry_over_ids).await;
+
         self.reconcile_release_age_unknown_pending(&now).await;
 
+        title_durations.sort_unstable();
         let (resident_kib, peak_resident_kib) = process_resident_kib();
         info!(
             fetched = report.releases_fetched,
             matched = report.releases_matched,
             grabbed = report.releases_grabbed,
             held = report.releases_held,
+            carried_titles = carried_count,
+            fresh_titles = fresh_count,
             titles_processed,
+            titles_carried_over = carried_over,
+            title_p50_ms = rss_title_duration_percentile_ms(&title_durations, 50),
+            title_p95_ms = rss_title_duration_percentile_ms(&title_durations, 95),
             resident_kib,
             peak_resident_kib,
             "RSS sync cycle completed"

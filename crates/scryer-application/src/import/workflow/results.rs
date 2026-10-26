@@ -792,7 +792,7 @@ async fn reconcile_terminal_download_cleanup(
         {
             Ok(payload) => Some(payload),
             Err(error) => {
-                if nzbget_retention_log_due(record) {
+                if cleanup_retry_log_due(record) {
                     tracing::warn!(
                         client_id,
                         download_client_item_id,
@@ -935,7 +935,7 @@ async fn reconcile_terminal_download_cleanup(
     if let Some(payload) = nzbget_payload.as_ref()
         && let Err(error) = verify_nzbget_entry_cleanup(payload).await
     {
-        if nzbget_retention_log_due(record) {
+        if cleanup_retry_log_due(record) {
             tracing::warn!(client_id, download_client_item_id, error = %error,
                 "retaining NZBGet history because native deletion could bypass payload preservation");
         } else {
@@ -1038,6 +1038,9 @@ async fn reconcile_terminal_download_cleanup(
     )
     .await;
 
+    let client_delete_in_progress = delete_result.as_ref().is_err_and(|error| {
+        error.reason() == Some(crate::error_reasons::acquisition::DOWNLOAD_CLIENT_DELETE_IN_PROGRESS)
+    });
     let outcome = match delete_result {
         Ok(()) => {
             tracing::info!(
@@ -1081,7 +1084,20 @@ async fn reconcile_terminal_download_cleanup(
                         "failed to checkpoint the native removal attempt");
                 }
             }
-            if !remove_data
+            if client_delete_in_progress {
+                // The client is finishing an earlier delete of this entry.
+                // Nothing more is sent: the next attempt, after the long
+                // recheck, finds the entry gone or asks again.
+                tracing::debug!(
+                    client_id,
+                    client_type,
+                    download_client_item_id,
+                    state = state.as_str(),
+                    error = %error,
+                    "download client is still deleting this entry; rechecking later"
+                );
+                TerminalDownloadCleanupOutcome::RetryableFailure
+            } else if !remove_data
                 && !terminal_download_item_is_still_visible(
                     app,
                     client_id,
@@ -1101,14 +1117,25 @@ async fn reconcile_terminal_download_cleanup(
                 );
                 TerminalDownloadCleanupOutcome::AlreadyGone
             } else {
-                tracing::warn!(
-                    client_id,
-                    client_type,
-                    download_client_item_id,
-                    state = state.as_str(),
-                    error = %error,
-                    "failed to remove terminal download from client"
-                );
+                if cleanup_retry_log_due(record) {
+                    tracing::warn!(
+                        client_id,
+                        client_type,
+                        download_client_item_id,
+                        state = state.as_str(),
+                        error = %error,
+                        "failed to remove terminal download from client"
+                    );
+                } else {
+                    tracing::debug!(
+                        client_id,
+                        client_type,
+                        download_client_item_id,
+                        state = state.as_str(),
+                        error = %error,
+                        "failed to remove terminal download from client"
+                    );
+                }
                 TerminalDownloadCleanupOutcome::RetryableFailure
             }
         }
@@ -1206,6 +1233,8 @@ async fn reconcile_terminal_download_cleanup(
         payload: payload_disposition,
         payload_requested: remove_data,
         client_payload,
+        client_delete_in_progress: client_delete_in_progress
+            && outcome == TerminalDownloadCleanupOutcome::RetryableFailure,
     }
 }
 
@@ -1764,10 +1793,10 @@ async fn revalidate_nzbget_cleanup_state(
     Ok(payload)
 }
 
-/// Retained NZBGet cleanup retries every few minutes indefinitely: warn on the
-/// first attempt and then once per twelve, mirroring "terminal cleanup remains
-/// pending". Calls outside a durable claim (manual import) always warn.
-fn nzbget_retention_log_due(record: Option<&crate::DownloadCleanupRecord>) -> bool {
+/// Whether a repeating cleanup warning is due on this attempt: the first, then
+/// one in every twelve, mirroring "terminal cleanup remains pending". Calls
+/// outside a durable claim (manual import) always warn.
+fn cleanup_retry_log_due(record: Option<&crate::DownloadCleanupRecord>) -> bool {
     record.is_none_or(|record| record.attempts <= 1 || record.attempts.is_multiple_of(12))
 }
 

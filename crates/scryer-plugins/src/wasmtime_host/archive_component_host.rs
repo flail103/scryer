@@ -587,6 +587,7 @@ fn finish_error(
     let diagnostic = error::to_app_error(
         failure,
         &error::InvocationContext {
+            plugin_kind: error::PluginHostKind::ArchiveExtractor,
             plugin_id: invocation.plugin_id,
             plugin_version: invocation.plugin_version,
             operation: invocation.operation,

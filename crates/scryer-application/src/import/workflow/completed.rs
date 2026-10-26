@@ -380,6 +380,10 @@ pub(crate) struct TerminalDownloadCleanup {
     pub payload_requested: bool,
     /// Whether the client was asked to delete its own files, and its answer.
     pub client_payload: ClientPayloadDeletion,
+    /// The client refused the delete because it is still finishing an
+    /// earlier delete of the same entry. Only meaningful with
+    /// `RetryableFailure`.
+    pub client_delete_in_progress: bool,
 }
 
 impl TerminalDownloadCleanup {
@@ -390,6 +394,7 @@ impl TerminalDownloadCleanup {
             payload: None,
             payload_requested: false,
             client_payload: ClientPayloadDeletion::NotRequested,
+            client_delete_in_progress: false,
         }
     }
 
@@ -465,10 +470,16 @@ pub(crate) enum CleanupSettlement {
     CleanupDeferred,
     CleanupFailed,
     ObservationUnknown,
+    /// The client is still finishing an earlier delete of the entry; the
+    /// next attempt only looks again, after a long wait.
+    ClientDeleteInProgress,
+    /// Written by the store when a hold on the download deferred the claim
+    /// itself; never chosen here.
+    ClaimDeferred,
 }
 
 impl CleanupSettlement {
-    pub(crate) const ALL: [Self; 19] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::PolicyRetained,
         Self::HandedOff,
         Self::SeedingEntryKept,
@@ -488,6 +499,8 @@ impl CleanupSettlement {
         Self::CleanupDeferred,
         Self::CleanupFailed,
         Self::ObservationUnknown,
+        Self::ClientDeleteInProgress,
+        Self::ClaimDeferred,
     ];
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -513,6 +526,8 @@ impl CleanupSettlement {
             Self::CleanupDeferred => "cleanup_deferred",
             Self::CleanupFailed => "cleanup_failed",
             Self::ObservationUnknown => "observation_unknown",
+            Self::ClientDeleteInProgress => "client_delete_in_progress",
+            Self::ClaimDeferred => "claim_deferred",
         }
     }
 
@@ -547,7 +562,9 @@ impl CleanupSettlement {
             Self::SeedingHold
             | Self::CleanupDeferred
             | Self::CleanupFailed
-            | Self::ObservationUnknown => TerminalDownloadCleanupOutcome::RetryableFailure,
+            | Self::ObservationUnknown
+            | Self::ClientDeleteInProgress
+            | Self::ClaimDeferred => TerminalDownloadCleanupOutcome::RetryableFailure,
         }
     }
 
@@ -1154,10 +1171,20 @@ pub(crate) async fn run_claimed_download_cleanup(
             TerminalDownloadCleanupOutcome::HeldForSeeding => CleanupSettlement::SeedingHold,
             TerminalDownloadCleanupOutcome::SeedingEntryKept => CleanupSettlement::SeedingEntryKept,
             TerminalDownloadCleanupOutcome::HandedOff => CleanupSettlement::HandedOff,
+            TerminalDownloadCleanupOutcome::RetryableFailure if cleanup.client_delete_in_progress => {
+                CleanupSettlement::ClientDeleteInProgress
+            }
             TerminalDownloadCleanupOutcome::RetryableFailure => CleanupSettlement::CleanupFailed,
         };
-        let error = (cleanup.outcome == TerminalDownloadCleanupOutcome::RetryableFailure)
-            .then_some("required payload or entry operation failed; see client cleanup log");
+        let error = match outcome {
+            CleanupSettlement::ClientDeleteInProgress => {
+                Some("the download client is still finishing an earlier delete of this entry")
+            }
+            CleanupSettlement::CleanupFailed => {
+                Some("required payload or entry operation failed; see client cleanup log")
+            }
+            _ => None,
+        };
         if !finish_cleanup_attempt(app, &record, outcome, complete, 0, error).await {
             return Ok(None);
         }
@@ -1182,7 +1209,14 @@ pub(crate) async fn run_claimed_download_cleanup(
             // heal with time, so after the retry budget the row settles as
             // abandoned and the scope is released; the client entry stays.
             let permanent = cleanup_error_is_permanent(&error);
+            // A locator that names another download, or one whose identity
+            // cannot be confirmed, is refused before anything is sent to the
+            // client. Waiting does not make the identity provable, so the row
+            // is abandoned at the first such refusal with the entry left as is.
+            let ambiguous = error.validation_reason()
+                == Some(crate::error_reasons::import::CLEANUP_LOCATOR_REUSED_IDENTITY_AMBIGUOUS);
             let abandon = permanent
+                || ambiguous
                 || (matches!(error, AppError::Validation(_) | AppError::ValidationRefused { .. } | AppError::ValidationRefusedWithCount { .. })
                     && record.attempts >= HOST_PAYLOAD_CLEANUP_ATTEMPTS_BEFORE_ENTRY_REMOVAL);
             if abandon {
@@ -1296,6 +1330,41 @@ fn cleanup_error_is_permanent(error: &AppError) -> bool {
     matches!(error.validation_reason(), Some(crate::error_reasons::import::CLEANUP_STATE_INVALID | crate::error_reasons::import::CLEANUP_ATTRIBUTION_MISSING))
 }
 
+/// Delays a retryable cleanup failure is rescheduled with, in order: fast at
+/// first, then hourly, then every six hours from there on.
+pub(crate) const CLEANUP_FAILURE_RETRY_LADDER_SECONDS: [i64; 7] =
+    [30, 60, 120, 240, 300, 3_600, 21_600];
+
+/// How long a cleanup waits, when the client is still finishing an earlier
+/// delete of the entry, before it looks at the entry again.
+pub(crate) const CLIENT_DELETE_IN_PROGRESS_RECHECK_SECONDS: i64 = 20 * 60;
+
+/// The next retry delay for a cleanup failure, one step past the delay the
+/// previous consecutive failure was given. A first failure starts the ladder.
+pub(crate) fn next_cleanup_failure_retry_seconds(previous: Option<i64>) -> i64 {
+    let ladder = CLEANUP_FAILURE_RETRY_LADDER_SECONDS;
+    match previous {
+        None => ladder[0],
+        Some(previous) => ladder
+            .into_iter()
+            .find(|step| *step > previous)
+            .unwrap_or(ladder[ladder.len() - 1]),
+    }
+}
+
+pub(crate) fn cleanup_retry_delay_seconds(
+    outcome: CleanupSettlement,
+    record: &crate::DownloadCleanupRecord,
+) -> i64 {
+    match outcome {
+        CleanupSettlement::CleanupFailed => {
+            next_cleanup_failure_retry_seconds(record.previous_failure_retry_seconds)
+        }
+        CleanupSettlement::ClientDeleteInProgress => CLIENT_DELETE_IN_PROGRESS_RECHECK_SECONDS,
+        _ => (30_i64 * (1_i64 << record.attempts.saturating_sub(1).min(4))).min(300),
+    }
+}
+
 async fn finish_cleanup_attempt(
     app: &AppUseCase,
     record: &crate::DownloadCleanupRecord,
@@ -1304,7 +1373,7 @@ async fn finish_cleanup_attempt(
     offset: usize,
     error: Option<&str>,
 ) -> bool {
-    let delay = (30_i64 * (1_i64 << record.attempts.saturating_sub(1).min(4))).min(300);
+    let delay = cleanup_retry_delay_seconds(outcome, record);
     match app
         .services
         .workflow
@@ -1370,6 +1439,62 @@ fn non_empty_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod settlement_tests {
     use super::*;
+
+    fn record(attempts: u32, previous_failure_retry_seconds: Option<i64>) -> crate::DownloadCleanupRecord {
+        crate::DownloadCleanupRecord {
+            download_id: scryer_domain::download_identity::DownloadId::new(),
+            client_id: "synthetic-client".into(),
+            client_type: "sabnzbd".into(),
+            item_id: "synthetic-item".into(),
+            tracked_state: "failed".into(),
+            title_id: None,
+            facet: None,
+            source_title: None,
+            attempts,
+            history_offset: 0,
+            payload_checkpoint: None,
+            previous_failure_retry_seconds,
+        }
+    }
+
+    #[test]
+    fn cleanup_failure_retries_escalate_from_seconds_to_six_hours() {
+        let mut previous = None;
+        let mut delays = Vec::new();
+        for attempts in 1..=9 {
+            let delay = cleanup_retry_delay_seconds(
+                CleanupSettlement::CleanupFailed,
+                &record(attempts, previous),
+            );
+            delays.push(delay);
+            previous = Some(delay);
+        }
+        assert_eq!(delays, [30, 60, 120, 240, 300, 3_600, 21_600, 21_600, 21_600]);
+        // A failure after a hold or deferral starts the ladder again, however
+        // many attempts the row has spent.
+        assert_eq!(
+            cleanup_retry_delay_seconds(CleanupSettlement::CleanupFailed, &record(3_000, None)),
+            30
+        );
+    }
+
+    #[test]
+    fn other_retry_outcomes_keep_their_short_schedule() {
+        for settlement in [
+            CleanupSettlement::SeedingHold,
+            CleanupSettlement::CleanupDeferred,
+            CleanupSettlement::ObservationUnknown,
+        ] {
+            let delays: Vec<_> = (1..=7)
+                .map(|attempts| cleanup_retry_delay_seconds(settlement, &record(attempts, Some(21_600))))
+                .collect();
+            assert_eq!(delays, [30, 60, 120, 240, 300, 300, 300], "{settlement:?}");
+        }
+        assert_eq!(
+            cleanup_retry_delay_seconds(CleanupSettlement::ClientDeleteInProgress, &record(1, None)),
+            CLIENT_DELETE_IN_PROGRESS_RECHECK_SECONDS
+        );
+    }
 
     // Sonarr 465b5192, Download/DownloadEventHub.cs distinguishes a removal
     // request from its outcome. A host observation of retained files wins.
