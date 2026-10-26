@@ -1716,7 +1716,14 @@ impl AppUseCase {
             return Ok(());
         };
         let planned_path = stored_path_to_path_buf(&planned.folder_path);
-        let folder_path = Self::resolve_existing_path_spelling(&planned_path).await;
+        let folder_path = if Self::rename_folder_differs_only_by_case(
+            title.folder_path.as_deref(),
+            &planned.folder_path,
+        ) {
+            Self::resolve_existing_path_spelling(&planned_path).await
+        } else {
+            planned_path
+        };
         let folder_path = path_to_stored_string(&folder_path);
         let folder_path = folder_path.as_str();
         if title
@@ -1790,6 +1797,15 @@ impl AppUseCase {
             .titles
             .set_folder_path(&title.id, folder_path)
             .await
+    }
+
+    /// The on-disk spelling lookup scans the planned folder's parent, which is
+    /// the library root for a bulk rename. Only a planned folder that differs
+    /// from the recorded one by letter case alone needs it.
+    pub(crate) fn rename_folder_differs_only_by_case(current: Option<&str>, planned: &str) -> bool {
+        current.is_some_and(|current| {
+            current != planned && crate::stored_paths::paths_match_ignoring_case(current, planned)
+        })
     }
 
     async fn resolve_existing_path_spelling(path: &Path) -> PathBuf {

@@ -996,6 +996,29 @@ async fn existing_title_folder_spelling_wins_for_case_only_path_changes() {
 }
 
 #[test]
+fn title_folder_spelling_lookup_runs_only_for_case_only_changes() {
+    assert!(AppUseCase::rename_folder_differs_only_by_case(
+        Some("/library/movies/Example Title"),
+        "/library/movies/example title",
+    ));
+    assert!(
+        !AppUseCase::rename_folder_differs_only_by_case(
+            Some("/library/movies/Example Title"),
+            "/library/movies/Other Title",
+        ),
+        "a real rename must not scan the library root"
+    );
+    assert!(!AppUseCase::rename_folder_differs_only_by_case(
+        Some("/library/movies/Example Title"),
+        "/library/movies/Example Title",
+    ));
+    assert!(!AppUseCase::rename_folder_differs_only_by_case(
+        None,
+        "/library/movies/Example Title",
+    ));
+}
+
+#[test]
 fn episode_rename_parent_uses_configured_season_folder_template() {
     let mut title = test_movie_title("Test Show");
     title.facet = MediaFacet::Series;
