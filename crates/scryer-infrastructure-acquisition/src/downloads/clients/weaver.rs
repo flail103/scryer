@@ -2240,8 +2240,11 @@ impl DownloadClient for WeaverDownloadClient {
     /// hint for a job Weaver still holds live does *not* fall through to a
     /// cancel. Cancelling there would stop a download nobody asked to stop, on
     /// nothing better than a stale local view, so the refusal is reported and
-    /// the job is left running. Routing keys on the `extensions.code` Weaver
-    /// attaches, never on the message text.
+    /// the job is left running. The same `CONFLICT` also answers a delete for
+    /// an archived job that an earlier history operation still holds; that
+    /// one is reported as in progress (see `history_delete_conflict`).
+    /// Routing keys on the `extensions.code` Weaver attaches and on the live
+    /// queue, never on the message text.
     async fn delete_queue_item(
         &self,
         id: &str,
@@ -2258,20 +2261,7 @@ impl DownloadClient for WeaverDownloadClient {
             match self.remove_history_item(job_id, remove_data).await {
                 Ok(()) => Ok(()),
                 Err(error) if error.refused_with(WeaverErrorCode::Conflict) => {
-                    // The two views disagree: this side believes the job is
-                    // finished, Weaver says it is still running. Weaver is the
-                    // one holding the job, so it wins. Cancelling to force the
-                    // history delete through would destroy a download the user
-                    // never asked to stop, so the entry stays and the
-                    // disagreement is reported for a human to settle.
-                    warn!(
-                        job_id,
-                        "weaver: still reports this job as live; leaving it running instead of cancelling it"
-                    );
-                    Err(AppError::ManualReconciliationRequired(format!(
-                        "weaver still reports job {job_id} as live, so its entry was not removed; \
-                         the download was left running"
-                    )))
+                    Err(self.history_delete_conflict(job_id).await)
                 }
                 Err(error) => Err(error.into()),
             }
@@ -2283,11 +2273,91 @@ impl DownloadClient for WeaverDownloadClient {
                         job_id,
                         "weaver: job hinted as queued is no longer live; removing it from history instead"
                     );
-                    self.remove_history_item(job_id, remove_data)
-                        .await
-                        .map_err(AppError::from)
+                    match self.remove_history_item(job_id, remove_data).await {
+                        Ok(()) => Ok(()),
+                        Err(error) if error.refused_with(WeaverErrorCode::Conflict) => {
+                            Err(self.history_delete_conflict(job_id).await)
+                        }
+                        Err(error) => Err(error.into()),
+                    }
                 }
                 Err(error) => Err(error.into()),
+            }
+        }
+    }
+}
+
+/// How long a caller waits before looking at a job again when Weaver is still
+/// finishing an earlier history operation on it. Weaver's history delete
+/// waits a bounded time per job for its scripts to stop, so this is well past
+/// any delete that is actually progressing.
+const WEAVER_HISTORY_OPERATION_RECHECK: Duration = Duration::from_secs(20 * 60);
+
+/// Why Weaver refused a history delete with `CONFLICT`.
+///
+/// Weaver's `removeHistoryItems` answers `CONFLICT` both for a job that is
+/// still live in its queue and for an archived job that an earlier history
+/// operation (a delete, restart or edit) still holds. The error carries the
+/// code and a sentence, nothing finer, so the live queue tells them apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WeaverHistoryDeleteConflict {
+    /// The job is still in Weaver's live queue.
+    JobLive,
+    /// The job has left the live queue; an earlier history operation holds it.
+    HistoryOperationRunning,
+    /// The live queue could not be read, so the refusal cannot be placed.
+    Unknown,
+}
+
+impl WeaverDownloadClient {
+    /// Classifies a history-delete `CONFLICT` once, here at the boundary, by
+    /// reading Weaver's live queue for the job.
+    async fn classify_history_delete_conflict(&self, job_id: u64) -> WeaverHistoryDeleteConflict {
+        match self.query_queue_items(None, false).await {
+            Ok(items) if items.iter().any(|item| item.id == job_id) => {
+                WeaverHistoryDeleteConflict::JobLive
+            }
+            Ok(_) => WeaverHistoryDeleteConflict::HistoryOperationRunning,
+            Err(error) => {
+                debug!(job_id, error = %error, "weaver: could not read the live queue to place a history delete refusal");
+                WeaverHistoryDeleteConflict::Unknown
+            }
+        }
+    }
+
+    /// The error a history-delete `CONFLICT` becomes.
+    ///
+    /// A job Weaver is still finishing an earlier history operation on is
+    /// work in progress: the caller rechecks later and sends nothing more in
+    /// the meantime. Otherwise the two views disagree: this side believes the
+    /// job is finished, Weaver holds it live. Weaver holds the job, so it
+    /// wins. Cancelling to force the history delete through would destroy a
+    /// download the user never asked to stop, so the entry stays and the
+    /// disagreement is reported for a human to settle.
+    async fn history_delete_conflict(&self, job_id: u64) -> AppError {
+        match self.classify_history_delete_conflict(job_id).await {
+            WeaverHistoryDeleteConflict::HistoryOperationRunning => {
+                debug!(
+                    job_id,
+                    "weaver: an earlier history operation still holds this job; rechecking later"
+                );
+                AppError::temporary_unavailable_reason(
+                    scryer_application::error_reasons::acquisition::DOWNLOAD_CLIENT_DELETE_IN_PROGRESS,
+                    format!(
+                        "weaver is still finishing an earlier history operation on job {job_id}"
+                    ),
+                    Some(WEAVER_HISTORY_OPERATION_RECHECK),
+                )
+            }
+            WeaverHistoryDeleteConflict::JobLive | WeaverHistoryDeleteConflict::Unknown => {
+                debug!(
+                    job_id,
+                    "weaver: still reports this job as live; leaving it running instead of cancelling it"
+                );
+                AppError::ManualReconciliationRequired(format!(
+                    "weaver still reports job {job_id} as live, so its entry was not removed; \
+                     the download was left running"
+                ))
             }
         }
     }
@@ -3107,13 +3177,9 @@ mod tests {
             .expect("finished job should be removed from history instead");
     }
 
-    // The history hint is stale: this side saw the job as finished while
-    // Weaver still holds it live, so the history delete answers CONFLICT.
-    // Weaver owns the job, so the disagreement is reported and the job keeps
-    // running. Nothing is cancelled: a stale local view is not a reason to
-    // stop a download the user never asked to stop.
-    #[tokio::test]
-    async fn delete_history_item_never_cancels_a_job_weaver_still_holds_live() {
+    // Mounts a `RemoveHistoryItems` refusal with Weaver's `CONFLICT` code,
+    // a cancel that must never be sent, and the live queue Weaver reports.
+    async fn history_delete_conflict_server(queue: Option<serde_json::Value>) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
@@ -3124,7 +3190,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": null,
                 "errors": [{
-                    "message": "cannot delete active job — cancel it first",
+                    "message": "synthetic conflict sentence",
                     "extensions": { "code": "CONFLICT" }
                 }]
             })))
@@ -3133,7 +3199,6 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
-            .and(header("authorization", "Bearer wvr_test"))
             .and(body_string_contains("mutation CancelQueueItem"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "cancelQueueItem": { "success": true } }
@@ -3141,6 +3206,45 @@ mod tests {
             .expect(0)
             .mount(&server)
             .await;
+        let queue_response = match queue {
+            Some(items) => {
+                ResponseTemplate::new(200).set_body_json(json!({"data": {"queueItems": items}}))
+            }
+            None => ResponseTemplate::new(503),
+        };
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("queueItems"))
+            .respond_with(queue_response)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    async fn request_bodies(server: &MockServer) -> Vec<String> {
+        server
+            .received_requests()
+            .await
+            .expect("requests should be recorded")
+            .iter()
+            .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+            .collect()
+    }
+
+    // The history hint is stale: this side saw the job as finished while
+    // Weaver still holds it live, so the history delete answers CONFLICT and
+    // the live queue lists the job. Weaver owns the job, so the disagreement
+    // is reported and the job keeps running. Nothing is cancelled: a stale
+    // local view is not a reason to stop a download the user never asked to
+    // stop.
+    #[tokio::test]
+    async fn delete_history_item_never_cancels_a_job_weaver_still_holds_live() {
+        let server = history_delete_conflict_server(Some(json!([{
+            "id": 10002, "name": "Synthetic.Live.Fixture", "state": "DOWNLOADING",
+            "progressPercent": 40.0, "totalBytes": 42, "attributes": [],
+            "createdAt": "2024-01-01T00:00:00Z"
+        }])))
+        .await;
 
         let client = WeaverDownloadClient::new(server.uri(), Some("wvr_test".to_string()));
         let error = client
@@ -3153,19 +3257,117 @@ mod tests {
             "expected a reconciliation refusal naming the job, got {error:?}"
         );
 
-        let requests = server
-            .received_requests()
-            .await
-            .expect("requests should be recorded");
-        let bodies: Vec<String> = requests
-            .iter()
-            .map(|request| String::from_utf8_lossy(&request.body).into_owned())
-            .collect();
-        assert_eq!(bodies.len(), 1);
+        let bodies = request_bodies(&server).await;
+        assert_eq!(bodies.len(), 2);
         assert!(bodies[0].contains("mutation RemoveHistoryItems"));
+        assert!(bodies[1].contains("queueItems"));
         assert!(
             !bodies.iter().any(|body| body.contains("CancelQueueItem")),
             "no cancel may be sent for a job weaver still reports as live"
+        );
+    }
+
+    // Weaver answers the same CONFLICT for an archived job an earlier history
+    // operation still holds (its own delete waiting for the job's scripts to
+    // stop, say). The job is gone from the live queue, so the refusal is work
+    // in progress: a typed reason with a long recheck, one delete sent, no
+    // cancel. The sentence plays no part; it is deliberately unrelated here.
+    #[tokio::test]
+    async fn history_delete_conflict_for_a_job_off_the_live_queue_is_in_progress() {
+        for is_history in [true, false] {
+            let server = MockServer::start().await;
+            // On a queue hint the cancel comes first; Weaver says the job is
+            // no longer live, and the history delete then meets the conflict.
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_string_contains("mutation CancelQueueItem"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "data": null,
+                    "errors": [{ "message": "synthetic", "extensions": { "code": "NOT_FOUND" } }]
+                })))
+                .expect(u64::from(!is_history))
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_string_contains(
+                    "mutation RemoveHistoryItems($ids: [Int!]!)",
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "data": null,
+                    "errors": [{ "message": "synthetic", "extensions": { "code": "CONFLICT" } }]
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_string_contains("queueItems"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!({"data": {"queueItems": []}})),
+                )
+                .mount(&server)
+                .await;
+
+            let client = WeaverDownloadClient::new(server.uri(), Some("wvr_test".to_string()));
+            let error = client
+                .delete_queue_item("10003", is_history, false)
+                .await
+                .expect_err("weaver has not removed the job yet");
+            match &error {
+                AppError::TemporaryUnavailable {
+                    reason,
+                    retry_after,
+                    ..
+                } => {
+                    assert_eq!(
+                        *reason,
+                        Some(
+                            scryer_application::error_reasons::acquisition::DOWNLOAD_CLIENT_DELETE_IN_PROGRESS
+                        )
+                    );
+                    let wait = retry_after.expect("an in-progress delete names its recheck");
+                    assert!(
+                        (Duration::from_secs(15 * 60)..=Duration::from_secs(30 * 60))
+                            .contains(&wait),
+                        "recheck {wait:?} is outside 15-30 minutes"
+                    );
+                }
+                other => panic!("expected an in-progress refusal, got {other:?}"),
+            }
+            let bodies = request_bodies(&server).await;
+            assert_eq!(
+                bodies
+                    .iter()
+                    .filter(|body| body.contains("RemoveHistoryItems"))
+                    .count(),
+                1,
+                "the delete is sent once and never re-issued"
+            );
+            assert_eq!(
+                bodies
+                    .iter()
+                    .filter(|body| body.contains("CancelQueueItem"))
+                    .count(),
+                usize::from(!is_history),
+                "only the queue hint's own cancel is ever sent"
+            );
+        }
+    }
+
+    // A live queue that cannot be read leaves the refusal unplaced. It stays
+    // the reconciliation refusal it always was, never an in-progress wait.
+    #[tokio::test]
+    async fn history_delete_conflict_with_an_unreadable_queue_stays_a_reconciliation_refusal() {
+        let server = history_delete_conflict_server(None).await;
+        let client = WeaverDownloadClient::new(server.uri(), Some("wvr_test".to_string()));
+        let error = client
+            .delete_queue_item("10004", true, false)
+            .await
+            .expect_err("an unplaced conflict is not a removal");
+        assert!(
+            matches!(error, AppError::ManualReconciliationRequired(_)),
+            "got {error:?}"
         );
     }
 

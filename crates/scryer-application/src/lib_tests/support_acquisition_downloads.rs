@@ -338,6 +338,8 @@ pub(super) struct TrackingDownloadSubmissionRepo {
     /// in order; a record only, it never feeds `claim_download_cleanup`.
     pub(super) finished_cleanup:
         Arc<Mutex<Vec<(scryer_domain::download_identity::DownloadId, String, bool)>>>,
+    /// The retry delay of every `finish_download_cleanup` call, in order.
+    pub(super) finished_cleanup_retry_seconds: Arc<Mutex<Vec<i64>>>,
     /// Durable cleanup rows that are due: `list_due_download_cleanup` returns
     /// them in order and `claim_download_cleanup` hands each one out as a claim.
     pub(super) claimable_cleanup: Arc<Mutex<Vec<crate::DownloadCleanupRecord>>>,
@@ -1114,11 +1116,15 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         id: &scryer_domain::download_identity::DownloadId,
         outcome: &str,
         complete: bool,
-        _retry_seconds: i64,
+        retry_seconds: i64,
         _history_offset: usize,
         _error: Option<&str>,
     ) -> AppResult<()> {
         let _gate = self.writer_transaction().await;
+        self.finished_cleanup_retry_seconds
+            .lock()
+            .await
+            .push(retry_seconds);
         self.finished_cleanup
             .lock()
             .await
@@ -2462,6 +2468,9 @@ pub(super) struct StubDownloadClient {
     pub(super) deleted_items: Arc<Mutex<Vec<(String, bool)>>>,
     pub(super) deleted_requests: DeletedDownloadRequests,
     pub(super) delete_error: Arc<Mutex<Option<String>>>,
+    /// A typed refusal returned for every delete while set, after
+    /// `delete_error`.
+    pub(super) delete_app_error: Arc<Mutex<Option<AppError>>>,
     /// Every delete the client was asked for as `(item id, is_history)`,
     /// recorded before `delete_error` is applied.
     pub(super) delete_attempts: Arc<Mutex<Vec<(String, bool)>>>,
@@ -2592,6 +2601,9 @@ impl StubDownloadClient {
             .push((id.to_string(), is_history));
         if let Some(error) = self.delete_error.lock().await.clone() {
             return Err(AppError::Repository(error));
+        }
+        if let Some(error) = self.delete_app_error.lock().await.clone() {
+            return Err(error);
         }
         self.deleted_requests.lock().await.push((
             client_id.map(str::to_string),
