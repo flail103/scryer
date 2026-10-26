@@ -1,5 +1,15 @@
 use super::*;
 
+#[cfg(test)]
+mod postgres_history {
+    use scryer_infrastructure_datastore as datastore;
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../scryer-infrastructure-datastore/tests/support/postgres_history.rs"
+    ));
+}
+
 #[tokio::test]
 async fn migration_catalog_installs_download_password_storage() {
     let directory = tempfile::tempdir().expect("synthetic schema fixture");
@@ -1341,7 +1351,7 @@ async fn migration_0180_postgres_rekeys_constraints_and_compares_fresh_indexes()
         })?;
 
     let result = async {
-        crate::postgres::replay_source_catalog_for_fresh_install(&pool, Some(179)).await?;
+        postgres_history::replay_historical_postgres(&pool, 179).await?;
         let now = "2026-08-24T12:00:00Z";
         let first_id = "00000000-0000-4000-8000-000000000001";
         sqlx::query(
@@ -3931,7 +3941,7 @@ async fn migration_0179_postgres_backfills_token_identity_from_env() -> AppResul
         })?;
 
     let result = async {
-        crate::postgres::replay_source_catalog_for_fresh_install(&pool, Some(177)).await?;
+        postgres_history::replay_historical_postgres(&pool, 177).await?;
         sqlx::query(
             "INSERT INTO download_clients (
                 id, name, client_type, config_json, created_at, updated_at
@@ -4330,7 +4340,7 @@ async fn migration_0201_postgres_uses_native_payload_and_timestamp_types() -> Ap
         })?;
 
     let result = async {
-        crate::postgres::replay_source_catalog_for_fresh_install(&pool, Some(200)).await?;
+        postgres_history::replay_historical_postgres(&pool, 200).await?;
         sqlx::query(
             "INSERT INTO discovery_sync_runs (
                 id, kind, status, trigger_source, region, language,
@@ -4661,7 +4671,7 @@ async fn migrations_0202_and_0203_postgres_bind_factor_state_and_session_epochs(
         })?;
 
     let result = async {
-        crate::postgres::replay_source_catalog_for_fresh_install(&pool, Some(201)).await?;
+        postgres_history::replay_historical_postgres(&pool, 201).await?;
         for (id, expires_at) in [
             ("expired-challenge", "2000-01-01T00:00:00Z"),
             ("stale-challenge", "2999-01-01T00:00:00Z"),
@@ -4711,13 +4721,16 @@ async fn migrations_0202_and_0203_postgres_bind_factor_state_and_session_epochs(
                 .await
                 .map_err(|error| AppError::Repository(error.to_string()))?;
         assert_eq!(challenge_ids, vec!["newest-challenge".to_string()]);
+        // pg_indexes may render another test schema's index before filtering
+        // its namespace. Resolve our OIDs first and inspect typed catalog flags.
         let unique_index: i64 = sqlx::query_scalar(
             "SELECT COUNT(*)
-             FROM pg_indexes
-             WHERE schemaname = current_schema()
-               AND tablename = 'totp_enrollment_challenges'
-               AND indexname = 'totp_enrollment_challenges_one_active_per_user'
-               AND indexdef LIKE 'CREATE UNIQUE INDEX%'",
+             FROM pg_catalog.pg_index
+             WHERE indexrelid = to_regclass(format('%I.%I', current_schema(),
+                       'totp_enrollment_challenges_one_active_per_user'))
+               AND indrelid = to_regclass(format('%I.%I', current_schema(),
+                       'totp_enrollment_challenges'))
+               AND indisunique AND indisvalid AND indisready",
         )
         .fetch_one(&pool)
         .await
@@ -4840,7 +4853,7 @@ async fn migration_0186_postgres_relaxes_the_token_check_and_adds_the_canonical_
         })?;
 
     let result = async {
-        crate::postgres::replay_source_catalog_for_fresh_install(&pool, Some(185)).await?;
+        postgres_history::replay_historical_postgres(&pool, 185).await?;
         let now = "2026-08-25T12:00:00Z";
         let token_download = "00000000-0000-4000-8000-000000000101";
         let plugin_download = "00000000-0000-4000-8000-000000000102";

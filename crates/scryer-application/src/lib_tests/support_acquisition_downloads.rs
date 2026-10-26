@@ -303,15 +303,18 @@ pub(super) async fn title_blocklist_entries(
         .expect("list title blocklist entries")
 }
 
+pub(super) type NotifyHandshake = (Arc<Notify>, Arc<Notify>);
+pub(super) type EnrichmentCall = (&'static str, Vec<ClientJobLocator>);
+
 #[derive(Default, Clone)]
 pub(super) struct TrackingDownloadSubmissionRepo {
-    pub(super) grabbed_names_gate: Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>,
+    pub(super) grabbed_names_gate: Arc<Mutex<Option<NotifyHandshake>>>,
     pub(super) enrichment_canonical_reads: Arc<std::sync::atomic::AtomicUsize>,
-    pub(super) enrichment_calls: Arc<Mutex<Vec<(&'static str, Vec<ClientJobLocator>)>>>,
+    pub(super) enrichment_calls: Arc<Mutex<Vec<EnrichmentCall>>>,
     pub(super) enrichment_goals: Arc<Mutex<HashMap<ClientJobLocator, crate::PersistedSeedGoals>>>,
     pub(super) enrichment_failures: Arc<Mutex<HashSet<&'static str>>>,
     pub(super) enrichment_generation_on_read: Arc<Mutex<Option<Arc<std::sync::atomic::AtomicU64>>>>,
-    pub(super) enrichment_gate: Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>,
+    pub(super) enrichment_gate: Arc<Mutex<Option<NotifyHandshake>>>,
     pub(super) presence_scopes: Arc<Mutex<Option<Arc<TrackingAcquisitionScopeStateRepo>>>>,
     pub(super) password_retry_recovery: Arc<Mutex<Vec<DownloadSubmission>>>,
     /// Calls to `list_password_retry_recovery_submissions`.

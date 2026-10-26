@@ -3352,7 +3352,8 @@ async fn download_queue_poller_retries_imported_cleanup_from_facet_routing_until
         .expect("create monitored movie title");
 
     let item_id = "imported-cleanup-1";
-    let download_id = "download-id-imported-cleanup-1";
+    let canonical_download_id = scryer_domain::download_identity::DownloadId::new();
+    let download_id = canonical_download_id.to_wire();
     let output = tempfile::tempdir().unwrap();
     app.update_download_client_config(&user, crate::DownloadClientConfigUpdate {
         id: config.id.clone(),
@@ -3379,7 +3380,7 @@ async fn download_queue_poller_retries_imported_cleanup_from_facet_routing_until
             client_type: "nzbget".into(),
             client_id: config.id.clone(),
             download_client_item_id: item_id.into(),
-            download_id: Some(download_id.into()),
+            download_id: Some(download_id.clone()),
             name: "Imported Cleanup Retry".into(),
             release_name: None,
             dest_dir: payload.display().to_string(),
@@ -3407,7 +3408,7 @@ async fn download_queue_poller_retries_imported_cleanup_from_facet_routing_until
     download_submissions
         .record_submission_with_identity(
             DownloadSubmission {
-                download_id: scryer_domain::download_identity::DownloadId::new(),
+                download_id: canonical_download_id,
                 title_id: title.id.clone(),
                 purpose: crate::DownloadSubmissionPurpose::Standard,
                 facet: "movie".to_string(),
