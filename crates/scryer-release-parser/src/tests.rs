@@ -648,6 +648,106 @@ fn range_pack_parser_handles_anime_batch_release() {
 }
 
 #[test]
+fn anime_ordinal_season_and_trailing_year_keep_single_episode_scope() {
+    let target = context(ContextFacetHint::Anime, "Title");
+    for (raw, expected_season, expected_episode) in [
+        ("Title 3rd Season - 02", 3, 2),
+        ("Title 2nd Season - 05", 2, 5),
+        ("Title 3rd Season - 12", 3, 12),
+        ("Title (2024) 3rd Season S3E01-2026", 3, 1),
+    ] {
+        let parsed = crate::best_parse_for_target(raw, &target);
+        let episode = parsed.episode.expect(raw);
+
+        assert_eq!(episode.season, Some(expected_season), "{raw}");
+        assert_eq!(episode.episode_numbers, vec![expected_episode], "{raw}");
+        assert!(!episode.full_season, "{raw}");
+    }
+}
+
+#[test]
+fn anime_ordinal_season_revision_keeps_single_episode_scope_and_version() {
+    let target = context(ContextFacetHint::Anime, "Title");
+    for (raw, expected_season, expected_episode, expected_version) in [
+        ("Title 3rd Season - 02v2", 3, 2, 2),
+        ("Title 2nd Season - 05v3", 2, 5, 3),
+    ] {
+        let parsed = crate::best_parse_for_target(raw, &target);
+        let episode = parsed.episode.as_ref().expect(raw);
+
+        assert_eq!(episode.season, Some(expected_season), "{raw}");
+        assert_eq!(episode.episode_numbers, vec![expected_episode], "{raw}");
+        assert!(!episode.full_season, "{raw}");
+        assert_eq!(parsed.anime_version, Some(expected_version), "{raw}");
+    }
+}
+
+#[test]
+fn anime_absolute_revision_parity() {
+    let target = context(ContextFacetHint::Anime, "Sample Title");
+    for (token, expected_episode, expected_version) in [
+        ("02v2", 2, Some(2)),
+        ("02V2", 2, Some(2)),
+        ("17v12", 17, Some(12)),
+    ] {
+        let raw = format!("[Grp] Sample Title - {token} [1080p]");
+        let parsed = crate::best_parse_for_target(&raw, &target);
+        let episode = parsed.episode.as_ref().expect(&raw);
+
+        assert_eq!(
+            episode.absolute_episode_numbers,
+            vec![expected_episode],
+            "{raw}"
+        );
+        assert_eq!(parsed.anime_version, expected_version, "{raw}");
+    }
+    for token in ["02v", "02v0", "02vTwo", "02v2v3", "02v4294967296"] {
+        let raw = format!("[Grp] Sample Title - {token} [1080p]");
+        let parsed = crate::best_parse_for_target(&raw, &target);
+        assert_eq!(parsed.anime_version, None, "{raw}");
+        assert!(
+            parsed
+                .episode
+                .as_ref()
+                .is_none_or(|episode| episode.absolute_episode_numbers.is_empty()),
+            "{raw}: {:?}",
+            parsed.episode
+        );
+    }
+}
+
+#[test]
+fn standalone_version_marker_parity() {
+    let has_version_marker = |raw: &str, normalized: &str| {
+        let analysis =
+            analyze_release_for_target(raw, &context(ContextFacetHint::Anime, "Sample Title"));
+        analysis
+            .tokens
+            .iter()
+            .zip(&analysis.annotations)
+            .any(|(token, annotation)| {
+                token.normalized == normalized
+                    && (annotation.primary_role == TokenRole::VersionMarker
+                        || annotation
+                            .alternate_roles
+                            .contains(&TokenRole::VersionMarker))
+            })
+    };
+    assert!(has_version_marker(
+        "[Grp] Sample Title - 02 V2 [1080p]",
+        "V2"
+    ));
+    assert!(has_version_marker(
+        "[Grp] Sample Title - 02 V10 [1080p]",
+        "V10"
+    ));
+    assert!(!has_version_marker(
+        "[Grp] Sample Title - 02 VX [1080p]",
+        "VX"
+    ));
+}
+
+#[test]
 fn anime_context_keeps_trailing_parenthetical_episode_range() {
     let analysis = analyze_release_for_target(
         "Emberfall Season 12 - (213 - 229) [Typis]",

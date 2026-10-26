@@ -827,7 +827,7 @@ async fn actor_scoped_job_history_reads_do_not_replay_domain_events() {
 }
 
 #[tokio::test]
-async fn delete_title_queues_targeted_cancel_for_active_submission_only() {
+async fn delete_title_leaves_active_submission_for_unmatched_import() {
     let download_client = Arc::new(StubDownloadClient::default());
     let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     let pending_releases = Arc::new(TrackingPendingReleaseRepo::default());
@@ -1057,15 +1057,7 @@ async fn delete_title_queues_targeted_cancel_for_active_submission_only() {
     assert_eq!(*download_client.history_calls.lock().await, 0);
     assert!(download_client.deleted_items.lock().await.is_empty());
     let queued_commands = download_queue_commands.queued.lock().await.clone();
-    assert_eq!(queued_commands.len(), 1);
-    assert_eq!(queued_commands[0].client_id.as_deref(), Some("primary"));
-    assert_eq!(queued_commands[0].client_type, "sabnzbd");
-    assert_eq!(queued_commands[0].download_client_item_id, "queue-active");
-    assert!(!queued_commands[0].is_history);
-    assert_eq!(
-        queued_commands[0].requested_by_user_id.as_deref(),
-        Some(user.id.as_str())
-    );
+    assert!(queued_commands.is_empty());
     assert_eq!(
         pending_releases.deleted_title_ids.lock().await.clone(),
         vec![created.id.clone()]
@@ -1132,7 +1124,7 @@ fn synthetic_movie(name: &str) -> NewTitle {
 }
 
 #[tokio::test]
-async fn delete_title_ends_bindings_and_forgets_tracked_state_of_its_downloads() {
+async fn delete_title_keeps_live_downloads_unmatched_and_retires_completed_ones() {
     let download_client = Arc::new(StubDownloadClient::default());
     let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     let pending_releases = Arc::new(TrackingPendingReleaseRepo::default());
@@ -1209,19 +1201,16 @@ async fn delete_title_ends_bindings_and_forgets_tracked_state_of_its_downloads()
             .await
             .expect("responder task");
 
-    // The cancel for the still-active download is queued exactly as before.
     let queued_commands = download_queue_commands.queued.lock().await.clone();
-    assert_eq!(queued_commands.len(), 1);
-    assert_eq!(queued_commands[0].download_client_item_id, "job-active");
+    assert!(queued_commands.is_empty());
 
+    assert!(registry.is_ended(&imported_id).await);
+    assert!(
+        !registry.is_ended(&active_id).await,
+        "active download binding stays live so the poller can adopt it as unmatched"
+    );
     let mut expected_ids = vec![imported_id, active_id];
     expected_ids.sort_unstable();
-    for download_id in &expected_ids {
-        assert!(
-            registry.is_ended(download_id).await,
-            "every binding the deleted title held is ended"
-        );
-    }
     let mut deleted_marker_ids = download_submissions
         .deleted_identity_state_download_ids
         .lock()
@@ -1407,7 +1396,7 @@ async fn delete_title_then_regrab_of_the_same_torrent_tracks_a_fresh_downloading
 }
 
 #[tokio::test]
-async fn delete_title_ends_the_binding_of_a_grab_the_client_has_not_reported_yet() {
+async fn delete_title_keeps_bound_and_unbound_active_grabs_available_for_import() {
     let download_client = Arc::new(StubDownloadClient::default());
     let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     download_submissions
@@ -1477,11 +1466,11 @@ async fn delete_title_ends_the_binding_of_a_grab_the_client_has_not_reported_yet
         .await
         .expect("responder task");
 
-    assert!(registry.is_ended(&bound_id).await);
     assert!(
-        registry.is_ended(&unbound_id).await,
-        "a grab with no client item yet still retires with its title"
+        !registry.is_ended(&bound_id).await,
+        "active bound download stays live after title deletion"
     );
+    assert!(!registry.is_ended(&unbound_id).await);
     let mut expected_ids = vec![bound_id, unbound_id];
     expected_ids.sort_unstable();
     forgotten_ids.sort_unstable();
@@ -1493,10 +1482,8 @@ async fn delete_title_ends_the_binding_of_a_grab_the_client_has_not_reported_yet
         .clone();
     deleted_marker_ids.sort_unstable();
     assert_eq!(deleted_marker_ids, expected_ids);
-    // Only the bound grab has a client item to cancel.
     let queued_commands = download_queue_commands.queued.lock().await.clone();
-    assert_eq!(queued_commands.len(), 1);
-    assert_eq!(queued_commands[0].download_client_item_id, "job-bound");
+    assert!(queued_commands.is_empty());
 }
 
 /// The tracked-download commands a title merge sends, as the tests see them.
