@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { OverviewTitleTarget, ViewId, WantedSection } from "@/components/root/types";
 import { useClient, useMutation } from "urql";
@@ -235,7 +236,7 @@ export const WantedContainer = memo(function WantedContainer({
       setPendingHasMore(Boolean(page.hasMore));
       setPendingNextOffset(nextItems.length);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("status.failedToLoad");
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
       setPendingLoading(false);
@@ -273,7 +274,7 @@ export const WantedContainer = memo(function WantedContainer({
       setPendingHasMore(Boolean(page.hasMore));
       setPendingNextOffset(pendingNextOffset + nextItems.length);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("status.failedToLoad");
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
       pendingLoadInFlightRef.current = false;
@@ -299,7 +300,7 @@ export const WantedContainer = memo(function WantedContainer({
     async (id: string) => {
       const { data, error } = await executeForceGrab({ id });
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else if (data?.forceGrabPendingRelease?.grabbed === false) {
         setGlobalStatus(t("pending.grabRejected"), { level: "ERROR" });
         void refreshPending();
@@ -315,7 +316,7 @@ export const WantedContainer = memo(function WantedContainer({
     async (id: string) => {
       const { error } = await executeDismiss({ id });
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else {
         setGlobalStatus(t("pending.dismissed"));
         void refreshPending();
@@ -354,7 +355,7 @@ export const WantedContainer = memo(function WantedContainer({
       })
       .catch((error) => {
         if (!cancelled) {
-          setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
         }
       })
       .finally(() => {
@@ -386,7 +387,7 @@ export const WantedContainer = memo(function WantedContainer({
       setItems(data?.wantedItems?.items ?? []);
       setTotal(data?.wantedItems?.totalCount ?? 0);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("status.failedToLoad");
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
       setLoading(false);
@@ -421,7 +422,7 @@ export const WantedContainer = memo(function WantedContainer({
       setCutoffItems(data?.cutoffUnmetTitlesPage?.items ?? []);
       setCutoffTotal(data?.cutoffUnmetTitlesPage?.totalCount ?? 0);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("status.failedToLoad");
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
       setCutoffLoading(false);
@@ -595,9 +596,9 @@ export const WantedContainer = memo(function WantedContainer({
     }
     const { error } = await executeCancelAcquisitionSearch({ id });
     if (error) {
-      setGlobalStatus(error.message, { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     }
-  }, [executeCancelAcquisitionSearch, searchJob?.id, setGlobalStatus]);
+  }, [executeCancelAcquisitionSearch, searchJob?.id, setGlobalStatus, t]);
 
   // Per-item "Search now": one-scope interactive job — the id is the scope
   // identity (state-row id or convergence scope key), resolved server-side.
@@ -612,31 +613,31 @@ export const WantedContainer = memo(function WantedContainer({
     async (id: string) => {
       const { error } = await executePause({ id });
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else {
         void refreshItems();
       }
     },
-    [executePause, refreshItems, setGlobalStatus],
+    [executePause, refreshItems, setGlobalStatus, t],
   );
 
   const resumeItem = useCallback(
     async (id: string) => {
       const { error } = await executeResume({ id });
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else {
         void refreshItems();
       }
     },
-    [executeResume, refreshItems, setGlobalStatus],
+    [executeResume, refreshItems, setGlobalStatus, t],
   );
 
   const triggerMismatchRecovery = useCallback(
     async (titleId: string) => {
       const { data, error } = await executeMismatchRecovery({ titleId });
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else {
         setGlobalStatus(
           t("status.mismatchRecoveryQueued", {
@@ -745,7 +746,7 @@ export const WantedContainer = memo(function WantedContainer({
           setGlobalStatus(t("status.foundNzb", { count: results.length }));
         }
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setCutoffInteractiveSearchingId(null);
       }

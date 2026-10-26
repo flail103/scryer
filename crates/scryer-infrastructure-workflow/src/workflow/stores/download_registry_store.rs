@@ -320,7 +320,7 @@ impl DownloadRegistryStore {
                 if SqlRuntime::fetch_optional(SqlExec::Tx(tx),
                     "SELECT id FROM download_identity_states WHERE canonical_download_id = {} AND reason = {} AND EXISTS (SELECT 1 FROM download_client_bindings b WHERE b.download_id = download_identity_states.canonical_download_id AND b.ended_at IS NULL) LIMIT 1",
                     &[SqlArg::Text(id.clone()), SqlArg::Text(scryer_application::DOWNLOAD_PASSWORD_RETRY_REASON.into())]).await?.is_some() {
-                    return Err(AppError::Validation("password retry is awaiting reconciliation; binding preserved".into()));
+                    return Err(AppError::validation_refused(crate::error_reasons::WORKFLOW_PASSWORD_RETRY_AWAITING_RECONCILIATION, "password retry is awaiting reconciliation; binding preserved"));
                 }
                 let ended_at = Utc::now();
                 SqlRuntime::execute(
@@ -3062,7 +3062,10 @@ mod tests {
              \"downloads_pkey\"",
         ] {
             assert!(
-                is_unique_violation(&AppError::Repository(message.to_string())),
+                is_unique_violation(&AppError::repository_failure(
+                    scryer_application::RepositoryErrorKind::UniqueViolation,
+                    message.to_string()
+                )),
                 "expected unique violation: {message}"
             );
         }
@@ -3094,7 +3097,10 @@ mod tests {
         let resolution = store
             .converge_on_locator_winner(
                 &observation("job-1", None, Some("release"), "2026-08-24T13:00:00Z"),
-                AppError::Repository(POSTGRES_UNIQUE_VIOLATION.to_string()),
+                AppError::repository_failure(
+                    scryer_application::RepositoryErrorKind::UniqueViolation,
+                    POSTGRES_UNIQUE_VIOLATION.to_string(),
+                ),
             )
             .await
             .expect("recovery should converge on the winner");
@@ -3145,7 +3151,10 @@ mod tests {
                     Some("release"),
                     "2026-08-24T13:00:00Z",
                 ),
-                AppError::Repository(POSTGRES_UNIQUE_VIOLATION.to_string()),
+                AppError::repository_failure(
+                    scryer_application::RepositoryErrorKind::UniqueViolation,
+                    POSTGRES_UNIQUE_VIOLATION.to_string(),
+                ),
             )
             .await
             .expect("recovery should classify the mismatch");
@@ -3167,12 +3176,16 @@ mod tests {
         let error = store
             .converge_on_locator_winner(
                 &observation("job-1", None, Some("release"), "2026-08-24T13:00:00Z"),
-                AppError::Repository(POSTGRES_UNIQUE_VIOLATION.to_string()),
+                AppError::repository_failure(
+                    scryer_application::RepositoryErrorKind::UniqueViolation,
+                    POSTGRES_UNIQUE_VIOLATION.to_string(),
+                ),
             )
             .await
             .expect_err("recovery must not invent an identity");
 
-        let AppError::Repository(message) = error else {
+        let (AppError::Repository(message) | AppError::RepositoryFailure { message, .. }) = error
+        else {
             panic!("recovery should surface the original repository error");
         };
         assert_eq!(message, POSTGRES_UNIQUE_VIOLATION);

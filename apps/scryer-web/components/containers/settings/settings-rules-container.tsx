@@ -1,3 +1,6 @@
+import { graphQlRuleValidationResult } from "@/lib/utils/rego-diagnostics";
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
+import { hasGraphQlErrorCode, hasGraphQlErrorReason } from "@/lib/graphql/error-message";
 import { useRegoValidation } from "@/lib/hooks/use-rego-validation";
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -227,7 +230,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       return data.ruleSet as RuleSetRecord | null;
     } catch (error) {
       if (request === detailRequestRef.current) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       }
       return null;
     }
@@ -327,7 +330,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       if (error) throw error;
       setRuleSetRecords(data.ruleSets || []);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -338,7 +341,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       setTrackedRulePacks(data.trackedRulePacks || []);
       setTrackedRulePacksLoaded(true);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -377,7 +380,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
         return true;
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
         return false;
       } finally {
         setMutatingRulePackId(null);
@@ -397,7 +400,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingRulePackId(null);
       }
@@ -415,11 +418,11 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         return data.previewTrackedRulePackUpdate;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const alreadyCurrent = /same version|no update|already (?:up to date|latest)/i.test(message);
+        const message = userFacingGraphQlErrorMessage(error, "", t);
+        const alreadyCurrent = hasGraphQlErrorReason(error, "RULE_PACK_UP_TO_DATE", "VALIDATION_ERROR");
         setGlobalStatus(
           alreadyCurrent
-            ? "This rule pack is already up to date."
+            ? t("error.rulePackUpToDate")
             : message || t("status.failedToUpdate"),
           alreadyCurrent ? undefined : { level: "ERROR" },
         );
@@ -446,7 +449,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingRulePackId(null);
       }
@@ -467,7 +470,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingRulePackId(null);
       }
@@ -524,7 +527,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         );
         await refreshRuleSets();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingRuleSetId(null);
       }
@@ -547,7 +550,7 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         closeRuleSetEditor();
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingRuleSetId(null);
       setPendingDeleteRuleSet(null);
@@ -658,17 +661,9 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       closeRuleSetEditor();
       await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : null;
-      const validationErrorIndex = message?.indexOf("Rule validation failed:") ?? -1;
-      if (validationErrorIndex >= 0 && message) {
-        setValidationResult({
-          valid: false,
-          errors: [
-            message
-              .slice(validationErrorIndex + "Rule validation failed:".length)
-              .replace(/^\s*-?\s*/, ""),
-          ],
-        });
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
+      if (hasGraphQlErrorCode(error, "VALIDATION_ERROR")) {
+        setValidationResult(graphQlRuleValidationResult(error, message));
         return;
       }
       setGlobalStatus(message || t("status.failedToUpdate"), { level: "ERROR" });

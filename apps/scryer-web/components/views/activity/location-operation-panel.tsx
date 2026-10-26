@@ -193,7 +193,7 @@ function OperationPanel({ operationId, onDismiss }: Props) {
       });
     } catch (error) {
       setGlobalStatus(
-        userFacingGraphQlErrorMessage(error, t("move.planAgainFailed")),
+        userFacingGraphQlErrorMessage(error, t("move.planAgainFailed"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -220,7 +220,7 @@ function OperationPanel({ operationId, onDismiss }: Props) {
       setRefresh((value) => value + 1);
     } catch (error) {
       setGlobalStatus(
-        userFacingGraphQlErrorMessage(error, t(`move.${action}Failed`)),
+        userFacingGraphQlErrorMessage(error, t(`move.${action}Failed`), t),
         { level: "ERROR" },
       );
     } finally {

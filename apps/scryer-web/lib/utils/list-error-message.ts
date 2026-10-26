@@ -96,5 +96,5 @@ export function listRefusalKey(error: unknown): string | null {
  */
 export function listErrorMessage(error: unknown, t: Translate, fallback: string): string {
   const key = listRefusalKey(error);
-  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback);
+  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

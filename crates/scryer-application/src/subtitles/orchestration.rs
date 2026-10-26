@@ -380,9 +380,12 @@ async fn resolve_runtime_subtitle_providers(
         .collect::<Vec<_>>();
 
     if enabled_configs.is_empty() {
-        return Ok(RuntimeSubtitleProviders::NoProviders(AppError::Validation(
-            "no enabled subtitle providers are configured".to_string(),
-        )));
+        return Ok(RuntimeSubtitleProviders::NoProviders(
+            AppError::validation_refused(
+                crate::error_reasons::subtitles::NO_ENABLED_SUBTITLE_PROVIDERS_NOT_CONFIGURED,
+                "no enabled subtitle providers are configured".to_string(),
+            ),
+        ));
     }
 
     let mut providers = Vec::new();
@@ -486,9 +489,10 @@ async fn runtime_subtitle_provider_for_download(
         };
     }
 
-    Err(AppError::NotFound(format!(
-        "subtitle provider '{provider_name}' is not configured"
-    )))
+    Err(AppError::not_found_reason(
+        crate::error_reasons::subtitles::SUBTITLE_PROVIDER_NOT_NOT_FOUND,
+        format!("subtitle provider '{provider_name}' is not configured"),
+    ))
 }
 
 /// Consecutive failed searches after which a provider sits out the rest of a
@@ -826,7 +830,12 @@ impl AppUseCase {
             .titles
             .get_by_id(title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id}"),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -862,14 +871,24 @@ impl AppUseCase {
             .media_files
             .get_media_file_by_id(media_file_id)
             .await?
-            .ok_or_else(|| AppError::NotFound("media file not found".to_string()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::subtitles::MEDIA_FILE_NOT_FOUND,
+                    "media file not found".to_string(),
+                )
+            })?;
         let title = self
             .services
             .catalog
             .titles
             .get_by_id(&media_file.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", media_file.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", media_file.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -902,14 +921,24 @@ impl AppUseCase {
             .media_files
             .get_media_file_by_id(media_file_id)
             .await?
-            .ok_or_else(|| AppError::NotFound("media file not found".to_string()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::subtitles::MEDIA_FILE_NOT_FOUND,
+                    "media file not found".to_string(),
+                )
+            })?;
         let title = self
             .services
             .catalog
             .titles
             .get_by_id(&media_file.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", media_file.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", media_file.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -1030,14 +1059,24 @@ impl AppUseCase {
             .media_files
             .get_media_file_by_id(&media_file_id)
             .await?
-            .ok_or_else(|| AppError::NotFound("media file not found".to_string()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::subtitles::MEDIA_FILE_NOT_FOUND,
+                    "media file not found".to_string(),
+                )
+            })?;
         let title = self
             .services
             .catalog
             .titles
             .get_by_id(&media_file.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound("title not found".to_string()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::subtitles::TITLE_NOT_FOUND,
+                    "title not found".to_string(),
+                )
+            })?;
         // Downloading a subtitle is a library action, not an instance-settings
         // action: catalog administrators still pass through the app-permission
         // override in `effective_library_permission`.
@@ -2072,14 +2111,24 @@ async fn run_subtitle_search_for_file(
         .titles
         .get_by_id(title_id)
         .await?
-        .ok_or_else(|| crate::AppError::NotFound("title not found".into()))?;
+        .ok_or_else(|| {
+            crate::AppError::not_found_reason(
+                crate::error_reasons::subtitles::TITLE_NOT_FOUND,
+                "title not found",
+            )
+        })?;
     let mf = app
         .services
         .library
         .media_files
         .get_media_file_by_id(media_file_id)
         .await?
-        .ok_or_else(|| crate::AppError::NotFound("media file not found".into()))?;
+        .ok_or_else(|| {
+            crate::AppError::not_found_reason(
+                crate::error_reasons::subtitles::MEDIA_FILE_NOT_FOUND,
+                "media file not found",
+            )
+        })?;
 
     let is_series = is_series_title(&title);
     let media_kind = if is_series {

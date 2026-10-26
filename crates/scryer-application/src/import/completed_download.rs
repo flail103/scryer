@@ -37,6 +37,8 @@ mod verification;
 
 pub use check::check;
 pub(crate) use check::check_with_lookup;
+#[cfg(test)]
+pub(crate) use check::has_id_only_conflict;
 pub use execute::import;
 #[cfg(test)]
 pub(crate) use execute::import_with_lookup;

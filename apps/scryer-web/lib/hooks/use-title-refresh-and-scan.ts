@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -57,7 +58,7 @@ export function useTitleRefreshAndScan({
       await onScanned();
     } catch (error: unknown) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("settings.libraryScanFailed"),
+        userFacingGraphQlErrorMessage(error, t("settings.libraryScanFailed"), t),
         { level: "ERROR" },
       );
     } finally {

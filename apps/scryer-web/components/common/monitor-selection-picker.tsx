@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { AlertTriangle } from "lucide-react";
 import { useClient } from "urql";
@@ -266,7 +267,7 @@ export function MonitorSelectionPicker({
         if (!active) return;
         setChoices(null);
         setLoadError(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
         );
       })
       .finally(() => {

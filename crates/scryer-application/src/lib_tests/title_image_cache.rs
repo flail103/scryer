@@ -250,7 +250,9 @@ async fn clear_title_image_cache_collapses_duplicate_requests_and_waits_for_scan
     assert!(
         matches!(
             app.run_title_image_cache_refresh().await,
-            Err(AppError::Validation(_))
+            Err(AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. })
         ),
         "a reset requested while one runs must collapse into it"
     );

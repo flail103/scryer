@@ -38,5 +38,5 @@ export function episodeFileReassignErrorMessage(
   const reason = episodeFileReassignRefusalReason(error);
   const key = reason && Object.hasOwn(EPISODE_FILE_REASSIGN_REFUSAL_KEYS, reason)
     ? EPISODE_FILE_REASSIGN_REFUSAL_KEYS[reason] : null;
-  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback);
+  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

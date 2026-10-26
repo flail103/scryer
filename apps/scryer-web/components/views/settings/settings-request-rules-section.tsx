@@ -1271,14 +1271,14 @@ export function SettingsRequestRulesSection({
                             regoSource: value,
                           }))
                         }
-                        diagnostics={regoDiagnostics(ruleSetDraft.regoSource, validationResult)}
+                        diagnostics={regoDiagnostics(ruleSetDraft.regoSource, validationResult, t)}
                         feedback={
                           <EditorValidationStatus
                             id="settings-request-rule-validation"
                             checking={validating}
                             result={validationResult}
                             data-request-rule-valid={validationResult ? String(validationResult.valid) : undefined}
-                            data-request-rule-person-targeting-refusal={validationResult?.errors.some(isPersonTargetingRefusal) ? "true" : undefined}
+                            data-request-rule-person-targeting-refusal={validationResult?.diagnostics?.some(isPersonTargetingRefusal) ? "true" : undefined}
                           />
                         }
                         minLines={12}

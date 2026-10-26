@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useTheme } from "next-themes";
 import { useClient, type OperationResult } from "urql";
@@ -75,7 +76,7 @@ export function isSignedOutLoginSurface(): boolean {
 }
 
 function uiSettingsErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Failed to load UI settings";
+  return userFacingGraphQlErrorMessage(error, "Failed to load UI settings");
 }
 
 /**

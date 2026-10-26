@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { useClient, useMutation } from "urql";
 
@@ -97,7 +98,7 @@ export function DashboardContainer() {
   const reportError = React.useCallback(
     (error: unknown) => {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.apiError"),
+        userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
         { level: "ERROR" },
       );
     },
@@ -344,7 +345,7 @@ export function DashboardContainer() {
           },
         });
         if (result.error) {
-          setGlobalStatus(result.error.message ?? t("queue.markFailedFailed"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("queue.markFailedFailed"), t), { level: "ERROR" });
           return;
         }
         setGlobalStatus(t("queue.markFailedSearchSuccess"), { level: "SUCCESS" });
@@ -372,7 +373,7 @@ export function DashboardContainer() {
         },
       });
       if (result.error) {
-        setGlobalStatus(result.error.message ?? t("queue.deleteFailed"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("queue.deleteFailed"), t), { level: "ERROR" });
         return;
       }
       setGlobalStatus(t("queue.deleteQueued"), { level: "SUCCESS" });

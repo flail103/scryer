@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -270,7 +271,7 @@ export function SetupWizardContainer({
     handleDcDraftChange,
     testDownloadClient,
     handleDcTestAndSave,
-  } = useDownloadClientSetup({ client });
+  } = useDownloadClientSetup({ client, t });
 
   // ── Step 5 (fresh): Indexer ─────────────────────────────────────────
   const {
@@ -516,7 +517,7 @@ export function SetupWizardContainer({
         },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save";
+      const message = userFacingGraphQlErrorMessage(err, t("error.fallback.failedToSave"), t);
       setMediaPathsError(
         savingField
           ? `${t(SETUP_MEDIA_PATH_LABEL_KEYS[savingField])}: ${message}`

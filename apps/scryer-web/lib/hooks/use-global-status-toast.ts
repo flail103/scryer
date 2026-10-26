@@ -1,5 +1,4 @@
 import { createElement, useCallback, useRef } from "react";
-import { Unplug } from "lucide-react";
 import { toast } from "sonner";
 
 import type { GlobalStatusOptions, SetGlobalStatus } from "@/lib/context/global-status-context";
@@ -40,8 +39,7 @@ export function useGlobalStatusToast(setGlobalStatus: SetGlobalStatus, {
       return;
     }
 
-    const isDisconnected = /^\[network\]\s+failed to fetch$/i.test(displayStatus);
-    const toastMessage = isDisconnected ? "Disconnected" : displayStatus;
+    const toastMessage = displayStatus;
     const content = options?.toastId
       ? createElement("span", { id: options.toastId }, toastMessage)
       : toastMessage;
@@ -51,11 +49,7 @@ export function useGlobalStatusToast(setGlobalStatus: SetGlobalStatus, {
     // frame) then lands on the freshly created one, which vanishes within a
     // frame or two and never gets read. Fresh sonner ids keep every toast
     // independent while the span id stays a stable DOM contract.
-    const toastOptions = {
-      ...(isDisconnected
-        ? { icon: createElement(Unplug, { "aria-hidden": true }) }
-        : {}),
-    };
+    const toastOptions = {};
 
     if (toastLevel === "SUCCESS") {
       toast.success(content, toastOptions);

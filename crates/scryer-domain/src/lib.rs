@@ -2034,6 +2034,9 @@ pub struct IndexerConfig {
     pub caps_snapshot_json: Option<String>,
     pub last_health_status: Option<String>,
     pub last_error_message: Option<String>,
+    /// Stable cause of the latest failure; the sentence is display-only.
+    #[serde(default)]
+    pub last_error_code: Option<String>,
     pub last_error_at: Option<DateTime<Utc>>,
     pub config_json: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -2913,10 +2916,49 @@ impl DownloadPasswordFailure {
 
     pub fn message(self) -> &'static str {
         match self {
-            Self::Required => "ARCHIVE_PASSWORD_REQUIRED: a new archive password is required",
+            Self::Required => "a new archive password is required",
             Self::PasswordOrCorruption => {
-                "ARCHIVE_PASSWORD_OR_CORRUPTION: the password may be incorrect or the archive may be damaged"
+                "the password may be incorrect or the archive may be damaged"
             }
+        }
+    }
+}
+
+impl DownloadPasswordFailure {
+    pub const fn reason_code(self) -> &'static str {
+        match self {
+            Self::Required => "ARCHIVE_PASSWORD_REQUIRED",
+            Self::PasswordOrCorruption => "ARCHIVE_PASSWORD_OR_CORRUPTION",
+        }
+    }
+
+    pub fn from_reason_code(code: &str) -> Option<Self> {
+        match code {
+            "ARCHIVE_PASSWORD_REQUIRED" => Some(Self::Required),
+            "ARCHIVE_PASSWORD_OR_CORRUPTION" => Some(Self::PasswordOrCorruption),
+            _ => None,
+        }
+    }
+
+    /// Compatibility reader for queue snapshots and events written before codes
+    /// were stored separately. New producers never concatenate codes and prose.
+    pub fn from_legacy_reason(reason: &str) -> Option<Self> {
+        if reason == "archive_password_required" || reason.starts_with("ARCHIVE_PASSWORD_REQUIRED:")
+        {
+            Some(Self::Required)
+        } else if reason == "archive_password_or_corruption"
+            || reason.starts_with("ARCHIVE_PASSWORD_OR_CORRUPTION:")
+        {
+            Some(Self::PasswordOrCorruption)
+        } else {
+            None
+        }
+    }
+
+    pub fn from_stored_reason(code: Option<&str>, reason: Option<&str>) -> Option<Self> {
+        match code {
+            Some(code) => Self::from_reason_code(code),
+            None => reason.and_then(Self::from_legacy_reason),
         }
     }
 }
@@ -2926,21 +2968,10 @@ impl DownloadQueueItem {
         if self.state != DownloadQueueState::Failed {
             return None;
         }
-        match self.attention_reason.as_deref() {
-            Some(reason)
-                if reason == "archive_password_required"
-                    || reason.starts_with("ARCHIVE_PASSWORD_REQUIRED:") =>
-            {
-                Some(DownloadPasswordFailure::Required)
-            }
-            Some(reason)
-                if reason == "archive_password_or_corruption"
-                    || reason.starts_with("ARCHIVE_PASSWORD_OR_CORRUPTION:") =>
-            {
-                Some(DownloadPasswordFailure::PasswordOrCorruption)
-            }
-            _ => None,
-        }
+        DownloadPasswordFailure::from_stored_reason(
+            self.attention_reason_code.as_deref(),
+            self.attention_reason.as_deref(),
+        )
     }
 }
 
@@ -2974,6 +3005,9 @@ pub struct DownloadQueueItem {
     pub last_updated_at: Option<String>,
     pub attention_required: bool,
     pub attention_reason: Option<String>,
+    /// Stable attention condition, independent of the display sentence.
+    #[serde(default)]
+    pub attention_reason_code: Option<String>,
     pub download_client_item_id: String,
     #[serde(default)]
     pub download_id: Option<String>,
@@ -3390,6 +3424,7 @@ pub enum ImportErrorCode {
     EpisodeNotFound,
     EpisodeLookupFailed,
     SourceJobFailed,
+    SceneSubtitlePending,
     PolicyMismatch,
     IoFailed,
     PermissionDenied,
@@ -3404,6 +3439,7 @@ impl ImportErrorCode {
             Self::EpisodeNotFound => "episode_not_found",
             Self::EpisodeLookupFailed => "episode_lookup_failed",
             Self::SourceJobFailed => "source_job_failed",
+            Self::SceneSubtitlePending => "scene_subtitle_pending",
             Self::PolicyMismatch => "policy_mismatch",
             Self::IoFailed => "io_failed",
             Self::PermissionDenied => "permission_denied",
@@ -3418,6 +3454,7 @@ impl ImportErrorCode {
             "episode_not_found" => Some(Self::EpisodeNotFound),
             "episode_lookup_failed" => Some(Self::EpisodeLookupFailed),
             "source_job_failed" => Some(Self::SourceJobFailed),
+            "scene_subtitle_pending" => Some(Self::SceneSubtitlePending),
             "policy_mismatch" => Some(Self::PolicyMismatch),
             "io_failed" => Some(Self::IoFailed),
             "permission_denied" => Some(Self::PermissionDenied),
@@ -3466,6 +3503,12 @@ pub enum ImportSkipReason {
     /// grab delivered a program, not media.
     UnwantedExecutables,
     DownloadInProgress,
+    /// The source changed after its validation snapshot; retry with a fresh proof.
+    SourceChanged,
+    /// The source snapshot is temporarily unavailable.
+    SourceUnavailable,
+    /// Imported video still awaits scene subtitle delivery or source-hold release.
+    SceneSubtitlePending,
     DiskFull,
     PermissionDenied,
     PasswordRequired,
@@ -3485,6 +3528,9 @@ impl ImportSkipReason {
             Self::NoVideoFiles => "no_video_files",
             Self::UnwantedExecutables => "unwanted_executables",
             Self::DownloadInProgress => "download_in_progress",
+            Self::SourceChanged => "source_changed",
+            Self::SourceUnavailable => "source_unavailable",
+            Self::SceneSubtitlePending => "scene_subtitle_pending",
             Self::DiskFull => "disk_full",
             Self::PermissionDenied => "permission_denied",
             Self::PasswordRequired => "password_required",
@@ -4077,6 +4123,9 @@ pub struct TitleHistoryRecord {
     #[serde(default)]
     pub retry_requires_password: bool,
     pub failure_reason: Option<String>,
+    /// Stable failure condition beside the explanation.
+    #[serde(default)]
+    pub failure_reason_code: Option<String>,
     pub blocklist_reason: Option<String>,
     #[serde(default)]
     pub source_path: Option<String>,
@@ -4676,6 +4725,9 @@ pub struct DownloadFailedEventData {
     pub quality: Option<String>,
     #[serde(default, alias = "error_message")]
     pub reason: Option<String>,
+    /// Stable failure condition for history and retry decisions.
+    #[serde(default)]
+    pub reason_code: Option<String>,
     #[serde(default)]
     pub episode_ids: Vec<String>,
     #[serde(default)]
@@ -5689,6 +5741,9 @@ pub struct RuleSet {
     pub exclusive_group: Option<String>,
     #[serde(default)]
     pub disabled_reason: Option<String>,
+    /// Stable policy condition that disabled this rule.
+    #[serde(default)]
+    pub disabled_reason_code: Option<String>,
     /// Facets this rule applies to. Empty = all facets.
     pub applied_facets: Vec<MediaFacet>,
     pub created_at: DateTime<Utc>,

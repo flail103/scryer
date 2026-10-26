@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -39,7 +40,7 @@ export function useTitleReleaseBlocklistClear({
         setGlobalStatus(t("status.blocklistEntryCleared"));
         await onCleared();
       } catch (error: unknown) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setClearingEntryId((current) => (current === entryId ? null : current));
       }

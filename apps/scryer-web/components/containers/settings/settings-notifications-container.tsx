@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -323,7 +324,7 @@ export function SettingsNotificationsContainer({
       if (error) throw error;
       setChannels(data.notificationChannels || []);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -335,7 +336,7 @@ export function SettingsNotificationsContainer({
       if (error) throw error;
       setSubscriptions(data.notificationSubscriptions || []);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -373,7 +374,7 @@ export function SettingsNotificationsContainer({
           localPathStyleFromRuntimeValue(data?.runtimeInfo?.runtimePathStyle),
         );
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       }
     };
     void load();
@@ -389,7 +390,7 @@ export function SettingsNotificationsContainer({
 
     providerCatalogVersionRef.current = providerCatalogVersion;
     void Promise.all([refreshProviderTypes(), refreshNotificationTargets()]).catch((error: unknown) => {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     });
   }, [providerCatalogVersion, refreshNotificationTargets, refreshProviderTypes, setGlobalStatus, t]);
 
@@ -505,7 +506,7 @@ export function SettingsNotificationsContainer({
       await refreshChannels();
       await refreshNotificationTargets();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingChannelId(null);
     }
@@ -620,7 +621,7 @@ export function SettingsNotificationsContainer({
         setAwaitingChannelBaselineSync(true);
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingChannelId(null);
       setPendingDeleteChannel(null);
@@ -660,7 +661,7 @@ export function SettingsNotificationsContainer({
           isEnabled: channel.isEnabled,
         }));
       }
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingChannelId(null);
     }
@@ -808,7 +809,7 @@ export function SettingsNotificationsContainer({
       await refreshSubscriptions();
     } catch (error) {
       await refreshSubscriptions().catch(() => undefined);
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingSubscriptionId(null);
     }
@@ -940,7 +941,7 @@ export function SettingsNotificationsContainer({
         setAwaitingSubscriptionBaselineSync(true);
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingSubscriptionId(null);
       setPendingDeleteSubscription(null);
@@ -962,7 +963,7 @@ export function SettingsNotificationsContainer({
       setGlobalStatus(t("status.notificationSubscriptionUpdated"), { level: "SUCCESS" });
       await refreshSubscriptions();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setMutatingSubscriptionId(null);
     }

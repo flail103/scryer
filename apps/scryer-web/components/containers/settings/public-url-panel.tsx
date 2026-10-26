@@ -72,7 +72,7 @@ export function PublicUrlPanel() {
           setDraft(result.data.serviceSettings.publicUrlSaved ?? "");
         }
       } catch (cause) {
-        if (!cancelled) setError(userFacingGraphQlErrorMessage(cause, t("settings.publicUrlLoadError")));
+        if (!cancelled) setError(userFacingGraphQlErrorMessage(cause, t("settings.publicUrlLoadError"), t));
       }
     })();
     return () => { cancelled = true; };
@@ -101,7 +101,7 @@ export function PublicUrlPanel() {
       if (!result.data) throw new Error(t("settings.publicUrlSaveError"));
       preview = result.data.publicUrlChangePreview;
     } catch (cause) {
-      setError(userFacingGraphQlErrorMessage(cause, t("settings.publicUrlSaveError")));
+      setError(userFacingGraphQlErrorMessage(cause, t("settings.publicUrlSaveError"), t));
       setBusy(false);
       return;
     }
@@ -136,7 +136,7 @@ export function PublicUrlPanel() {
     } catch (cause) {
       setError(errorText(
         graphQlErrorExtension(cause, "PUBLIC_URL_REJECTED", "reason"),
-        userFacingGraphQlErrorMessage(cause, t("settings.publicUrlSaveError")),
+        userFacingGraphQlErrorMessage(cause, t("settings.publicUrlSaveError"), t),
       ));
     } finally {
       setBusy(false);

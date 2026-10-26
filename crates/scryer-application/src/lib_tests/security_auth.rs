@@ -868,8 +868,11 @@ async fn oauth_redirect_validation_and_code_exchange_reject_fragments() {
         .await
         .expect_err("fragment-bearing redirect should be rejected")
     {
-        AppError::Validation(message) => {
-            assert_eq!(message, "redirect_uri must not contain a fragment");
+        AppError::ValidationRefused { reason, .. } => {
+            assert_eq!(
+                reason,
+                crate::error_reasons::oauth::REDIRECT_URI_FRAGMENT_FORBIDDEN
+            );
         }
         other => panic!("expected redirect_uri validation error, got {other}"),
     }
@@ -885,8 +888,11 @@ async fn oauth_redirect_validation_and_code_exchange_reject_fragments() {
         .await
         .expect_err("fragment-bearing token redirect should be rejected")
     {
-        AppError::Validation(message) => {
-            assert_eq!(message, "redirect_uri must not contain a fragment");
+        AppError::ValidationRefused { reason, .. } => {
+            assert_eq!(
+                reason,
+                crate::error_reasons::oauth::REDIRECT_URI_FRAGMENT_FORBIDDEN
+            );
         }
         other => panic!("expected token redirect_uri validation error, got {other}"),
     }
@@ -943,8 +949,11 @@ async fn oauth_token_with_app_permissions_is_rejected_during_authentication() {
         .await
         .expect_err("OAuth token with app permissions should be rejected");
     match error {
-        AppError::Unauthorized(message) => {
-            assert_eq!(message, "OAuth tokens cannot carry app permissions");
+        AppError::UnauthorizedReason { reason, .. } => {
+            assert_eq!(
+                reason,
+                crate::error_reasons::security::OAUTH_TOKENS_CANNOT_CARRY_APP_PERMISSIONS
+            );
         }
         other => panic!("expected OAuth app-permission rejection, got {other}"),
     }
@@ -1001,8 +1010,11 @@ async fn oauth_token_with_actor_capabilities_is_rejected_during_authentication()
         .await
         .expect_err("OAuth token with actor capabilities should be rejected");
     match error {
-        AppError::Unauthorized(message) => {
-            assert_eq!(message, "OAuth tokens cannot carry actor capabilities");
+        AppError::UnauthorizedReason { reason, .. } => {
+            assert_eq!(
+                reason,
+                crate::error_reasons::security::OAUTH_TOKENS_CANNOT_CARRY_ACTOR_CAPABILITIES
+            );
         }
         other => panic!("expected OAuth actor-capability rejection, got {other}"),
     }
@@ -1878,7 +1890,7 @@ async fn passkey_registration_allows_external_user() {
     let result = app.webauthn_register_start(&user, true).await;
 
     assert!(
-        matches!(&result, Err(AppError::Repository(message)) if message == "not configured"),
+        matches!(&result, Err(AppError::Repository(message) | AppError::RepositoryFailure { message, .. } | AppError::RepositoryFailed { message, .. }) if message == "not configured"),
         "the external user should pass eligibility checks before reaching the WebAuthn repository: {result:?}"
     );
 }
@@ -1893,7 +1905,10 @@ async fn passkey_registration_requires_own_account_capability() {
 
     let result = app.webauthn_register_start(&user, true).await;
 
-    assert!(matches!(result, Err(AppError::Unauthorized(_))));
+    assert!(matches!(
+        result,
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
+    ));
 }
 
 #[tokio::test]
@@ -1919,7 +1934,11 @@ async fn passkey_management_requires_enabled_form_login() {
 
     fn assert_form_login_required<T>(result: AppResult<T>) {
         match result {
-            Err(AppError::Validation(message)) => {
+            Err(
+                AppError::Validation(message)
+                | AppError::ValidationRefused { message, .. }
+                | AppError::ValidationRefusedWithCount { message, .. },
+            ) => {
                 assert_eq!(
                     message,
                     "passkey authentication is unavailable while form login is disabled"
@@ -2308,7 +2327,10 @@ async fn verified_old_password_cannot_continue_after_password_epoch_changes() {
         )
         .await;
     assert!(
-        matches!(old_login, Err(AppError::Unauthorized(_))),
+        matches!(
+            old_login,
+            Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
+        ),
         "the paused old-password request must not issue a token or challenge"
     );
     assert!(
@@ -2544,7 +2566,10 @@ async fn failed_local_login_logs_username_client_ip_and_reason_without_the_passw
         .await;
     drop(guard);
 
-    assert!(matches!(result, Err(AppError::Unauthorized(_))));
+    assert!(matches!(
+        result,
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
+    ));
     let events = captured.0.lock().unwrap().clone();
     let failures = events
         .iter()

@@ -225,7 +225,8 @@ async fn require_actor_view_library(app: &AppUseCase, actor: &User) -> AppResult
     {
         Ok(())
     } else {
-        Err(AppError::Unauthorized(
+        Err(AppError::unauthorized_reason(
+            crate::error_reasons::events::LIBRARY_ACCESS_DENIED,
             "You do not have access to this library".to_string(),
         ))
     }
@@ -673,6 +674,7 @@ fn media_request_title_history_records(
             import_id: None,
             skip_reason: None,
             retry_requires_password: false,
+            failure_reason_code: None,
             failure_reason: None,
             blocklist_reason: None,
             source_path: None,
@@ -1136,7 +1138,12 @@ impl AppUseCase {
             .titles
             .get_by_id(&input.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", input.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", input.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -1182,7 +1189,12 @@ impl AppUseCase {
                 .titles
                 .get_by_id(title_id)
                 .await?
-                .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                        format!("title {title_id}"),
+                    )
+                })?;
             self.require_library_permission(
                 actor,
                 &title.library_id,
@@ -1624,9 +1636,10 @@ impl AppUseCase {
             .subscribe(&actor.id, plugin_id)
             .await
             .ok_or_else(|| {
-                AppError::NotFound(format!(
-                    "no active plugin install progress for '{plugin_id}'"
-                ))
+                AppError::not_found_reason(
+                    crate::error_reasons::events::ACTIVE_PLUGIN_INSTALL_PROGRESS_NOT_FOUND,
+                    format!("no active plugin install progress for '{plugin_id}'"),
+                )
             })
     }
 
@@ -1879,7 +1892,12 @@ impl AppUseCase {
             .titles
             .get_by_id(title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -1919,14 +1937,24 @@ impl AppUseCase {
             .shows
             .get_episode_by_id(episode_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("episode {}", episode_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::events::EPISODE_NOT_FOUND,
+                    format!("episode {}", episode_id),
+                )
+            })?;
         let title = self
             .services
             .catalog
             .titles
             .get_by_id(&episode.title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {}", episode.title_id)))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {}", episode.title_id),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,

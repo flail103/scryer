@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "./graphql/error-message.ts";
 import type { Translate } from "@/components/root/types";
 import type { SetGlobalStatus } from "@/lib/context/global-status-context";
 import { metadataFacetGraphqlValue } from "./facets/registry.ts";
@@ -63,7 +64,7 @@ export async function handleFixTitleMatchComplete({
   try {
     await refreshTitleDetail();
   } catch (error) {
-    setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+    setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     return;
   }
 

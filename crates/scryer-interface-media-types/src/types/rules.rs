@@ -47,9 +47,26 @@ pub struct DeleteRuleSetPayload {
     pub id: async_graphql::ID,
 }
 
+/// Structured rule diagnostic. Coordinates refer to the compiled Rego source.
+#[derive(SimpleObject, Clone)]
+pub struct RuleValidationDiagnosticPayload {
+    /// Stable condition code.
+    pub code: String,
+    /// Human-readable diagnostic for unknown-code fallback.
+    pub message: String,
+    /// One-based source line when the compiler supplies it.
+    pub line: Option<i32>,
+    /// One-based source column when the compiler supplies it.
+    pub column: Option<i32>,
+    /// Input path involved in the diagnostic.
+    pub path: Option<String>,
+}
+
 #[derive(SimpleObject, Clone)]
 /// Result of validating Rego source.
 pub struct RuleValidationResultPayload {
+    /// Structured conditions and source locations.
+    pub diagnostics: Vec<RuleValidationDiagnosticPayload>,
     /// Whether the source is valid.
     pub valid: bool,
     /// Validation errors; empty when valid.

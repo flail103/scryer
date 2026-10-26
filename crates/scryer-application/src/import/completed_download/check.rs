@@ -49,7 +49,9 @@ pub(crate) async fn check_with_lookup(
                     app,
                     td,
                     crate::tracked_downloads::ImportBlockedReason::AfterImport,
-                    td.status_messages.first().map(String::as_str),
+                    td.status_messages
+                        .first()
+                        .map(|message| message.text.as_str()),
                 )
                 .await;
             }
@@ -255,13 +257,11 @@ pub(crate) async fn check_with_lookup(
     // Auto-import safety gating.
     match td.match_type {
         TitleMatchType::Unmatched => {
-            if !td
-                .status_messages
-                .iter()
-                .any(|m| m.contains("couldn't be matched"))
-            {
+            if !td.status_messages.iter().any(|m| {
+                m.kind == crate::tracked_downloads::TrackedStatusMessageKind::TitleUnmatched
+            }) {
                 td.status_messages.clear();
-                td.warn("Download couldn't be matched to a library title. Assign a title manually or check the download name.");
+                td.warn_kind(crate::tracked_downloads::TrackedStatusMessageKind::TitleUnmatched, "Download couldn't be matched to a library title. Assign a title manually or check the download name.");
             }
             set_state_to_import_blocked(app, td).await;
             return;
@@ -269,10 +269,14 @@ pub(crate) async fn check_with_lookup(
         TitleMatchType::IdOnly => {
             if has_id_only_conflict(td) {
                 if !td.status_messages.iter().any(|m| {
-                    m.contains("matched by ID only") || m.contains(ID_ONLY_CONFLICT_MESSAGE)
+                    matches!(
+                        m.kind,
+                        crate::tracked_downloads::TrackedStatusMessageKind::IdOnlyConfirmation
+                            | crate::tracked_downloads::TrackedStatusMessageKind::IdOnlyConflict
+                    )
                 }) {
                     td.status_messages.clear();
-                    td.warn(
+                    td.warn_kind(crate::tracked_downloads::TrackedStatusMessageKind::IdOnlyConfirmation,
                         "Download was matched to a title by ID only. Manual confirmation required to import.",
                     );
                 }
@@ -397,10 +401,10 @@ fn mark_waiting_for_completed_history(
     td.state = TrackedDownloadState::ImportPending;
     td.waiting_for_completed_history = true;
     td.status = TrackedDownloadStatus::Warning;
-    td.status_messages = vec![
+    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
         "Completed download is waiting for client history to expose a matching item; retrying."
             .to_string(),
-    ];
+    )];
 }
 
 fn missing_completed_history_is_retryable(
@@ -715,10 +719,10 @@ pub(super) async fn completed_download_proves_assigned_title(
     AssignedTitleProof::Disproven
 }
 
-pub(super) fn has_id_only_conflict(td: &TrackedDownload) -> bool {
-    td.status_messages
-        .iter()
-        .any(|message| message == ID_ONLY_CONFLICT_MESSAGE)
+pub(crate) fn has_id_only_conflict(td: &TrackedDownload) -> bool {
+    td.status_messages.iter().any(|message| {
+        message.kind == crate::tracked_downloads::TrackedStatusMessageKind::IdOnlyConflict
+    })
 }
 
 async fn set_state_to_import_blocked(app: &AppUseCase, td: &mut TrackedDownload) {
@@ -743,7 +747,9 @@ async fn set_state_to_import_blocked_with_reason(
         app,
         td,
         reason,
-        td.status_messages.first().map(String::as_str),
+        td.status_messages
+            .first()
+            .map(|message| message.text.as_str()),
     )
     .await;
 
@@ -755,7 +761,7 @@ async fn set_state_to_import_blocked_with_reason(
     let message = td
         .status_messages
         .first()
-        .cloned()
+        .map(|message| message.text.clone())
         .unwrap_or_else(|| "Manual interaction required for this download.".to_string());
 
     let event = match td.title_id.as_ref() {
@@ -837,9 +843,15 @@ async fn block_tracked_download_identity_for_manual_review(
     if crate::download_submission_identity_is_empty(&observed_identity) {
         return;
     }
-    if !td.status_messages.iter().any(|message| message == detail) {
+    if !td.status_messages.iter().any(|message| {
+        message.kind == crate::tracked_downloads::TrackedStatusMessageKind::ManualReview
+    }) {
         td.status_messages.clear();
-        td.status_messages.push(detail.to_string());
+        td.status_messages
+            .push(crate::tracked_downloads::TrackedStatusMessage::new(
+                crate::tracked_downloads::TrackedStatusMessageKind::ManualReview,
+                detail,
+            ));
     }
     set_state_to_import_blocked_with_reason(app, td, reason).await;
 }

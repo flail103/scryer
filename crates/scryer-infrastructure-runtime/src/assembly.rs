@@ -208,8 +208,12 @@ fn datastore_config_from_url(
     data_dir: PathBuf,
     migration_mode: MigrationMode,
 ) -> AppResult<DatastoreConfig> {
-    let parsed = url::Url::parse(&raw_url)
-        .map_err(|error| AppError::Validation(format!("invalid SCRYER_DB_URL: {error}")))?;
+    let parsed = url::Url::parse(&raw_url).map_err(|error| {
+        AppError::validation_refused(
+            crate::error_reasons::DATASTORE_URL_INVALID,
+            format!("invalid SCRYER_DB_URL: {error}"),
+        )
+    })?;
     match parsed.scheme() {
         "sqlite" => Ok(DatastoreConfig::sqlite_with_source(
             raw_url,
@@ -227,22 +231,27 @@ fn datastore_config_from_url(
                 migration_mode,
             ))
         }
-        scheme => Err(AppError::Validation(format!(
-            "unsupported datastore URL scheme '{scheme}'; expected sqlite, postgres, or postgresql"
-        ))),
+        scheme => Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_URL_SCHEME_UNSUPPORTED,
+            format!(
+                "unsupported datastore URL scheme '{scheme}'; expected sqlite, postgres, or postgresql"
+            ),
+        )),
     }
 }
 
 fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
     if url.host_str().is_none_or(|host| host.trim().is_empty()) {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_HOST_REQUIRED,
             "PostgreSQL datastore URL must include a host".to_string(),
         ));
     }
 
     let database_name = url.path().trim_start_matches('/').trim();
     if database_name.is_empty() {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_DATABASE_REQUIRED,
             "PostgreSQL datastore URL must include a database name".to_string(),
         ));
     }
@@ -252,7 +261,8 @@ fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
         .find(|(key, _)| key == "sslmode")
         .map(|(_, value)| value.to_string());
     let Some(sslmode) = sslmode else {
-        return Err(AppError::Validation(
+        return Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_SSLMODE_REQUIRED,
             "PostgreSQL datastore URL must include an explicit sslmode".to_string(),
         ));
     };
@@ -260,9 +270,12 @@ fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
         sslmode.as_str(),
         "disable" | "prefer" | "require" | "verify-ca" | "verify-full"
     ) {
-        return Err(AppError::Validation(format!(
-            "unsupported PostgreSQL sslmode '{sslmode}'; expected disable, prefer, require, verify-ca, or verify-full"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_SSLMODE_UNSUPPORTED,
+            format!(
+                "unsupported PostgreSQL sslmode '{sslmode}'; expected disable, prefer, require, verify-ca, or verify-full"
+            ),
+        ));
     }
 
     let username = env_string("SCRYER_DB_USER")
@@ -275,7 +288,8 @@ fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
             }
         })
         .ok_or_else(|| {
-            AppError::Validation(
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_POSTGRES_USERNAME_REQUIRED,
                 "PostgreSQL datastore requires SCRYER_DB_USER or a URL username".to_string(),
             )
         })?;
@@ -283,10 +297,16 @@ fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
     let password = postgres_password(&url)?;
 
     url.set_username(&username).map_err(|_| {
-        AppError::Validation("failed to set PostgreSQL username on datastore URL".to_string())
+        AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_USERNAME_INVALID,
+            "failed to set PostgreSQL username on datastore URL".to_string(),
+        )
     })?;
     url.set_password(Some(&password)).map_err(|_| {
-        AppError::Validation("failed to set PostgreSQL password on datastore URL".to_string())
+        AppError::validation_refused(
+            crate::error_reasons::DATASTORE_POSTGRES_PASSWORD_INVALID,
+            "failed to set PostgreSQL password on datastore URL".to_string(),
+        )
     })?;
 
     let mut redacted = url.clone();
@@ -299,14 +319,18 @@ fn resolve_postgres_url(mut url: url::Url) -> AppResult<(String, String)> {
 fn postgres_password(url: &url::Url) -> AppResult<String> {
     if let Some(password_file) = env_string("SCRYER_DB_PASSWORD_FILE") {
         let password = std::fs::read_to_string(&password_file).map_err(|error| {
-            AppError::Validation(format!(
-                "failed to read SCRYER_DB_PASSWORD_FILE {}: {error}",
-                password_file
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_PASSWORD_FILE_UNREADABLE,
+                format!(
+                    "failed to read SCRYER_DB_PASSWORD_FILE {}: {error}",
+                    password_file
+                ),
+            )
         })?;
         let password = password.trim_end().to_string();
         if password.is_empty() {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::DATASTORE_PASSWORD_FILE_EMPTY,
                 "SCRYER_DB_PASSWORD_FILE did not contain a password".to_string(),
             ));
         }
@@ -321,10 +345,8 @@ fn postgres_password(url: &url::Url) -> AppResult<String> {
         .map(str::to_string)
         .filter(|password| !password.trim().is_empty())
         .ok_or_else(|| {
-            AppError::Validation(
-                "PostgreSQL datastore requires SCRYER_DB_PASSWORD, SCRYER_DB_PASSWORD_FILE, or a URL password"
-                    .to_string(),
-            )
+            AppError::validation_refused(crate::error_reasons::DATASTORE_POSTGRES_PASSWORD_REQUIRED, "PostgreSQL datastore requires SCRYER_DB_PASSWORD, SCRYER_DB_PASSWORD_FILE, or a URL password"
+                    .to_string())
         })
 }
 
@@ -1929,8 +1951,9 @@ pub async fn restore_prepared_backup_directory_to_datastore(
     prepared_root: &Path,
 ) -> AppResult<scryer_application::BackupRestorePreparedBundle> {
     match config.engine {
-        DatastoreEngine::Sqlite => Err(AppError::Validation(
-            "prepared backup directory restore is only supported for PostgreSQL".into(),
+        DatastoreEngine::Sqlite => Err(AppError::validation_refused(
+            crate::error_reasons::DATASTORE_DIRECTORY_RESTORE_ENGINE_UNSUPPORTED,
+            "prepared backup directory restore is only supported for PostgreSQL",
         )),
         DatastoreEngine::Postgres => {
             let services =

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "@/lib/graphql/error-message";
 import { useCallback, useState } from "react";
 import { useClient } from "urql";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -56,7 +57,7 @@ export function useMaintenanceRuleState({
       record: MaintenanceRuleSetRecord,
       state: MaintenanceRuleState,
       candidateCount?: number,
-    ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    ): Promise<{ ok: true } | { ok: false; message: string; error: unknown }> => {
       const { error } = await client
         .mutation(
           setMaintenanceRuleStateMutation,
@@ -64,12 +65,12 @@ export function useMaintenanceRuleState({
         )
         .toPromise();
       if (error) {
-        return { ok: false, message: error.message };
+        return { ok: false, message: userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), error };
       }
       await onChanged();
       return { ok: true };
     },
-    [client, onChanged],
+    [client, onChanged, t],
   );
 
   /// List what the rule could act on once enabled. The dialog shows every
@@ -113,7 +114,7 @@ export function useMaintenanceRuleState({
       } catch (error) {
         setPendingArming(null);
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
           { level: "ERROR" },
         );
       }
@@ -160,10 +161,10 @@ export function useMaintenanceRuleState({
       );
       return;
     }
-    const serverCount = parseAcknowledgedCandidateCountMismatch(result.message);
+    const serverCount = parseAcknowledgedCandidateCountMismatch(result.error);
     if (serverCount === null) {
       setPendingArming(null);
-      setGlobalStatus(result.message, { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(result, t("status.apiError"), t), { level: "ERROR" });
       await onChanged();
       return;
     }

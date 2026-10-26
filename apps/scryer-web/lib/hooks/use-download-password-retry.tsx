@@ -1,3 +1,4 @@
+import { isArchivePasswordFailure } from "../utils/archive-password-reason";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "urql";
 import { PasswordRetryDialog } from "@/components/dialogs/password-retry-dialog";
@@ -14,10 +15,8 @@ export function canRetryDownloadPassword(item: DownloadQueueItem): boolean {
   if (item.passwordRetryImportId) return true;
   return item.state === "FAILED" && Boolean(item.downloadId) &&
     ["sabnzbd", "nzbget", "weaver"].includes(item.clientType) &&
-    (item.passwordFailureCode === "ARCHIVE_PASSWORD_REQUIRED" ||
-     item.passwordFailureCode === "ARCHIVE_PASSWORD_OR_CORRUPTION" ||
-     Boolean(item.attentionReason?.startsWith("ARCHIVE_PASSWORD_REQUIRED:") ||
-       item.attentionReason?.startsWith("ARCHIVE_PASSWORD_OR_CORRUPTION:")));
+    isArchivePasswordFailure(item.passwordFailureCode ?? item.attentionReasonCode, item.attentionReason);
+
 }
 
 export type DownloadPasswordRetryTarget = Pick<DownloadQueueItem,

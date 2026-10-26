@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 import {
@@ -34,8 +35,8 @@ type MyApiKeysQueryResult = {
   myApiKeys: ApiKeySummary[];
 };
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
+function errorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]) {
+  return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
 function apiKeyStatus(key: ApiKeySummary, canCreate: boolean) {
@@ -131,7 +132,7 @@ export function ApiKeysPanel({ adoptSession }: {
       .query<MyApiKeysQueryResult>(myApiKeysQuery, {}, { requestPolicy: "network-only" })
       .toPromise();
     if (result.error || !result.data) {
-      if (errorMessage(result.error, "").includes("interactive session is required")) {
+      if (errorMessage(result.error, "", t).includes("interactive session is required")) {
         setKeys([]);
         setCanCreate(false);
         setLoaded(true);
@@ -139,14 +140,14 @@ export function ApiKeysPanel({ adoptSession }: {
         return;
       }
       setLoaded(true);
-      setStatus(errorMessage(result.error, "Unable to load API keys."));
+      setStatus(errorMessage(result.error, t("error.fallback.unableToLoadAPIKeys"), t));
       return;
     }
     setKeys(result.data.myApiKeys);
     setCanCreate(result.data.canCreateMyApiKeys);
     setLoaded(true);
     setStatus(null);
-  }, [client]);
+  }, [client, t]);
 
   useEffect(() => {
     void load();
@@ -172,7 +173,7 @@ export function ApiKeysPanel({ adoptSession }: {
       if (!result) return;
       const created = result.data?.createMyApiKey;
       if (result.error || !created) {
-        setStatus(errorMessage(result.error, "Unable to create API key."));
+        setStatus(errorMessage(result.error, t("error.fallback.unableToCreateAPIKey"), t));
         return;
       }
       setRevealed(created.apiKey);
@@ -180,11 +181,11 @@ export function ApiKeysPanel({ adoptSession }: {
       setLabel("");
       await load();
     } catch (error) {
-      setStatus(errorMessage(error, "Unable to create API key."));
+      setStatus(errorMessage(error, t("error.fallback.unableToCreateAPIKey"), t));
     } finally {
       setBusy(false);
     }
-  }, [busy, client, expiry, label, load, requestMfa]);
+  }, [busy, client, expiry, label, load, requestMfa, t]);
 
   const copyRevealedKey = useCallback(async () => {
     if (!revealed) {
@@ -198,9 +199,9 @@ export function ApiKeysPanel({ adoptSession }: {
       setRevealedCopied(true);
       setStatus(null);
     } catch (error) {
-      setStatus(errorMessage(error, "Unable to copy the API key."));
+      setStatus(errorMessage(error, t("error.fallback.unableToCopyTheAPIKey"), t));
     }
-  }, [revealed]);
+  }, [revealed, t]);
 
   const revoke = useCallback(async (id: string) => {
     setPendingRevoke(null);
@@ -209,14 +210,14 @@ export function ApiKeysPanel({ adoptSession }: {
     try {
       const result = await client.mutation(revokeMyApiKeyMutation, { id }).toPromise();
       if (result.error || !result.data?.revokeMyApiKey?.revoked) {
-        setStatus(errorMessage(result.error, "Unable to revoke API key."));
+        setStatus(errorMessage(result.error, t("error.fallback.unableToRevokeAPIKey"), t));
         return;
       }
       await load();
     } finally {
       setRevokingId(null);
     }
-  }, [client, load]);
+  }, [client, load, t]);
 
   return (
     <>

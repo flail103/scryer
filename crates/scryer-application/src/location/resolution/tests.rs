@@ -672,7 +672,12 @@ async fn a_transient_media_failure_keeps_its_companions_waiting_for_the_retry() 
     let error = resolve_with(&resolver, &outage, &title, 0)
         .await
         .expect_err("the first attempt meets the outage");
-    assert!(matches!(error, AppError::Repository(_)));
+    assert!(matches!(
+        error,
+        AppError::Repository(_)
+            | AppError::RepositoryFailure { .. }
+            | AppError::RepositoryFailed { .. }
+    ));
 
     let companion = resolve_with(&resolver, &outage, &title, 1);
     tokio::pin!(companion);

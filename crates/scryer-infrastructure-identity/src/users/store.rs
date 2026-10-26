@@ -72,7 +72,7 @@ impl UserRepository for UserStore {
                         "UPDATE users SET password_hash = {}, password_change_required = {} WHERE id = {} AND id = '00000000000000000000000000000001' AND username = 'admin' AND password_hash IS NULL AND auth_session_version IS NULL AND account_kind = 'local' AND status = 'active' AND NOT EXISTS (SELECT 1 FROM user_app_permission_masks WHERE user_id = users.id) AND NOT EXISTS (SELECT 1 FROM user_library_permission_masks WHERE user_id = users.id)",
                         &[SqlArg::OptText(user.password_hash.clone()), SqlArg::Bool(true), SqlArg::Text(user.id.clone())],
                     ).await?;
-                    if rows != 1 { return Err(AppError::Validation("default administrator seed changed during bootstrap".into())); }
+                    if rows != 1 { return Err(AppError::validation_refused(crate::error_reasons::IDENTITY_ADMINISTRATOR_BOOTSTRAP_SEED_STALE, "default administrator seed changed during bootstrap")); }
                 } else {
                     insert_user_tx(tx, &user).await?;
                 }
@@ -130,11 +130,17 @@ impl UserRepository for UserStore {
                     )
                     .await?;
                 if rows == 0 {
-                    return Err(AppError::NotFound(format!("user {user_id}")));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                        format!("user {user_id}"),
+                    ));
                 }
-                load_user_by_id_tx(tx, &user_id)
-                    .await?
-                    .ok_or_else(|| AppError::NotFound(format!("user {user_id}")))
+                load_user_by_id_tx(tx, &user_id).await?.ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                        format!("user {user_id}"),
+                    )
+                })
             })
         })
         .await
@@ -164,7 +170,10 @@ impl UserRepository for UserStore {
                         )
                         .await?;
                     if rows == 0 {
-                        return Err(AppError::NotFound(format!("user {user_id}")));
+                        return Err(AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                            format!("user {user_id}"),
+                        ));
                     }
                     for table in [
                         "totp_credentials",
@@ -219,7 +228,7 @@ impl UserRepository for UserStore {
                         )
                         .await?;
                     if rows == 0 {
-                        return Err(AppError::NotFound(format!("user {id}")));
+                        return Err(AppError::not_found_reason(crate::error_reasons::IDENTITY_USER_NOT_FOUND, format!("user {id}")));
                     }
                     for table in [
                         "totp_enrollment_challenges",
@@ -234,7 +243,7 @@ impl UserRepository for UserStore {
                     }
                     load_user_by_id_tx(tx, &id)
                         .await?
-                        .ok_or_else(|| AppError::NotFound(format!("user {id}")))
+                        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::IDENTITY_USER_NOT_FOUND, format!("user {id}")))
                 })
             },
         )
@@ -307,7 +316,7 @@ impl UserRepository for UserStore {
                     }
                     load_user_by_id_tx(tx, &id)
                         .await?
-                        .ok_or_else(|| AppError::NotFound(format!("user {id}")))
+                        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::IDENTITY_USER_NOT_FOUND, format!("user {id}")))
                 })
             },
         )
@@ -351,13 +360,11 @@ impl UserRepository for UserStore {
                         )
                         .await?;
                     if rows == 0 {
-                        return Err(AppError::Unauthorized(
-                            "password change is no longer required".into(),
-                        ));
+                        return Err(AppError::unauthorized_reason(crate::error_reasons::IDENTITY_PASSWORD_CHANGE_NOT_REQUIRED, "password change is no longer required"));
                     }
                     load_user_by_id_tx(tx, &id)
                         .await?
-                        .ok_or_else(|| AppError::NotFound(format!("user {id}")))
+                        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::IDENTITY_USER_NOT_FOUND, format!("user {id}")))
                 })
             },
         )
@@ -389,11 +396,17 @@ impl UserRepository for UserStore {
                     )
                     .await?;
                 if rows == 0 {
-                    return Err(AppError::NotFound(format!("user {id}")));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                        format!("user {id}"),
+                    ));
                 }
-                load_user_by_id_tx(tx, &id)
-                    .await?
-                    .ok_or_else(|| AppError::NotFound(format!("user {id}")))
+                load_user_by_id_tx(tx, &id).await?.ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                        format!("user {id}"),
+                    )
+                })
             })
         })
         .await
@@ -411,7 +424,10 @@ impl UserRepository for UserStore {
                     )
                     .await?;
                 if rows == 0 {
-                    return Err(AppError::NotFound(format!("user {id}")));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_USER_NOT_FOUND,
+                        format!("user {id}"),
+                    ));
                 }
                 Ok(())
             })
@@ -441,7 +457,12 @@ impl UserUiSettingsRepository for UserStore {
                 }
                 load_ui_settings_by_user_id_tx(tx, &user_id)
                     .await?
-                    .ok_or_else(|| AppError::NotFound(format!("UI settings for user {user_id}")))
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
+                            format!("UI settings for user {user_id}"),
+                        )
+                    })
             })
         })
         .await
@@ -502,7 +523,12 @@ impl UserUiSettingsRepository for UserStore {
                 }
                 load_ui_settings_by_user_id_tx(tx, &user_id)
                     .await?
-                    .ok_or_else(|| AppError::NotFound(format!("UI settings for user {user_id}")))
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
+                            format!("UI settings for user {user_id}"),
+                        )
+                    })
             })
         })
         .await
@@ -518,7 +544,12 @@ impl UserExternalAccountRepository for UserStore {
                 insert_external_account_tx(tx, &account).await?;
                 load_external_account_by_id_tx(tx, &account.id)
                     .await?
-                    .ok_or_else(|| AppError::NotFound(format!("external account {}", account.id)))
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                            format!("external account {}", account.id),
+                        )
+                    })
             })
         })
         .await
@@ -533,8 +564,9 @@ impl UserExternalAccountRepository for UserStore {
             .as_deref()
             .is_none_or(|external_user_id| external_user_id.trim().is_empty())
         {
-            return Err(AppError::Validation(
-                "external account identity must be present when claiming".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_IDENTITY_REQUIRED,
+                "external account identity must be present when claiming",
             ));
         }
         SqlRuntime::run_in_transaction(
@@ -547,7 +579,10 @@ impl UserExternalAccountRepository for UserStore {
                         return load_external_account_by_id_tx(tx, &account.id)
                             .await?
                             .ok_or_else(|| {
-                                AppError::NotFound(format!("external account {}", account.id))
+                                AppError::not_found_reason(
+                                    crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                                    format!("external account {}", account.id),
+                                )
                             });
                     }
 
@@ -556,8 +591,9 @@ impl UserExternalAccountRepository for UserStore {
                         &account.provider,
                         &account.connection_id,
                         account.external_user_id.as_deref().ok_or_else(|| {
-                            AppError::Validation(
-                                "external account identity must be present when claiming".into(),
+                            AppError::validation_refused(
+                                crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_IDENTITY_REQUIRED,
+                                "external account identity must be present when claiming",
                             )
                         })?,
                     )
@@ -574,9 +610,9 @@ impl UserExternalAccountRepository for UserStore {
                     .await?
                     .is_some()
                     {
-                        return Err(AppError::Validation(
-                            "external account is already linked to a different provider identity"
-                                .into(),
+                        return Err(AppError::validation_refused(
+                            crate::error_reasons::EXTERNAL_ACCOUNT_IDENTITY_MISMATCH,
+                            "external account is already linked to a different provider identity",
                         ));
                     }
                     Err(AppError::Repository(
@@ -722,14 +758,19 @@ impl UserExternalAccountRepository for UserStore {
                     )
                     .await?;
                 if rows == 0 {
-                    return Err(AppError::NotFound(format!(
-                        "external account {}",
-                        account.id
-                    )));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                        format!("external account {}", account.id),
+                    ));
                 }
                 load_external_account_by_id_tx(tx, &account.id)
                     .await?
-                    .ok_or_else(|| AppError::NotFound(format!("external account {}", account.id)))
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                            format!("external account {}", account.id),
+                        )
+                    })
             })
         })
         .await
@@ -757,7 +798,10 @@ impl UserExternalAccountRepository for UserStore {
                     let account = load_external_account_by_id_tx(tx, &account.id)
                         .await?
                         .ok_or_else(|| {
-                            AppError::NotFound(format!("external account {}", account.id))
+                            AppError::not_found_reason(
+                                crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                                format!("external account {}", account.id),
+                            )
                         })?;
                     Ok((user, account))
                 })
@@ -778,7 +822,10 @@ impl UserExternalAccountRepository for UserStore {
                 )
                 .await?
                 else {
-                    return Err(AppError::NotFound(format!("external account {id}")));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::IDENTITY_EXTERNAL_ACCOUNT_NOT_FOUND,
+                        format!("external account {id}"),
+                    ));
                 };
                 let user_id = account.text("user_id")?;
                 tx.execute(
@@ -808,8 +855,9 @@ impl UserExternalAccountRepository for UserStore {
                     )
                     .await?;
                 if rows == 0 {
-                    return Err(AppError::Validation(
-                        "cannot remove the last available sign-in method".into(),
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::IDENTITY_LAST_SIGN_IN_METHOD_REQUIRED,
+                        "cannot remove the last available sign-in method",
                     ));
                 }
                 Ok(())

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -321,9 +322,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
 
         if (adminLibrariesResult.error || requesterLibrariesResult.error) {
           setGlobalStatus(
-            adminLibrariesResult.error?.message ||
-              requesterLibrariesResult.error?.message ||
-              t("status.apiError"),
+            userFacingGraphQlErrorMessage(adminLibrariesResult.error ?? requesterLibrariesResult.error, t("status.apiError"), t),
             { level: "ERROR" },
           );
           return;
@@ -385,7 +384,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         return;
       }
       if (requestsResult.error) {
-        setGlobalStatus(requestsResult.error.message || t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(requestsResult.error, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
       const loadedRequests =
@@ -402,7 +401,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         setRequests((loadedRequests ?? []) as MediaRequestRecord[]);
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     } finally {
       if (
         refreshSeq === refreshSeqRef.current &&
@@ -428,7 +427,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         })),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t]);
 
@@ -545,7 +544,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         dispatchNavigationBadgesRefresh();
         await refresh();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setActionRequestId(null);
       }
@@ -570,7 +569,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         dispatchNavigationBadgesRefresh();
         await refresh();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setActionRequestId(null);
       }
@@ -604,7 +603,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         if (firstError !== null) throw firstError;
         setGlobalStatus(t("status.requestReopened", { name: request.title }));
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setActionRequestId(null);
       }
@@ -636,7 +635,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         dispatchNavigationBadgesRefresh();
         await refresh();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setActionRequestId(null);
       }
@@ -661,7 +660,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         dispatchNavigationBadgesRefresh();
         await refresh();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } finally {
         setActionRequestId(null);
       }
@@ -693,7 +692,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
       } catch (error) {
         setClaimsByRequestId((prev) => ({ ...prev, [request.id]: [] }));
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -731,7 +730,7 @@ export function RequestsContainer({ facet }: RequestsContainerProps) {
         await refresh();
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       } finally {

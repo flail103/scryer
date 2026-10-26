@@ -648,17 +648,13 @@ test("every rule state and effect has real copy in the default locale", () => {
   assert.equal(effectArmingLabelKey("SOME_FUTURE_ARMING"), null);
 });
 
-test("the count-mismatch message shape the dialog re-asks against is pinned", () => {
-  const message =
-    "destructive arming requires acknowledging the current candidate count (12)";
-
-  assert.equal(parseAcknowledgedCandidateCountMismatch(message), 12);
-  assert.equal(
-    parseAcknowledgedCandidateCountMismatch(`[GraphQL] ${message}`),
-    12,
-  );
-  assert.equal(parseAcknowledgedCandidateCountMismatch(message.toUpperCase()), 12);
-  assert.equal(parseAcknowledgedCandidateCountMismatch("rule not found"), null);
+test("count acknowledgement reads a numeric fact and ignores prose", () => {
+  const error = (value: unknown, reason = "MAINTENANCE_ARM_COUNT_MISMATCH") => ({ graphQLErrors: [{ message: "any words (999)", extensions: { code: "VALIDATION_ERROR", reason, currentCount: value } }] });
+  assert.equal(parseAcknowledgedCandidateCountMismatch(error(12)), 12);
+  assert.equal(parseAcknowledgedCandidateCountMismatch(error(0)), 0);
+  for (const value of [-1, 1.5, "12", Number.NaN, Number.POSITIVE_INFINITY]) assert.equal(parseAcknowledgedCandidateCountMismatch(error(value)), null);
+  assert.equal(parseAcknowledgedCandidateCountMismatch(error(12, "OTHER")), null);
+  assert.equal(parseAcknowledgedCandidateCountMismatch("acknowledging the current candidate count (12)"), null);
 });
 
 // ── Candidates ────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { PublicUrlPanel } from "@/components/containers/settings/public-url-panel";
 import { TrustedProxiesPanel } from "@/components/containers/settings/trusted-proxies-panel";
@@ -159,7 +160,7 @@ export function SettingsOverviewContainer({
       } catch (error) {
         setVerificationDepth(previous);
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -188,13 +189,13 @@ export function SettingsOverviewContainer({
       ).toPromise();
 
       if (error) {
-        setGlobalStatus(error.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
       } else {
         setGlobalStatus(t("settings.metadataRehydrationStarted"));
       }
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -232,7 +233,7 @@ export function SettingsOverviewContainer({
         setGlobalStatus(t("settings.uiSaved"), { level: "SUCCESS" });
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -286,7 +287,7 @@ export function SettingsOverviewContainer({
       }
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -327,7 +328,7 @@ export function SettingsOverviewContainer({
       setGlobalStatus(t("settings.imageCacheClearQueued"), { level: "SUCCESS" });
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {

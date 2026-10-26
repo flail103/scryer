@@ -911,7 +911,10 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
                 .await?
                     == 0
                 {
-                    return Err(AppError::NotFound("download submission not found".into()));
+                    return Err(AppError::not_found_reason(
+                        crate::error_reasons::WORKFLOW_DOWNLOAD_SUBMISSION_NOT_FOUND,
+                        "download submission not found",
+                    ));
                 }
                 Ok(())
             })
@@ -972,8 +975,9 @@ impl DownloadSubmissionRepository for DownloadSubmissionStore {
         let title_id = title_id.trim().to_string();
         let facet = facet.trim().to_string();
         if title_id.is_empty() || facet.is_empty() {
-            return Err(AppError::Validation(
-                "manual cleanup requires title and facet".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::WORKFLOW_CLEANUP_IDENTITY_REQUIRED,
+                "manual cleanup requires title and facet",
             ));
         }
         SqlRuntime::run_in_transaction(&self.datastore, "attribute_download_cleanup", move |tx| {
@@ -5916,7 +5920,10 @@ mod seed_goal_tests {
                     )
                     .await?;
                     if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-                        return Err(AppError::Repository(ACTIVE_LOCATOR_VIOLATION.to_string()));
+                        return Err(AppError::repository_failure(
+                            scryer_application::RepositoryErrorKind::UniqueViolation,
+                            ACTIVE_LOCATOR_VIOLATION.to_string(),
+                        ));
                     }
                     Ok(claimed)
                 })
@@ -5960,7 +5967,10 @@ mod seed_goal_tests {
                     if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
                         // This claimant read the locator as unbound before the
                         // winner committed, so its insert lost the race.
-                        return Err(AppError::Repository(ACTIVE_LOCATOR_VIOLATION.to_string()));
+                        return Err(AppError::repository_failure(
+                            scryer_application::RepositoryErrorKind::UniqueViolation,
+                            ACTIVE_LOCATOR_VIOLATION.to_string(),
+                        ));
                     }
                     claim_or_create_binding_download_id_tx(
                         tx,
@@ -5992,7 +6002,10 @@ mod seed_goal_tests {
                 let attempts = Arc::clone(&attempts);
                 Box::pin(async move {
                     attempts.fetch_add(1, Ordering::SeqCst);
-                    Err(AppError::Repository(ACTIVE_LOCATOR_VIOLATION.to_string()))
+                    Err(AppError::repository_failure(
+                        scryer_application::RepositoryErrorKind::UniqueViolation,
+                        ACTIVE_LOCATOR_VIOLATION.to_string(),
+                    ))
                 })
             },
         )
@@ -6000,7 +6013,8 @@ mod seed_goal_tests {
         .expect_err("a persistent conflict must not be swallowed");
 
         assert_eq!(attempts.load(Ordering::SeqCst), 2, "exactly one retry");
-        let AppError::Repository(message) = error else {
+        let (AppError::Repository(message) | AppError::RepositoryFailure { message, .. }) = error
+        else {
             panic!("the original repository error should surface");
         };
         assert_eq!(message, ACTIVE_LOCATOR_VIOLATION);
@@ -6028,7 +6042,8 @@ mod seed_goal_tests {
         .expect_err("an unrelated failure must propagate");
 
         assert_eq!(attempts.load(Ordering::SeqCst), 1, "no retry");
-        let AppError::Repository(message) = error else {
+        let (AppError::Repository(message) | AppError::RepositoryFailure { message, .. }) = error
+        else {
             panic!("the original repository error should surface");
         };
         assert_eq!(message, FOREIGN_KEY_VIOLATION);

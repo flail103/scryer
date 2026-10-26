@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "@/lib/graphql/error-message";
 // State and data for the Indexers › Search pane (spec 0002, WP4).
 // The search itself is the existing interactive-release-search job: one start,
 // one poll loop, one cancel. Everything the pane shows on top of it — facets,
@@ -229,7 +230,7 @@ export function SettingsIndexerSearchContainer() {
           return;
         }
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
           { level: "ERROR" },
         );
       }
@@ -326,7 +327,7 @@ export function SettingsIndexerSearchContainer() {
         );
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -473,7 +474,7 @@ export function SettingsIndexerSearchContainer() {
           });
         } catch (error) {
           setGlobalStatus(
-            error instanceof Error ? error.message : t("status.failedToLoad"),
+            userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
             { level: "ERROR" },
           );
         } finally {

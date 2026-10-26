@@ -30,6 +30,7 @@ export type TitleHistoryEvent = {
   importId: string | null;
   skipReason: string | null;
   retryRequiresPassword: boolean;
+  failureReasonCode?: string | null;
   failureReason: string | null;
   blocklistReason: string | null;
   sourcePath: string | null;

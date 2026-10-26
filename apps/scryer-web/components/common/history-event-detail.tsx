@@ -1,3 +1,4 @@
+import { importSkipReasonLabelKey } from "@/lib/utils/import-skip-reason";
 import type { TitleHistoryEvent } from "@/lib/types";
 import { ScoreStat, ScoreValue } from "@/components/common/score-log";
 import { toScoreLogEntries } from "@/lib/utils/score-log";
@@ -182,7 +183,9 @@ export function HistoryEventDetailContent({ event }: { event: TitleHistoryEvent 
           <span className={cn("min-w-0 text-foreground", key.endsWith("_path") && "font-[var(--font-code)]")}>
             {key === "reason" && DOWNLOAD_REASON_KEYS[value]
               ? t(DOWNLOAD_REASON_KEYS[value])
-              : formatValue(value, key)}
+              : key === "skip_reason" && importSkipReasonLabelKey(String(value))
+                ? t(importSkipReasonLabelKey(String(value))!)
+                : formatValue(value, key)}
           </span>
         </div>
       ))}
@@ -202,7 +205,7 @@ export function HistoryEventDetailContent({ event }: { event: TitleHistoryEvent 
         ) : (
           <div key={key} className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-xs @min-[28rem]/history-detail:grid-cols-[max-content_minmax(0,1fr)]">
             <span className="text-muted-foreground">{formatKey(key)}</span>
-            <span className="min-w-0 text-foreground">{formatValue(value, key)}</span>
+            <span className="min-w-0 text-foreground">{key === "skip_reason" && importSkipReasonLabelKey(String(value)) ? t(importSkipReasonLabelKey(String(value))!) : formatValue(value, key)}</span>
           </div>
         ),
       )}

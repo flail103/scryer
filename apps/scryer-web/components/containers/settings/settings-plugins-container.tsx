@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -64,20 +65,8 @@ type UpdatePluginAutoUpdateSettingsResult = {
   updatePluginAutoUpdateSettings?: PluginAutoUpdateSettings | null;
 };
 
-function extractPluginMutationErrorMessage(error: unknown): string | null {
-  if (error && typeof error === "object" && "graphQLErrors" in error) {
-    const graphQLErrors = (error as { graphQLErrors?: Array<{ message?: string }> }).graphQLErrors;
-    const message = graphQLErrors?.find((entry) => typeof entry.message === "string")?.message;
-    if (message?.trim()) {
-      return message.trim();
-    }
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return null;
+function extractPluginMutationErrorMessage(error: unknown, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string | null {
+  return userFacingGraphQlErrorMessage(error, "", translate) || null;
 }
 
 function extractPluginMutationErrorCode(error: unknown): string | null {
@@ -104,23 +93,11 @@ function formatPluginInstallError(
   error: unknown,
   t: ReturnType<typeof useTranslate>,
 ): string {
-  const rawMessage = extractPluginMutationErrorMessage(error);
+  const rawMessage = extractPluginMutationErrorMessage(error, t);
   const normalized = rawMessage
     ?.replace(/^\[GraphQL\]\s*/i, "")
     .replace(/^validation:\s*/i, "")
     .trim();
-
-  if (normalized && /WASM SHA256 mismatch/i.test(normalized)) {
-    return t("status.pluginInstallFailedChecksumMismatch", { name: plugin.name });
-  }
-
-  if (
-    normalized
-    && normalized.includes("has sdk_constraint")
-    && normalized.includes("but registry selected")
-  ) {
-    return t("status.pluginInstallFailedSdkMetadataMismatch", { name: plugin.name });
-  }
 
   if (normalized) {
     if (extractPluginMutationErrorCode(error) === "PLUGIN_INSTALL_IN_PROGRESS") {
@@ -297,7 +274,7 @@ export function SettingsPluginsContainer() {
         reconcilePluginOperationState(nextPlugins);
       } catch (error) {
         if (reportErrors) {
-          setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
         }
       } finally {
         setInitialLoading(false);
@@ -322,7 +299,7 @@ export function SettingsPluginsContainer() {
       if (error) throw error;
       setAutoUpdateEnabled(data?.pluginAutoUpdateSettings?.enabled ?? false);
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setAutoUpdateLoading(false);
     }
@@ -345,7 +322,7 @@ export function SettingsPluginsContainer() {
       setAutoUpdateEnabled(data?.updatePluginAutoUpdateSettings?.enabled ?? enabled);
       setGlobalStatus(t("status.pluginAutoUpdateSettingsSaved"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
       setAutoUpdateSaving(false);
     }
@@ -491,7 +468,7 @@ export function SettingsPluginsContainer() {
       dispatchNavigationBadgesRefresh();
       setGlobalStatus(t("status.catalogRefreshed"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setRefreshing(false);
     }
@@ -516,7 +493,7 @@ export function SettingsPluginsContainer() {
         await refreshPlugins();
         dispatchNavigationBadgesRefresh();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         endPluginMutation(plugin.id);
       }
@@ -600,7 +577,7 @@ export function SettingsPluginsContainer() {
       if (error) throw error;
       setManualPreview(data.inspectManualPluginRepo || null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("status.failedToLoad");
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t);
       setPluginErrors((current) => ({ ...current, __manual: message }));
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
@@ -658,7 +635,7 @@ export function SettingsPluginsContainer() {
       await refreshPlugins();
       dispatchNavigationBadgesRefresh();
     } catch (error) {
-      const message = extractPluginMutationErrorMessage(error) ?? t("status.failedToUpdate");
+      const message = extractPluginMutationErrorMessage(error, t) ?? t("status.failedToUpdate");
       setPluginErrors((current) => ({ ...current, __manualUpload: message }));
       setGlobalStatus(message, { level: "ERROR" });
     } finally {
@@ -773,7 +750,7 @@ export function SettingsPluginsContainer() {
       await refreshPlugins();
       dispatchNavigationBadgesRefresh();
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       endPluginMutation(plugin.id);
       setPendingUninstall(null);

@@ -30,5 +30,5 @@ export function titleDeleteErrorMessage(error: unknown, t: Translate, fallback: 
     ?? graphQlErrorExtension(error, "INTERNAL_ERROR", "reason");
   const key = reason && Object.hasOwn(TITLE_DELETE_REFUSAL_KEYS, reason)
     ? TITLE_DELETE_REFUSAL_KEYS[reason] : null;
-  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback);
+  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

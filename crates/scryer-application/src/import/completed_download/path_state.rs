@@ -15,7 +15,10 @@ pub(super) fn evaluate_completed_download_path(
     if completed_download_path_is_unsupported_url(&completed.dest_dir) {
         td.path_missing_since = None;
         td.status = TrackedDownloadStatus::Warning;
-        td.status_messages = vec![PATH_URL_UNSUPPORTED_MESSAGE.to_string()];
+        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            crate::tracked_downloads::TrackedStatusMessageKind::PathUnsupported,
+            PATH_URL_UNSUPPORTED_MESSAGE,
+        )];
         return CompletedDownloadPathState::Blocked;
     }
 
@@ -32,12 +35,18 @@ pub(super) fn evaluate_completed_download_path(
     let elapsed = now.signed_duration_since(*missing_since);
     if elapsed < Duration::minutes(COMPLETED_PATH_GRACE_PERIOD_MINUTES) {
         td.status = TrackedDownloadStatus::Warning;
-        td.status_messages = vec![PATH_WAITING_MESSAGE.to_string()];
+        td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+            crate::tracked_downloads::TrackedStatusMessageKind::PathWaiting,
+            PATH_WAITING_MESSAGE,
+        )];
         return CompletedDownloadPathState::Retry;
     }
 
     td.status = TrackedDownloadStatus::Warning;
-    td.status_messages = vec![missing_completed_download_path_message(completed)];
+    td.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::new(
+        crate::tracked_downloads::TrackedStatusMessageKind::PathUnavailable,
+        missing_completed_download_path_message(completed),
+    )];
     CompletedDownloadPathState::Blocked
 }
 
@@ -56,10 +65,12 @@ fn completed_download_path_is_unsupported_url(dest_dir: &str) -> bool {
 
 fn clear_path_warnings(td: &mut TrackedDownload) {
     td.status_messages.retain(|message| {
-        message != PATH_WAITING_MESSAGE
-            && message != PATH_BLOCKED_MESSAGE
-            && message != PATH_BLOCKED_NZBDAV_SYMLINK_MESSAGE
-            && message != PATH_URL_UNSUPPORTED_MESSAGE
+        !matches!(
+            message.kind,
+            crate::tracked_downloads::TrackedStatusMessageKind::PathWaiting
+                | crate::tracked_downloads::TrackedStatusMessageKind::PathUnavailable
+                | crate::tracked_downloads::TrackedStatusMessageKind::PathUnsupported
+        )
     });
     if td.status_messages.is_empty() && td.status == TrackedDownloadStatus::Warning {
         td.status = TrackedDownloadStatus::Ok;

@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -137,7 +138,7 @@ export function ApplicationUpgradeAction({
       setOpen(false);
       onStatusChanged?.();
     } catch (error) {
-      toast.error(error instanceof Error && error.message ? error.message : t("appUpgrade.startFailed"));
+      toast.error(userFacingGraphQlErrorMessage(error, t("appUpgrade.startFailed"), t));
     } finally {
       setBusy(false);
     }

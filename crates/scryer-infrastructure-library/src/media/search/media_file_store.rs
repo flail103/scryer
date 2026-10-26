@@ -690,7 +690,10 @@ impl MediaFileRepository for MediaFileStore {
         )
         .await?;
         if changed != 1 {
-            return Err(AppError::NotFound("media file ownership changed".into()));
+            return Err(AppError::not_found_reason(
+                crate::error_reasons::MEDIA_FILE_OWNERSHIP_CHANGED,
+                "media file ownership changed",
+            ));
         }
         Ok(())
     }
@@ -1744,14 +1747,16 @@ impl MediaFileRepository for MediaFileStore {
                                 && title.report.status == scryer_media_types::ProbeStatus::Complete
                         })
                     {
-                        return Err(AppError::Validation(
-                            "invalid or incomplete disc episode mapping".into(),
+                        return Err(AppError::validation_refused(
+                            crate::error_reasons::MEDIA_DISC_EPISODE_MAPPING_INVALID,
+                            "invalid or incomplete disc episode mapping",
                         ));
                     }
                     for id in &mapping.episode_ids {
                         if !ids.insert(id.clone()) {
-                            return Err(AppError::Validation(
-                                "duplicate disc episode mapping".into(),
+                            return Err(AppError::validation_refused(
+                                crate::error_reasons::MEDIA_DISC_EPISODE_MAPPING_DUPLICATE,
+                                "duplicate disc episode mapping",
                             ));
                         }
                     }
@@ -1787,7 +1792,7 @@ impl MediaFileRepository for MediaFileStore {
                         if SqlRuntime::fetch_optional(SqlExec::Tx(tx),
                             "SELECT id FROM episodes WHERE id = {} AND title_id = {}",
                             &[SqlArg::Text(episode_id.clone()), SqlArg::Text(expected.title_id.clone())]).await?.is_none()
-                        { return Err(AppError::Validation("disc episode belongs to a different title or no longer exists".into())); }
+                        { return Err(AppError::validation_refused(crate::error_reasons::MEDIA_DISC_EPISODE_TITLE_MISMATCH, "disc episode belongs to a different title or no longer exists")); }
                     }
                     let mut delete_args = vec![SqlArg::Text(expected.id.clone())];
                     let delete_sql = if episode_ids.is_empty() { "DELETE FROM file_episode_map WHERE file_id = {}".to_string() }

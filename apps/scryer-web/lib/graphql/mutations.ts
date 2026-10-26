@@ -2488,6 +2488,7 @@ export const toggleRuleSetMutation = `mutation ToggleRuleSet($input: ToggleRuleS
 export const validateRuleSetMutation = `mutation ValidateRuleSet($input: ValidateRuleSetInput!) {
   validateRuleSet(input: $input) {
     valid
+    diagnostics { code message line column path }
     errors
   }
 }`;
@@ -2637,6 +2638,7 @@ export const deleteMaintenanceRuleSetMutation = `mutation DeleteMaintenanceRuleS
 export const validateMaintenanceRuleMutation = `mutation ValidateMaintenanceRule($input: ValidateMaintenanceRuleInput!) {
   validateMaintenanceRule(input: $input) {
     valid
+    diagnostics { code message line column path }
     errors
   }
 }`;
@@ -2743,6 +2745,7 @@ export const deleteRequestRuleSetMutation = `mutation DeleteRequestRuleSet($id: 
 export const validateRequestRuleMutation = `mutation ValidateRequestRule($input: ValidateRequestRuleInput!) {
   validateRequestRule(input: $input) {
     valid
+    diagnostics { code message line column path }
     errors
   }
 }`;

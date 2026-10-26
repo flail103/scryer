@@ -30,16 +30,21 @@ impl std::fmt::Debug for SubtitleDownloadSelection {
 
 /// Normalize a language code and ensure it's safe for use in filenames.
 fn normalize_language(lang: &str) -> AppResult<String> {
-    let normalized = normalize_subtitle_language_code(lang)
-        .ok_or_else(|| AppError::Validation(format!("invalid subtitle language code: {lang:?}")))?;
+    let normalized = normalize_subtitle_language_code(lang).ok_or_else(|| {
+        AppError::validation_refused(
+            crate::error_reasons::subtitles::SUBTITLE_LANGUAGE_CODE_INVALID,
+            format!("invalid subtitle language code: {lang:?}"),
+        )
+    })?;
 
     if normalized.len() < 2
         || normalized.len() > 3
         || !normalized.chars().all(|c| c.is_ascii_alphanumeric())
     {
-        return Err(AppError::Validation(format!(
-            "invalid subtitle language code: {lang:?}"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::subtitles::SUBTITLE_LANGUAGE_CODE_INVALID,
+            format!("invalid subtitle language code: {lang:?}"),
+        ));
     }
 
     Ok(normalized)
@@ -48,9 +53,10 @@ fn normalize_language(lang: &str) -> AppResult<String> {
 /// Validate that a subtitle format is safe for use in filenames.
 fn validate_format(fmt: &str) -> AppResult<()> {
     if !is_supported_subtitle_format(fmt) {
-        return Err(AppError::Validation(format!(
-            "unsupported subtitle format: {fmt:?}"
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::subtitles::SUBTITLE_FORMAT_UNSUPPORTED,
+            format!("unsupported subtitle format: {fmt:?}"),
+        ));
     }
     Ok(())
 }

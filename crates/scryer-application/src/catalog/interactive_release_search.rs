@@ -380,7 +380,12 @@ impl AppUseCase {
                     .titles
                     .get_by_id(title_id)
                     .await?
-                    .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                            format!("title {title_id}"),
+                        )
+                    })?;
                 self.require_library_permission(
                     actor,
                     &title.library_id,
@@ -448,10 +453,14 @@ impl AppUseCase {
                 )
             }
             (None, Some(_)) => {
-                return Err(AppError::Validation("search query is required".to_string()));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::catalog::SEARCH_QUERY_REQUIRED,
+                    "search query is required".to_string(),
+                ));
             }
             _ => {
-                return Err(AppError::Validation(
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::catalog::PROVIDE_EXACTLY_ONE_TITLE_ID_QUERY,
                     "provide exactly one of title id or query".to_string(),
                 ));
             }
@@ -474,7 +483,10 @@ impl AppUseCase {
                 .map(|config| config.id.as_str())
                 .collect::<HashSet<_>>();
             if let Some(unknown) = requested.iter().find(|id| !known.contains(id.as_str())) {
-                return Err(AppError::Validation(format!("unknown indexer {unknown}")));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::catalog::INDEXER_UNKNOWN,
+                    format!("unknown indexer {unknown}"),
+                ));
             }
         }
 
@@ -596,7 +608,8 @@ impl AppUseCase {
                 })
                 .count();
             if running_for_actor >= MAX_RUNNING_JOBS_PER_ACTOR {
-                return Err(AppError::Validation(
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::catalog::TOO_MANY_CONCURRENT_INTERACTIVE_SEARCHES,
                     "too many concurrent interactive searches".to_string(),
                 ));
             }
@@ -873,7 +886,9 @@ impl AppUseCase {
                             &job_id,
                             &indexer_id,
                             InteractiveReleaseSearchIndexerStatus::Failed,
-                            Some(error.to_string()),
+                            Some(super::release_search::IncompleteIndexerReason::failed(
+                                error.to_string(),
+                            )),
                             Some(elapsed_ms),
                         )
                         .await;
@@ -925,7 +940,7 @@ impl AppUseCase {
         job_id: &str,
         indexer_id: &str,
         status: InteractiveReleaseSearchIndexerStatus,
-        failure_reason: Option<String>,
+        failure_reason: Option<super::release_search::IncompleteIndexerReason>,
         elapsed_ms: Option<i64>,
     ) {
         let mut registry = self
@@ -948,9 +963,9 @@ impl AppUseCase {
         {
             indexer.status = status;
             indexer.rate_limited = failure_reason
-                .as_deref()
+                .as_ref()
                 .is_some_and(super::release_search::reason_is_rate_limit);
-            indexer.failure_reason = failure_reason;
+            indexer.failure_reason = failure_reason.map(|reason| reason.message);
             if elapsed_ms.is_some() {
                 indexer.elapsed_ms = elapsed_ms;
             }
@@ -1093,7 +1108,7 @@ impl AppUseCase {
         cancel_token: CancellationToken,
     ) -> AppResult<(
         Vec<IndexerSearchResult>,
-        Option<String>,
+        Option<super::release_search::IncompleteIndexerReason>,
         Option<IndexerSkip>,
     )> {
         let response = self
@@ -1166,7 +1181,12 @@ impl AppUseCase {
             .titles
             .get_by_id(title_id)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("title {title_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                    format!("title {title_id}"),
+                )
+            })?;
         self.require_library_permission(
             actor,
             &title.library_id,
@@ -1216,9 +1236,12 @@ impl AppUseCase {
         let result = self
             .find_interactive_search_result(actor, search_id, download_url)
             .await?;
-        let (_, source_kind) = result
-            .canonical_download_source()
-            .ok_or_else(|| AppError::Validation("release has no usable download source".into()))?;
+        let (_, source_kind) = result.canonical_download_source().ok_or_else(|| {
+            AppError::validation_refused(
+                crate::error_reasons::catalog::RELEASE_NO_USABLE_DOWNLOAD_SOURCE,
+                "release has no usable download source",
+            )
+        })?;
         let title = if let Some(id) = title_id {
             let title = self
                 .services
@@ -1226,7 +1249,12 @@ impl AppUseCase {
                 .titles
                 .get_by_id(id)
                 .await?
-                .ok_or_else(|| AppError::NotFound(format!("title {id}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found_reason(
+                        crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                        format!("title {id}"),
+                    )
+                })?;
             self.require_library_permission(
                 actor,
                 &title.library_id,
@@ -1324,18 +1352,20 @@ impl AppUseCase {
             .get_by_id(download_client_id)
             .await?
             .ok_or_else(|| {
-                AppError::Validation(format!(
-                    "download client {download_client_id} does not exist"
-                ))
+                AppError::validation_refused(
+                    crate::error_reasons::catalog::DOWNLOAD_CLIENT_DOES_NOT_EXIST,
+                    format!("download client {download_client_id} does not exist"),
+                )
             })?;
         if !client.is_enabled {
-            return Err(AppError::Validation(format!(
-                "download client {} is disabled",
-                client.name
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::DOWNLOAD_CLIENT_DISABLED,
+                format!("download client {} is disabled", client.name),
+            ));
         }
         let Some((source_hint, source_kind)) = result.canonical_download_source() else {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::RELEASE_NO_USABLE_DOWNLOAD_SOURCE,
                 "release has no usable download source".to_string(),
             ));
         };
@@ -1599,14 +1629,18 @@ impl AppUseCase {
         self.require_app_permission(actor, scryer_domain::AppPermission::ManageSystemSettings)
             .await?;
         if targets.is_empty() {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::RELEASE_DOWNLOAD_REQUIRED,
                 "select at least one release to download".to_string(),
             ));
         }
         if targets.len() > MAX_INTERACTIVE_SEARCH_ARTIFACT_DOWNLOADS {
-            return Err(AppError::Validation(format!(
-                "at most {MAX_INTERACTIVE_SEARCH_ARTIFACT_DOWNLOADS} releases can be downloaded at once"
-            )));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::MOST_RELEASES_DOWNLOADED_ONCE,
+                format!(
+                    "at most {MAX_INTERACTIVE_SEARCH_ARTIFACT_DOWNLOADS} releases can be downloaded at once"
+                ),
+            ));
         }
 
         let now = self.runtime.environment.now();
@@ -1617,10 +1651,10 @@ impl AppUseCase {
                 .find_interactive_search_result(actor, &target.search_id, &target.download_url)
                 .await?;
             let Some((source_hint, source_kind)) = result.canonical_download_source() else {
-                return Err(AppError::Validation(format!(
-                    "{} has no usable download source",
-                    result.title
-                )));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::catalog::NO_USABLE_DOWNLOAD_SOURCE,
+                    format!("{} has no usable download source", result.title),
+                ));
             };
             // With no title there is no owner facet; read one exactly as the
             // unlinked grab does.
@@ -1690,17 +1724,18 @@ impl AppUseCase {
                     ..
                 } => (".torrent", "application/x-bittorrent", bytes, content_type),
                 ResolvedDownloadArtifact::Magnet { .. } => {
-                    return Err(AppError::Validation(format!(
-                        "{} is a magnet link and has no file to download",
-                        result.title
-                    )));
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::catalog::MAGNET_LINK_NO_FILE_DOWNLOAD,
+                        format!(
+                            "{} is a magnet link and has no file to download",
+                            result.title
+                        ),
+                    ));
                 }
             };
             total_bytes = total_bytes.saturating_add(bytes.len());
             if total_bytes > MAX_INTERACTIVE_SEARCH_ARTIFACT_BYTES {
-                return Err(AppError::Validation(
-                    "selected release files exceed the 64 MiB download bundle limit".to_string(),
-                ));
+                return Err(AppError::validation_refused(crate::error_reasons::catalog::SELECTED_RELEASE_FILES_EXCEED_64_MIB_DOWNLOAD_BUNDLE_LIMIT, "selected release files exceed the 64 MiB download bundle limit".to_string()));
             }
             // Nothing was submitted, so there is no download client to name.
             let release_facts = self
@@ -1819,7 +1854,12 @@ impl AppUseCase {
         let entry = registry
             .get(search_id)
             .filter(|entry| entry.actor_id == actor.id)
-            .ok_or_else(|| AppError::NotFound(format!("interactive release search {search_id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::INTERACTIVE_RELEASE_SEARCH_NOT_FOUND,
+                    format!("interactive release search {search_id}"),
+                )
+            })?;
         let result = entry
             .snapshot
             .results
@@ -1832,7 +1872,12 @@ impl AppUseCase {
                     .is_some_and(|value| value == download_url)
             })
             .cloned()
-            .ok_or_else(|| AppError::NotFound("release is no longer in this search".to_string()))?;
+            .ok_or_else(|| {
+                AppError::not_found_reason(
+                    crate::error_reasons::catalog::RELEASE_NO_LONGER_SEARCH_NOT_FOUND,
+                    "release is no longer in this search".to_string(),
+                )
+            })?;
         Ok(result)
     }
 
@@ -1849,7 +1894,8 @@ impl AppUseCase {
         episode: Option<&str>,
     ) -> AppResult<(Title, ResolvedReleaseSearchSubject, bool)> {
         if season.is_some() && title.facet == MediaFacet::Movie {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::MOVIE_SEARCHES_CANNOT_INCLUDE_SEASON_EPISODE,
                 "movie searches cannot include season or episode".to_string(),
             ));
         }
@@ -1862,11 +1908,15 @@ impl AppUseCase {
                     .get_series_movie_link_by_id(series_movie_link_id)
                     .await?
                     .ok_or_else(|| {
-                        AppError::NotFound(format!("series movie {series_movie_link_id}"))
+                        AppError::not_found_reason(
+                            crate::error_reasons::catalog::SERIES_MOVIE_NOT_FOUND,
+                            format!("series movie {series_movie_link_id}"),
+                        )
                     })?;
                 if link.series_title_id != title.id {
-                    return Err(AppError::Validation(
-                        "series movie does not belong to title".into(),
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::catalog::SERIES_MOVIE_DOES_NOT_BELONG_TITLE,
+                        "series movie does not belong to title",
                     ));
                 }
                 let (search_title, subject) = self
@@ -2088,10 +2138,12 @@ fn validate_interactive_search_subject_shape(
         | (None, Some(_), Some(_))
         | (None, Some(_), None)
         | (None, None, None) => Ok(()),
-        (None, None, Some(_)) => Err(AppError::Validation(
+        (None, None, Some(_)) => Err(AppError::validation_refused(
+            crate::error_reasons::catalog::EPISODE_SEARCHES_REQUIRE_SEASON,
             "episode searches require a season".to_string(),
         )),
-        (Some(_), Some(_), _) | (Some(_), _, Some(_)) => Err(AppError::Validation(
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) => Err(AppError::validation_refused(
+            crate::error_reasons::catalog::SERIES_MOVIE_SEARCHES_CANNOT_INCLUDE_SEASON_EPISODE,
             "series movie searches cannot include season or episode".to_string(),
         )),
     }
@@ -2114,7 +2166,15 @@ mod subject_shape_tests {
     fn an_episode_without_a_season_is_rejected() {
         let error = validate_interactive_search_subject_shape(None, None, Some("5"))
             .expect_err("episode without season");
-        assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -2122,7 +2182,15 @@ mod subject_shape_tests {
         for (season, episode) in [(Some("1"), None), (Some("1"), Some("2")), (None, Some("2"))] {
             let error = validate_interactive_search_subject_shape(Some("link-1"), season, episode)
                 .expect_err("series movie with season or episode");
-            assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+            assert!(
+                matches!(
+                    error,
+                    AppError::Validation(_)
+                        | AppError::ValidationRefused { .. }
+                        | AppError::ValidationRefusedWithCount { .. }
+                ),
+                "{error:?}"
+            );
         }
         validate_interactive_search_subject_shape(Some("link-1"), None, None)
             .expect("series movie subject");

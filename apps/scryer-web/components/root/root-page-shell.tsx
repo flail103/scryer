@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import {
   lazy,
   Suspense,
@@ -1155,7 +1156,7 @@ function AuthenticatedHomePage({
 
         setResolvedOverviewTarget(null);
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
         navigateTo(view, undefined, "overview", undefined, undefined);
@@ -1246,7 +1247,7 @@ function AuthenticatedHomePage({
           return;
         }
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
           { level: "ERROR" },
         );
         replaceWithOverviewList();

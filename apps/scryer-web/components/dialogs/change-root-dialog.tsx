@@ -222,7 +222,7 @@ export function ChangeRootDialog({
       setPreviewError(
         code
           ? t(rootRefusalMessageKey(code))
-          : userFacingGraphQlErrorMessage(error, t("rootChange.previewFailed")),
+          : userFacingGraphQlErrorMessage(error, t("rootChange.previewFailed"), t),
       );
     } finally {
       setPreviewing(false);

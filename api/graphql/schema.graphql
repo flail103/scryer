@@ -5632,6 +5632,10 @@ type DownloadQueueItemPayload {
 	"""
 	attentionReason: String
 	"""
+	Stable condition explaining why attention is needed.
+	"""
+	attentionReasonCode: String
+	"""
 	Stable password-related download failure classification; never contains credentials.
 	"""
 	passwordFailureCode: DownloadPasswordFailureCodeValue
@@ -7981,6 +7985,10 @@ enum ImportErrorCodeValue {
 	"""
 	PERMISSION_DENIED
 	"""
+	Scene subtitles are still being prepared.
+	"""
+	SCENE_SUBTITLE_PENDING
+	"""
 	Storage is full.
 	"""
 	DISK_FULL
@@ -8148,6 +8156,18 @@ enum ImportSkipReasonValue {
 	The download client is still writing or unpacking the source file.
 	"""
 	DOWNLOAD_IN_PROGRESS
+	"""
+	The source changed after it was inspected.
+	"""
+	SOURCE_CHANGED
+	"""
+	The source snapshot is temporarily unavailable.
+	"""
+	SOURCE_UNAVAILABLE
+	"""
+	Scene subtitles are still being prepared.
+	"""
+	SCENE_SUBTITLE_PENDING
 	"""
 	Storage is full.
 	"""
@@ -15479,6 +15499,10 @@ enum MaintenanceRuleSubjectKind {
 Result of validating maintenance rule source without saving it.
 """
 type MaintenanceRuleValidationPayload {
+	"""
+	Structured conditions and source locations.
+	"""
+	diagnostics: [RuleValidationDiagnosticPayload!]!
 	"""
 	Whether the source is valid.
 	"""
@@ -26601,6 +26625,10 @@ Result of validating request rule source without saving it.
 """
 type RequestRuleValidationPayload {
 	"""
+	Structured conditions and source locations.
+	"""
+	diagnostics: [RuleValidationDiagnosticPayload!]!
+	"""
 	Whether the source is valid.
 	"""
 	valid: Boolean!
@@ -27416,9 +27444,39 @@ type RuleSetTestRuleSetPayload {
 }
 
 """
+Structured rule diagnostic. Coordinates refer to the compiled Rego source.
+"""
+type RuleValidationDiagnosticPayload {
+	"""
+	Stable condition code.
+	"""
+	code: String!
+	"""
+	Human-readable diagnostic for unknown-code fallback.
+	"""
+	message: String!
+	"""
+	One-based source line when the compiler supplies it.
+	"""
+	line: Int
+	"""
+	One-based source column when the compiler supplies it.
+	"""
+	column: Int
+	"""
+	Input path involved in the diagnostic.
+	"""
+	path: String
+}
+
+"""
 Result of validating Rego source.
 """
 type RuleValidationResultPayload {
+	"""
+	Structured conditions and source locations.
+	"""
+	diagnostics: [RuleValidationDiagnosticPayload!]!
 	"""
 	Whether the source is valid.
 	"""
@@ -30325,6 +30383,10 @@ type TitleHistoryEventPayload {
 	Failure reason, or null when the event did not fail.
 	"""
 	failureReason: String
+	"""
+	Stable failure condition separate from the human-readable reason.
+	"""
+	failureReasonCode: String
 	"""
 	Blocklist reason, or null when the event was not blocklisted.
 	"""

@@ -61,3 +61,5 @@ pub use scryer_plugin_sdk::sdk_constraint_or_legacy;
 pub use scryer_plugin_sdk::validate_sdk_contract;
 pub use types::{ConfigFieldDef, ConfigFieldOption};
 pub use wasmtime_host::engine::{initialize_wasm_runtime, initialize_wasm_runtime_at};
+
+mod error_reasons;

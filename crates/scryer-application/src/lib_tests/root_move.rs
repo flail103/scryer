@@ -1907,7 +1907,7 @@ async fn abandoning_a_dead_operation_fails_it_releases_its_claims_and_leaves_ret
             .await
             .expect_err("a live operation must not be abandoned");
         assert!(
-            matches!(&refused, crate::AppError::Validation(message) if message.contains("cancel it instead")),
+            matches!(&refused, crate::AppError::Validation(message) | crate::AppError::ValidationRefused { message, .. } | crate::AppError::ValidationRefusedWithCount { message, .. } if message.contains("cancel it instead")),
             "{refused:?}"
         );
     }
@@ -2872,7 +2872,12 @@ async fn the_generic_job_trigger_still_refuses_to_start_a_location_operation() {
         .await
         .expect_err("the generic path refuses");
     assert!(
-        matches!(error, crate::AppError::Validation(_)),
+        matches!(
+            error,
+            crate::AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
         "refusing a manual trigger is a validation error, got {error:?}"
     );
 }

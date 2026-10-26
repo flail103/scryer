@@ -372,7 +372,12 @@ impl ImageProxyRuntime {
         };
         let upstream_url = image_upstream_variant_url(source_url, &source.image_kind, variant)
             .and_then(|url| approved_upstream_url(&url))
-            .ok_or_else(|| AppError::Validation("unapproved image proxy source".to_string()))?;
+            .ok_or_else(|| {
+                AppError::validation_refused(
+                    crate::error_reasons::MEDIA_IMAGE_PROXY_SOURCE_UNAPPROVED,
+                    "unapproved image proxy source".to_string(),
+                )
+            })?;
         let mut response = self
             .outbound_http
             .send(image_fetch_policy(), || {
@@ -421,7 +426,8 @@ impl ImageProxyRuntime {
             .and_then(|value| value.parse::<usize>().ok())
             && length > MAX_SOURCE_BYTES
         {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::MEDIA_IMAGE_PROXY_RESPONSE_TOO_LARGE,
                 "image proxy response is too large".to_string(),
             ));
         }
@@ -431,7 +437,10 @@ impl ImageProxyRuntime {
             .and_then(|value| value.to_str().ok())
             .and_then(approved_content_type)
             .ok_or_else(|| {
-                AppError::Validation("unsupported image proxy content type".to_string())
+                AppError::validation_refused(
+                    crate::error_reasons::MEDIA_IMAGE_PROXY_CONTENT_TYPE_UNSUPPORTED,
+                    "unsupported image proxy content type".to_string(),
+                )
             })?
             .to_string();
         let etag = response
@@ -454,14 +463,16 @@ impl ImageProxyRuntime {
             AppError::Repository(format!("failed to read image proxy response: {error}"))
         })? {
             if bytes.len().saturating_add(chunk.len()) > MAX_SOURCE_BYTES {
-                return Err(AppError::Validation(
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::MEDIA_IMAGE_PROXY_RESPONSE_TOO_LARGE,
                     "image proxy response is too large".to_string(),
                 ));
             }
             bytes.extend_from_slice(&chunk);
         }
         if !valid_raster_bytes(&content_type, &bytes) {
-            return Err(AppError::Validation(
+            return Err(AppError::validation_refused(
+                crate::error_reasons::MEDIA_IMAGE_PROXY_CONTENT_TYPE_MISMATCH,
                 "image proxy response bytes do not match its image content type".to_string(),
             ));
         }
@@ -810,8 +821,9 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
                 return Ok(false);
             }
             if entry.byte_size <= 0 || entry.byte_size as u64 > MAX_SOURCE_BYTES as u64 {
-                return Err(AppError::Validation(
-                    "cached JPEG exceeds source size limit".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::MEDIA_CACHED_JPEG_TOO_LARGE,
+                    "cached JPEG exceeds source size limit",
                 ));
             }
             let Some(source) = self.repository.get_image_proxy_source(&entry.token).await? else {
@@ -823,7 +835,12 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
                 ("fanart", _) => 1280,
                 ("episode_still", _) => 300,
                 ("person", _) => 185,
-                _ => return Err(AppError::Validation("unsupported cached JPEG kind".into())),
+                _ => {
+                    return Err(AppError::validation_refused(
+                        crate::error_reasons::MEDIA_CACHED_JPEG_KIND_UNSUPPORTED,
+                        "unsupported cached JPEG kind",
+                    ));
+                }
             };
             let bytes = match tokio::fs::read(self.cache_path(&entry.token, &entry.variant)).await {
                 Ok(bytes) => bytes,
@@ -842,8 +859,9 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
         let original_digest = blake3::hash(&bytes);
         let encoded = processor.encode_cached_jpeg(bytes, width).await?;
         if !valid_raster_bytes("image/avif", &encoded) {
-            return Err(AppError::Validation(
-                "cached JPEG encoder returned invalid AVIF".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::MEDIA_CACHED_AVIF_INVALID,
+                "cached JPEG encoder returned invalid AVIF",
             ));
         }
 

@@ -381,7 +381,10 @@ impl AppUseCase {
                 .clone()
                 .try_lock_owned()
                 .map_err(|_| {
-                    AppError::Validation("Full-hash backfill is already running".into())
+                    AppError::validation_refused(
+                        crate::error_reasons::location::FULL_HASH_BACKFILL_ALREADY_RUNNING,
+                        "Full-hash backfill is already running",
+                    )
                 })?,
         );
         let cancellation = self.runtime.jobs.full_hash_shutdown.child_token();
@@ -662,7 +665,10 @@ async fn hash_file_cancellable(
         use std::io::Read;
 
         if cancellation.is_cancelled() {
-            return Err(AppError::Validation("Full-hash backfill cancelled".into()));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::location::FULL_HASH_BACKFILL_CANCELLED,
+                "Full-hash backfill cancelled",
+            ));
         }
         let mut file = std::fs::File::open(&path).map_err(|error| {
             AppError::Repository(format!(
@@ -679,7 +685,10 @@ async fn hash_file_cancellable(
             // Cancellation cannot interrupt an OS read already in progress.
             // Check again before every bounded read and before publishing.
             if cancellation.is_cancelled() {
-                return Err(AppError::Validation("Full-hash backfill cancelled".into()));
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::location::FULL_HASH_BACKFILL_CANCELLED,
+                    "Full-hash backfill cancelled",
+                ));
             }
             let read = file.read(&mut buffer).map_err(|error| {
                 AppError::Repository(format!(
@@ -698,10 +707,16 @@ async fn hash_file_cancellable(
         let after =
             std::fs::metadata(&path).map_err(|error| AppError::Repository(error.to_string()))?;
         if cancellation.is_cancelled() {
-            return Err(AppError::Validation("Full-hash backfill cancelled".into()));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::location::FULL_HASH_BACKFILL_CANCELLED,
+                "Full-hash backfill cancelled",
+            ));
         }
         if !same_file_version(&before, &after) {
-            return Err(AppError::Validation("file changed while hashing".into()));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::location::FILE_CHANGED_WHILE_HASHING,
+                "file changed while hashing",
+            ));
         }
         Ok(hasher.finalize())
     })

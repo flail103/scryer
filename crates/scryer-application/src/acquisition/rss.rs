@@ -393,7 +393,7 @@ fn pending_release_as_rss_result(pending: &PendingRelease) -> IndexerSearchResul
 
     let response_attributes = external::restore_announcement(pending, &mut extra);
     IndexerSearchResult {
-        http: None,
+        http: pending.http_release.clone(),
         indexer_id: pending.indexer_id.clone(),
         source: pending
             .indexer_source
@@ -5900,6 +5900,38 @@ mod tests {
             &SubmissionScope::Title,
             &[],
         ));
+    }
+
+    // Sonarr 465b5192, Download/Pending/PendingReleaseService.cs retains
+    // the release object across delayed-grab reconstruction.
+    #[test]
+    fn rss_pending_round_trip_preserves_http_resolution_and_expiry() {
+        let mut pending = listing_pending(None);
+        pending.http_release = Some(scryer_plugin_sdk::PluginHttpRelease {
+            provider: "synthetic".into(),
+            item_id: "item".into(),
+            page_url: "https://provider.invalid/item".into(),
+            resolve: Some(scryer_plugin_sdk::PluginHttpResolve {
+                action: "resolve".into(),
+                ttl_seconds: Some(60),
+            }),
+            resources: vec![
+                serde_json::from_value(serde_json::json!({
+                    "transport": "direct_file", "role": "muxed",
+                    "url": "https://provider.invalid/media",
+                    "expires_at": "2026-01-01T00:00:00Z"
+                }))
+                .unwrap(),
+            ],
+            ..Default::default()
+        });
+        let mut restored = pending.clone();
+        restored.http_release =
+            serde_json::from_value(serde_json::to_value(&pending.http_release).unwrap()).unwrap();
+        let candidate = pending_release_as_rss_result(&restored);
+        assert_eq!(candidate.http, pending.http_release);
+        assert!(candidate.parsed_release_metadata.is_none());
+        assert!(candidate.quality_profile_decision.is_none());
     }
 
     fn listing_pending(release_listing_json: Option<&str>) -> PendingRelease {

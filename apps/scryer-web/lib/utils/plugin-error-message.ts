@@ -109,5 +109,5 @@ export function pluginErrorMessage(error: unknown, t: Translate, fallback: strin
   if (unknownReason) {
     return detail ?? t("plugins.failure.unknown", { code: humanisePluginReason(unknownReason) });
   }
-  return userFacingGraphQlErrorMessage(error, fallback);
+  return userFacingGraphQlErrorMessage(error, fallback, t);
 }

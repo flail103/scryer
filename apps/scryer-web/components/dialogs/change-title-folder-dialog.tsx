@@ -167,7 +167,7 @@ export function ChangeTitleFolderDialog({
         if (error) {
           setEntries([]);
           setBrowseError(
-            userFacingGraphQlErrorMessage(error, t("title.changeFolderBrowseFailed")),
+            userFacingGraphQlErrorMessage(error, t("title.changeFolderBrowseFailed"), t),
           );
           return;
         }
@@ -180,7 +180,7 @@ export function ChangeTitleFolderDialog({
         }
         setEntries([]);
         setBrowseError(
-          userFacingGraphQlErrorMessage(error, t("title.changeFolderBrowseFailed")),
+          userFacingGraphQlErrorMessage(error, t("title.changeFolderBrowseFailed"), t),
         );
       })
       .finally(() => {
@@ -223,8 +223,7 @@ export function ChangeTitleFolderDialog({
           setPreviewError(
             userFacingGraphQlErrorMessage(
               error,
-              t("title.changeFolderPreviewFailed"),
-            ),
+              t("title.changeFolderPreviewFailed"), t),
           );
           return;
         }
@@ -249,7 +248,7 @@ export function ChangeTitleFolderDialog({
         setPreview(null);
         setResolution(null);
         setPreviewError(
-          userFacingGraphQlErrorMessage(error, t("title.changeFolderPreviewFailed")),
+          userFacingGraphQlErrorMessage(error, t("title.changeFolderPreviewFailed"), t),
         );
       })
       .finally(() => {
@@ -296,7 +295,7 @@ export function ChangeTitleFolderDialog({
       }
     } catch (error: unknown) {
       setApplyError(
-        userFacingGraphQlErrorMessage(error, t("title.changeFolderApplyFailed")),
+        userFacingGraphQlErrorMessage(error, t("title.changeFolderApplyFailed"), t),
       );
     } finally {
       setApplying(false);

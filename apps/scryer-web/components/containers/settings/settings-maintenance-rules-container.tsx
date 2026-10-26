@@ -1,3 +1,5 @@
+import { graphQlRuleValidationResult } from "@/lib/utils/rego-diagnostics";
+import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
 import { useRegoValidation } from "@/lib/hooks/use-rego-validation";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
@@ -230,7 +232,7 @@ export function SettingsMaintenanceRulesContainer({
         return detail;
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToLoad"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
           { level: "ERROR" },
         );
         return null;
@@ -368,7 +370,7 @@ export function SettingsMaintenanceRulesContainer({
       setRuleSetRecords(data?.maintenanceRuleSets ?? []);
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
         { level: "ERROR" },
       );
     }
@@ -426,7 +428,7 @@ export function SettingsMaintenanceRulesContainer({
       }
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
         { level: "ERROR" },
       );
     }
@@ -473,7 +475,7 @@ export function SettingsMaintenanceRulesContainer({
     } catch (error) {
       setCandidates([]);
       setCandidatesError(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
       );
     } finally {
       setCandidatesLoading(false);
@@ -509,7 +511,7 @@ export function SettingsMaintenanceRulesContainer({
         (actions.data?.maintenanceActionRuns as MaintenanceActionRun[]) ?? [],
       );
     } catch (error) {
-      setRunsError(error instanceof Error ? error.message : t("status.failedToLoad"));
+      setRunsError(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t));
     } finally {
       setRunsLoading(false);
     }
@@ -530,7 +532,7 @@ export function SettingsMaintenanceRulesContainer({
     } catch (error) {
       setExclusions([]);
       setExclusionsError(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
       );
     }
   }, [candidateRuleFilter, client, t]);
@@ -619,7 +621,7 @@ export function SettingsMaintenanceRulesContainer({
       await refreshRuleSets();
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToDelete"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -685,11 +687,8 @@ export function SettingsMaintenanceRulesContainer({
       closeEditor();
       await refreshRuleSets();
     } catch (error) {
-      const message = error instanceof Error ? error.message : null;
-      setValidationResult({
-        valid: false,
-        errors: [message || t("status.failedToUpdate")],
-      });
+      const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
+      setValidationResult(graphQlRuleValidationResult(error, message));
     } finally {
       setMutatingRuleSetId(null);
     }
@@ -725,7 +724,7 @@ export function SettingsMaintenanceRulesContainer({
       if (request !== previewRequest.current) return;
       setPreviewResult(null);
       setPreviewError(
-        error instanceof Error ? error.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
       );
     } finally {
       if (request === previewRequest.current) setPreviewing(false);
@@ -769,7 +768,7 @@ export function SettingsMaintenanceRulesContainer({
         setGlobalStatus(t("settings.maintenanceSwitchesUpdated"), { level: "SUCCESS" });
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -838,7 +837,7 @@ export function SettingsMaintenanceRulesContainer({
       await refreshCandidates();
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -868,7 +867,7 @@ export function SettingsMaintenanceRulesContainer({
       await refreshCandidates();
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -921,7 +920,7 @@ export function SettingsMaintenanceRulesContainer({
       await refreshCandidates();
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
         { level: "ERROR" },
       );
     } finally {
@@ -952,7 +951,7 @@ export function SettingsMaintenanceRulesContainer({
       await refreshCandidates();
     } catch (error) {
       setGlobalStatus(
-        error instanceof Error ? error.message : t("status.failedToDelete"),
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
         { level: "ERROR" },
       );
     } finally {

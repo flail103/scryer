@@ -64,7 +64,7 @@ export function IndexerErrorHistoryModal({
       ).toPromise();
       if (generation !== requestGeneration.current) return;
       if (result.error) {
-        setError(userFacingGraphQlErrorMessage(result.error, t("indexerErrors.loadError")));
+        setError(userFacingGraphQlErrorMessage(result.error, t("indexerErrors.loadError"), t));
         return;
       }
       const next = result.data?.indexerErrors;
@@ -82,7 +82,7 @@ export function IndexerErrorHistoryModal({
       });
     } catch (requestError) {
       if (generation === requestGeneration.current) {
-        setError(userFacingGraphQlErrorMessage(requestError, t("indexerErrors.loadError")));
+        setError(userFacingGraphQlErrorMessage(requestError, t("indexerErrors.loadError"), t));
       }
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
@@ -120,7 +120,7 @@ export function IndexerErrorHistoryModal({
       if (result.error || !result.data?.indexerError) {
         setDetailErrors({
           [id]: result.error
-            ? userFacingGraphQlErrorMessage(result.error, t("indexerErrors.detailLoadError"))
+            ? userFacingGraphQlErrorMessage(result.error, t("indexerErrors.detailLoadError"), t)
             : t("indexerErrors.detailMissing"),
         });
         return;
@@ -132,7 +132,7 @@ export function IndexerErrorHistoryModal({
         activeDetailId.current === id
       ) {
         setDetailErrors({
-          [id]: userFacingGraphQlErrorMessage(requestError, t("indexerErrors.detailLoadError")),
+          [id]: userFacingGraphQlErrorMessage(requestError, t("indexerErrors.detailLoadError"), t),
         });
       }
     } finally {

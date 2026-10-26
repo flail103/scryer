@@ -189,9 +189,14 @@ impl ProwlarrRequestError {
 
     fn into_app_error(self) -> AppError {
         match self {
-            Self::InvalidConfig(message) | Self::AuthFailed(message) => {
-                AppError::Validation(message)
-            }
+            Self::InvalidConfig(message) => AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_PROWLARR_CONFIG_INVALID,
+                message,
+            ),
+            Self::AuthFailed(message) => AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_PROWLARR_AUTH_FAILED,
+                message,
+            ),
             Self::Unreachable(message) | Self::Unsupported(message) => {
                 AppError::Repository(message)
             }
@@ -611,9 +616,12 @@ impl ProwlarrManagementClient {
     }
 
     fn config(&self) -> AppResult<&ProwlarrConfig> {
-        self.config
-            .as_ref()
-            .map_err(|message| AppError::Validation(message.clone()))
+        self.config.as_ref().map_err(|message| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_PROWLARR_CONFIG_INVALID,
+                message.clone(),
+            )
+        })
     }
 
     fn error_capture(&self) -> ProwlarrErrorCapture {
@@ -1074,7 +1082,8 @@ impl IndexerClient for ProwlarrSearchStub {
         _cancel_token: tokio_util::sync::CancellationToken,
         _page_sink: scryer_application::IndexerSearchPageSink,
     ) -> AppResult<IndexerSearchResponse> {
-        Err(AppError::Validation(
+        Err(AppError::validation_refused(
+            crate::error_reasons::ACQUISITION_PROWLARR_PARENT_SEARCH_UNSUPPORTED,
             "Prowlarr parent configs are management-only; search through synced child indexers"
                 .to_string(),
         ))
@@ -2058,6 +2067,7 @@ mod tests {
 
     fn test_indexer_config(base_url: &str) -> IndexerConfig {
         IndexerConfig {
+            last_error_code: None,
             id: "cfg-1".to_string(),
             name: "Prowlarr".to_string(),
             provider_type: PROWLARR_PROVIDER_TYPE.to_string(),

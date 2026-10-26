@@ -29,6 +29,7 @@ export type ImportErrorCode =
   | "IO_FAILED"
   | "PERMISSION_DENIED"
   | "DISK_FULL"
+  | "SCENE_SUBTITLE_PENDING"
   | "UNKNOWN";
 
 export type DownloadQueueDeleteStatus =
@@ -178,6 +179,7 @@ export type DownloadQueueItem = {
   queuedAt: string | null;
   lastUpdatedAt: string | null;
   attentionRequired: boolean;
+  attentionReasonCode?: string | null;
   attentionReason: string | null;
   passwordFailureCode?: "ARCHIVE_PASSWORD_REQUIRED" | "ARCHIVE_PASSWORD_OR_CORRUPTION" | null;
   passwordRetryImportId?: string | null;

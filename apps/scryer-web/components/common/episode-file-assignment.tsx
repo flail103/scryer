@@ -109,7 +109,7 @@ export function useEpisodeFileAssignment({
         })
         .catch((error: unknown) => {
           if (requestRef.current !== request) return;
-          setLoadError(userFacingGraphQlErrorMessage(error, t("episodeAssign.loadFailed")));
+          setLoadError(userFacingGraphQlErrorMessage(error, t("episodeAssign.loadFailed"), t));
         });
     },
     [client, t, titleId],

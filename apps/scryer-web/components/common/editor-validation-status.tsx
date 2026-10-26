@@ -1,10 +1,11 @@
+import { regoDiagnosticMessage, type RuleValidationDiagnostic } from "@/lib/utils/rego-diagnostics";
 import { useId, useRef, useState, type ComponentProps } from "react";
 import { Check, X } from "lucide-react";
 import { LoadingMark } from "@/components/common/loading-mark";
 import { useTranslate } from "@/lib/context/translate-context";
 import { cn } from "@/lib/utils";
 
-type ValidationResult = { valid: boolean; errors: readonly string[] };
+type ValidationResult = { valid: boolean; errors: readonly string[]; diagnostics?: readonly RuleValidationDiagnostic[] };
 type EditorValidationStatusProps = ComponentProps<"div"> & {
   checking: boolean;
   result: ValidationResult | null;
@@ -24,6 +25,7 @@ function ValidationBadge({ checking, result, formatError, className, ...props }:
   const [pinned, setPinned] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const failed = !checking && result?.valid === false;
+  const errorMessages = result?.diagnostics?.length ? result.diagnostics.map((diagnostic) => regoDiagnosticMessage(diagnostic, t)) : result?.errors;
   const expanded = failed && (hovered || focused || pinned);
   const label = checking ? t("settings.ruleValidating") : failed ? t("settings.regoValidationFailed") : t("settings.ruleValid");
 
@@ -73,7 +75,7 @@ function ValidationBadge({ checking, result, formatError, className, ...props }:
       )}
       {expanded ? (
         <div id={errorId} role="region" aria-label={label} tabIndex={0} className="min-h-0 space-y-2 overflow-y-auto px-3 pb-3 text-xs">
-          {(result?.errors.length ? result.errors : [label]).map((error, index) => (
+          {(errorMessages?.length ? errorMessages : [label]).map((error, index) => (
             <pre key={index} className="whitespace-pre-wrap break-words font-[var(--font-code)] leading-5 [overflow-wrap:anywhere]">
               {formatError ? formatError(error) : error}
             </pre>

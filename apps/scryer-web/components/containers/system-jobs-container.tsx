@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useClient } from "urql";
 import { useSearchParams } from "react-router";
@@ -191,7 +192,7 @@ export const SystemJobsContainer = memo(function SystemJobsContainer() {
       }
       const firstError = jobsError ?? recentError ?? latestError;
       if (firstError) {
-        setGlobalStatus(firstError.message, { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(firstError, t("status.apiError"), t), { level: "ERROR" });
         return;
       }
 
@@ -214,7 +215,7 @@ export const SystemJobsContainer = memo(function SystemJobsContainer() {
     return () => {
       cancelled = true;
     };
-  }, [client, setGlobalStatus]);
+  }, [client, setGlobalStatus, t]);
 
   useEffect(() => {
     if (!selectedJobRunId) {
@@ -309,7 +310,7 @@ export const SystemJobsContainer = memo(function SystemJobsContainer() {
           return;
         }
         if (error) {
-          setGlobalStatus(error.message, { level: "ERROR" });
+          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
           return;
         }
         setJobHistoryByKey((current) => ({
@@ -335,7 +336,7 @@ export const SystemJobsContainer = memo(function SystemJobsContainer() {
     selectedInstanceKey,
     selectedJobKey,
     selectedJobRunId,
-    setGlobalStatus,
+    setGlobalStatus, t,
   ]);
 
   // Fire-and-forget scripts record their output after the job run finishes:
@@ -411,7 +412,7 @@ export const SystemJobsContainer = memo(function SystemJobsContainer() {
           }));
         }
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("jobs.failedToTrigger"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("jobs.failedToTrigger"), t), { level: "ERROR" });
       } finally {
         setTriggeringKeys((current) => ({ ...current, [instanceKey]: false }));
       }

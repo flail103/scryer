@@ -108,7 +108,7 @@ export function useLocationOperationStart(options: {
           setStartError(own);
           return;
         }
-        const message = userFacingGraphQlErrorMessage(error, failedMessage);
+        const message = userFacingGraphQlErrorMessage(error, failedMessage, t);
         // A refused confirmation is nearly always "the plan moved under you",
         // or a title that became blocked between preview and confirm. Either
         // way the answer is a fresh plan, not a backend sentence about

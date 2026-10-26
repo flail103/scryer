@@ -265,7 +265,10 @@ async fn direct_wanted_item_lookup_requires_access_to_item_library() {
         .get_wanted_item(&viewer, &wanted.id)
         .await
         .expect_err("viewer should not see another library wanted item");
-    assert!(matches!(error, AppError::Unauthorized(_)));
+    assert!(matches!(
+        error,
+        AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1154,7 +1157,10 @@ async fn dismiss_nonexistent_returns_error() {
         .dismiss_pending_release(&admin(), "nonexistent-id")
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Repository(_)));
+    assert!(matches!(
+        err,
+        AppError::Repository(_) | AppError::RepositoryFailure { .. }
+    ));
 }
 
 #[tokio::test]
@@ -1183,7 +1189,10 @@ async fn dismiss_non_waiting_returns_error() {
         .dismiss_pending_release(&admin(), &pr.id)
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Repository(_)));
+    assert!(matches!(
+        err,
+        AppError::Repository(_) | AppError::RepositoryFailure { .. }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,7 +1208,10 @@ async fn force_grab_nonexistent_returns_error() {
         .force_grab_pending_release(&admin(), "nonexistent-id")
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Repository(_)));
+    assert!(matches!(
+        err,
+        AppError::Repository(_) | AppError::RepositoryFailure { .. }
+    ));
 }
 
 #[tokio::test]
@@ -1228,7 +1240,10 @@ async fn force_grab_non_waiting_returns_error() {
         .force_grab_pending_release(&admin(), &pr.id)
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Repository(_)));
+    assert!(matches!(
+        err,
+        AppError::Repository(_) | AppError::RepositoryFailure { .. }
+    ));
 }
 
 // ---------------------------------------------------------------------------

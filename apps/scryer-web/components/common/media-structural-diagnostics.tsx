@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import { useState } from "react";
 import { useClient } from "urql";
 import { useTranslate } from "@/lib/context/translate-context";
@@ -32,7 +33,7 @@ export function MediaStructuralDiagnostics({ fileId }: { fileId: string }) {
       if (!response.data?.diagnoseMediaFile) throw new Error(t("mediaFile.diagnosticsFailed"));
       setResult(response.data.diagnoseMediaFile);
     } catch (error) {
-      setError(error instanceof Error ? error.message : t("mediaFile.diagnosticsFailed"));
+      setError(userFacingGraphQlErrorMessage(error, t("mediaFile.diagnosticsFailed"), t));
     } finally { setRunning(false); }
   }
   const covered = result?.coverage.reduce((total, range) => total + Number(range.length), 0) ?? 0;

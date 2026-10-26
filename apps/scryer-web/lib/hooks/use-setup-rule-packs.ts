@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from '../graphql/error-message.ts';
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "urql";
 
@@ -30,8 +31,8 @@ export type SetupRulePackState = {
   error: string | null;
 };
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
+function errorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]) {
+  return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
 /**
@@ -130,7 +131,7 @@ export function useSetupRulePacks({
       } catch (error) {
         setErrors((current) => ({
           ...current,
-          [packId]: errorMessage(error, t("status.failedToUpdate")),
+          [packId]: errorMessage(error, t("status.failedToUpdate"), t),
         }));
       } finally {
         setBusyPackIds((current) => current.filter((id) => id !== packId));

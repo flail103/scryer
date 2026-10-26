@@ -98,7 +98,7 @@ impl BackupMutations {
             .create_backup(&actor, &input.password)
             .await
             .map_err(to_gql_error)?;
-        from_backup_info(info).map_err(|error| to_gql_error(AppError::Validation(error)))
+        from_backup_info(info).map_err(|error| to_gql_error(AppError::Repository(error)))
     }
 
     /// Create a short-lived authorization token for downloading an existing backup.
@@ -158,7 +158,10 @@ impl BackupMutations {
         ensure_restore_supported(&restore.datastore_config).map_err(to_gql_error)?;
 
         let upload = bundle_upload.value(ctx).map_err(|error| {
-            to_gql_error(AppError::Validation(format!("invalid upload: {error}")))
+            to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_INVALID,
+                format!("invalid upload: {error}"),
+            ))
         })?;
         let password = normalize_password(password);
 
@@ -237,15 +240,17 @@ impl BackupMutations {
 
         let upload_id = upload_id.as_ref().trim();
         if upload_id.is_empty() || upload_id.contains('/') || upload_id.contains('\\') {
-            return Err(to_gql_error(AppError::Validation(
-                "invalid restore upload id".into(),
+            return Err(to_gql_error(AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_ID_INVALID,
+                "invalid restore upload id",
             )));
         }
 
         let bundle_path = restore_upload_bundle_path(&restore.data_dir, upload_id);
         if !bundle_path.exists() {
-            return Err(to_gql_error(AppError::NotFound(
-                "restore upload could not be found; inspect the bundle again".into(),
+            return Err(to_gql_error(AppError::not_found_reason(
+                scryer_interface_core::refusal::INTERFACE_RESTORE_UPLOAD_NOT_FOUND,
+                "restore upload could not be found; inspect the bundle again",
             )));
         }
 
@@ -337,8 +342,9 @@ fn pending_restore_ready_path(data_dir: &Path) -> PathBuf {
 
 async fn ensure_setup_mode(app: &AppUseCase) -> Result<(), AppError> {
     if app.setup_complete().await? {
-        return Err(AppError::Validation(
-            "restore is only available while setup is still incomplete".into(),
+        return Err(AppError::validation_refused(
+            scryer_interface_core::refusal::INTERFACE_RESTORE_SETUP_REQUIRED,
+            "restore is only available while setup is still incomplete",
         ));
     }
     Ok(())
@@ -351,7 +357,12 @@ fn ensure_restore_supported(_datastore_config: &RestoreDatastoreConfig) -> Resul
 fn parse_datetime(value: &str, field: &str) -> Result<DateTime<Utc>, AppError> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
-        .map_err(|error| AppError::Validation(format!("invalid {field} timestamp: {error}")))
+        .map_err(|error| {
+            AppError::validation_refused(
+                scryer_interface_core::refusal::INTERFACE_TIMESTAMP_INVALID,
+                format!("invalid {field} timestamp: {error}"),
+            )
+        })
 }
 
 fn restore_summary_payload(

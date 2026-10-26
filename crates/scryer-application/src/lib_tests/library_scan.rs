@@ -7693,7 +7693,7 @@ async fn cancel_library_scan_rejects_additive_sessions() {
         .await
         .expect_err("additive scan should not be cancelable");
     assert!(
-        matches!(error, AppError::Validation(ref message) if message.contains("only full library scans")),
+        matches!(error, AppError::Validation(ref message) | AppError::ValidationRefused { ref message, .. } | AppError::ValidationRefusedWithCount { ref message, .. } if message.contains("only full library scans")),
         "unexpected cancel error: {error:?}"
     );
 
@@ -8574,7 +8574,7 @@ async fn recover_reserved_admin_access_creates_recovery_admin() {
     assert!(matches!(
         app.authenticate_credentials("recovery-admin", "new recovery password")
             .await,
-        Err(AppError::Unauthorized(_))
+        Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. })
     ));
     app.set_recovery_admin_login_enabled(true);
     assert_eq!(
@@ -8775,7 +8775,7 @@ async fn update_default_library_rejects_empty_roots_without_persisting_them() {
         .await
         .expect_err("empty default roots should be rejected");
     assert!(
-        matches!(error, AppError::Validation(ref message) if message.contains("libraries require at least one root folder")),
+        matches!(error, AppError::Validation(ref message) | AppError::ValidationRefused { ref message, .. } | AppError::ValidationRefusedWithCount { ref message, .. } if message.contains("libraries require at least one root folder")),
         "unexpected error: {error:?}"
     );
 

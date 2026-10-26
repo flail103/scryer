@@ -1,3 +1,4 @@
+import { useTranslate } from "@/lib/context/translate-context";
 import * as React from "react";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { useClient } from "urql";
@@ -78,6 +79,7 @@ function draftFromClient(client: OAuthClientRegistration): OAuthClientDraft {
 }
 
 export function OAuthClientRegistrationsPanel() {
+  const t = useTranslate();
   const client = useClient();
   const [clients, setClients] = React.useState<OAuthClientRegistration[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -140,7 +142,7 @@ export function OAuthClientRegistrationsPanel() {
         reloadGenerationRef.current,
       )) return;
       toast.error(
-        userFacingGraphQlErrorMessage(error, "Unable to load OAuth applications."),
+        userFacingGraphQlErrorMessage(error, t("error.fallback.unableToLoadOAuthApplications"), t),
       );
     } finally {
       if (shouldApplyJellyfinPluginOAuthReload(
@@ -148,7 +150,7 @@ export function OAuthClientRegistrationsPanel() {
         reloadGenerationRef.current,
       )) setLoading(false);
     }
-  }, [client]);
+  }, [client, t]);
 
   React.useEffect(() => {
     void reload();
@@ -206,12 +208,12 @@ export function OAuthClientRegistrationsPanel() {
       await reload();
     } catch (error) {
       toast.error(
-        userFacingGraphQlErrorMessage(error, "Unable to save OAuth application."),
+        userFacingGraphQlErrorMessage(error, t("error.fallback.unableToSaveOAuthApplication"), t),
       );
     } finally {
       setBusy(false);
     }
-  }, [client, draft, editingClientId, reload, resetDraft]);
+  }, [client, draft, editingClientId, reload, resetDraft, t]);
 
   const copyClientId = React.useCallback(async (clientId: string) => {
     if (!navigator.clipboard) {
@@ -295,7 +297,7 @@ export function OAuthClientRegistrationsPanel() {
       toast.error(
         userFacingGraphQlErrorMessage(
           error,
-          "The create result is uncertain. Reload OAuth applications before trying again.",
+          t("error.fallback.theCreateResultIsUncertainReloadOAuthApplicationsBeforeTryingAgain"), t,
         ),
       );
       await reload();
@@ -303,7 +305,7 @@ export function OAuthClientRegistrationsPanel() {
       if (jellyfinCreateKeyRef.current === callbackUrl) jellyfinCreateKeyRef.current = null;
       setBusy(false);
     }
-  }, [client, clients, jellyfinPublicBaseUrl, reload]);
+  }, [client, clients, jellyfinPublicBaseUrl, reload, t]);
 
   const deleteClient = React.useCallback(async () => {
     if (!deleteTarget) return;
@@ -322,12 +324,12 @@ export function OAuthClientRegistrationsPanel() {
       await reload();
     } catch (error) {
       toast.error(
-        userFacingGraphQlErrorMessage(error, "Unable to delete OAuth application."),
+        userFacingGraphQlErrorMessage(error, t("error.fallback.unableToDeleteOAuthApplication"), t),
       );
     } finally {
       setBusy(false);
     }
-  }, [client, deleteTarget, reload, resetDraft]);
+  }, [client, deleteTarget, reload, resetDraft, t]);
 
   const managedClients = clients.filter(
     (client) => client.source === "MANAGED" && client.clientId !== "generic-native",

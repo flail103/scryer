@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 import { Disc3, TriangleAlert } from "lucide-react";
@@ -142,7 +143,7 @@ export function DiscTitleDialog({ open, onOpenChange, file }: {
       })
       .catch((cause: unknown) => {
         if (!active || version !== requestVersion.current) return;
-        setError(cause instanceof Error ? cause.message : t("mediaFile.discMappingFailed"));
+        setError(userFacingGraphQlErrorMessage(cause, t("mediaFile.discMappingFailed"), t));
         setTargets([]);
       });
     return () => { active = false; };
@@ -167,7 +168,7 @@ export function DiscTitleDialog({ open, onOpenChange, file }: {
       onChanged(next);
     } catch (cause) {
       if (version !== requestVersion.current) return;
-      setError(cause instanceof Error ? cause.message : t("mediaFile.discSelectionFailed"));
+      setError(userFacingGraphQlErrorMessage(cause, t("mediaFile.discSelectionFailed"), t));
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }
@@ -195,7 +196,7 @@ export function DiscTitleDialog({ open, onOpenChange, file }: {
       onChanged(next);
     } catch (cause) {
       if (version !== requestVersion.current) return;
-      setError(cause instanceof Error ? cause.message : t("mediaFile.discMappingFailed"));
+      setError(userFacingGraphQlErrorMessage(cause, t("mediaFile.discMappingFailed"), t));
     } finally {
       if (version === requestVersion.current) setBusy(false);
     }

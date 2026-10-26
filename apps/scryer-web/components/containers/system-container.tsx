@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 
 import { memo, type ReactNode, useCallback, useEffect, useState } from "react";
 import { useClient } from "urql";
@@ -76,7 +77,7 @@ export const SystemContainer = memo(function SystemContainer({
       setSystemHealth(data?.systemHealth ?? null);
       setGlobalStatus(data?.systemHealth?.serviceReady ? t("system.loaded") : t("system.notReady"));
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
       setSystemLoading(false);
     }

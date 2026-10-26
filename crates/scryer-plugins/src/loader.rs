@@ -835,7 +835,12 @@ impl IndexerPluginProvider for WasmIndexerPluginProvider {
         }
         crate::newznab_profiles::resolve_newznab_profile(indexer, provider_type, Some(config_json))
             .map(|_| ())
-            .map_err(|error| AppError::Validation(error.to_string()))
+            .map_err(|error| {
+                AppError::validation_refused(
+                    crate::error_reasons::PLUGIN_NEWZNAB_PROFILE_INVALID,
+                    error.to_string(),
+                )
+            })
     }
 
     fn available_provider_types(&self) -> Vec<String> {
@@ -3110,8 +3115,9 @@ impl WasmArchiveExtractorPluginProvider {
             .filter(|loaded| Self::provider_supports_format(loaded, format));
         let selected = eligible.next();
         if eligible.next().is_some() {
-            return Err(AppError::Validation(
-                "Multiple enabled archive extraction plugins support this format. Disable one in Settings → Plugins.".into()
+            return Err(AppError::validation_refused(
+                crate::error_reasons::PLUGIN_ARCHIVE_EXTRACTOR_CONFLICT,
+                "Multiple enabled archive extraction plugins support this format. Disable one in Settings → Plugins.",
             ));
         }
         Ok(selected)
@@ -3760,8 +3766,9 @@ impl PluginDescriptorLoader for WasmPluginDescriptorLoader {
         if serde_json::to_value(&initialized_descriptor).ok()
             != serde_json::to_value(&descriptor).ok()
         {
-            return Err(AppError::Validation(
-                "Initialized component descriptor differs from embedded metadata".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::PLUGIN_COMPONENT_DESCRIPTOR_MISMATCH,
+                "Initialized component descriptor differs from embedded metadata",
             ));
         }
         Ok(descriptor)

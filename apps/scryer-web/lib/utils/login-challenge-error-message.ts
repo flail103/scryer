@@ -40,5 +40,5 @@ export function loginChallengeErrorMessage(
   fallback: string,
 ): string {
   const key = loginChallengeRefusalKey(error);
-  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback);
+  return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

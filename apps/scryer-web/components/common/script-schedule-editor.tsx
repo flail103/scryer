@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from '../../lib/graphql/error-message.ts';
 import { useEffect, useState, type ReactNode } from "react";
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import { useClient } from "urql";
@@ -117,7 +118,7 @@ function CronExpressionField({
         .then(({ data, error }) => {
           if (cancelled) return;
           if (error) {
-            setValidation({ expression: trimmed, result: null, failure: error.message });
+            setValidation({ expression: trimmed, result: null, failure: userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t) });
             return;
           }
           const payload = data?.validateScriptSchedule as ScriptScheduleValidation | undefined;
@@ -139,7 +140,7 @@ function CronExpressionField({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [client, trimmed]);
+  }, [client, trimmed, t]);
 
   const description = describeCronExpression(expression, uiLanguage, {
     use24HourTimeFormat: dateTimeFormat === "ISO24H" ? true : undefined,

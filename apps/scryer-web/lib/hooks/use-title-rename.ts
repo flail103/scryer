@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import { useClient } from "urql";
 
@@ -101,7 +102,7 @@ export function useTitleRename<
       setPlanState((current) =>
         current?.titleKey === requestedKey ? null : current,
       );
-      setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     } finally {
       setPreviewingKey((current) => (current === requestedKey ? null : current));
     }
@@ -151,7 +152,7 @@ export function useTitleRename<
         current?.titleKey === requestedKey ? null : current,
       );
     } catch (error: unknown) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.apiError"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
     } finally {
       setApplyingKey((current) => (current === requestedKey ? null : current));
     }

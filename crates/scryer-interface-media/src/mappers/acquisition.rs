@@ -378,6 +378,7 @@ pub fn from_download_queue_item(item: DownloadQueueItem) -> DownloadQueueItemPay
         ),
         attention_required: item.attention_required,
         attention_reason: item.attention_reason,
+        attention_reason_code: item.attention_reason_code,
         download_client_item_id: item.download_client_item_id,
         download_id: item.download_id,
         import_status: item.import_status.map(ImportStatusValue::from_domain),
@@ -430,7 +431,7 @@ pub fn from_wanted_item(
         season_number: item.season_number,
         episode_number: item.episode_number,
         media_type: WantedMediaTypeValue::parse(&item.media_type).ok_or_else(|| {
-            scryer_application::AppError::Validation(format!(
+            scryer_application::AppError::Repository(format!(
                 "invalid wanted item media_type '{}'",
                 item.media_type
             ))
@@ -455,9 +456,9 @@ pub fn from_wanted_item(
         indexers_routed: 0,
         recency_lane: RecencyLaneValue::Cold,
         created_at: parse_datetime(&item.created_at, "wanted item created_at")
-            .map_err(scryer_application::AppError::Validation)?,
+            .map_err(scryer_application::AppError::Repository)?,
         updated_at: parse_datetime(&item.updated_at, "wanted item updated_at")
-            .map_err(scryer_application::AppError::Validation)?,
+            .map_err(scryer_application::AppError::Repository)?,
     })
 }
 
@@ -494,7 +495,7 @@ pub fn from_wanted_scope_view(
         season_number: view.season_number,
         episode_number: view.episode_number,
         media_type: WantedMediaTypeValue::parse(&view.media_type).ok_or_else(|| {
-            scryer_application::AppError::Validation(format!(
+            scryer_application::AppError::Repository(format!(
                 "invalid wanted view media_type '{}'",
                 view.media_type
             ))
@@ -584,7 +585,7 @@ pub fn from_release_decision(
         score_delta: decision.score_delta,
         explanation_json: decision.explanation_json.map(json_string_to_value),
         created_at: parse_datetime(&decision.created_at, "release decision created_at")
-            .map_err(scryer_application::AppError::Validation)?,
+            .map_err(scryer_application::AppError::Repository)?,
     })
 }
 

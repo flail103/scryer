@@ -183,7 +183,7 @@ pub async fn restore_backup_bundle_into_sqlite_pool(
 
         let violations = foreign_key_violations(&mut conn).await?;
         if !violations.is_empty() {
-            return Err(AppError::Validation(format!(
+            return Err(AppError::validation_refused(crate::error_reasons::DATASTORE_BACKUP_FOREIGN_KEY_INVALID, format!(
                 "restored database failed foreign key validation: {}",
                 format_foreign_key_violations(&violations)
             )));
@@ -194,7 +194,7 @@ pub async fn restore_backup_bundle_into_sqlite_pool(
             .filter(|table| payload.manifest().row_counts.contains_key(*table))
         {
             let expected_rows = payload.manifest().row_counts.get(table).ok_or_else(|| {
-                AppError::Validation(format!(
+                AppError::validation_refused(crate::error_reasons::DATASTORE_BACKUP_TABLE_SET_MISMATCH, format!(
                     "backup bundle table set does not match the current restore catalog: missing [{}], unexpected []",
                     table
                 ))
@@ -209,7 +209,7 @@ pub async fn restore_backup_bundle_into_sqlite_pool(
                     ))
                 })?;
             if actual_rows as u64 != *expected_rows {
-                return Err(AppError::Validation(format!(
+                return Err(AppError::validation_refused(crate::error_reasons::DATASTORE_RESTORED_TABLE_ROW_COUNT_MISMATCH, format!(
                     "restored table {table} row count mismatch: expected {expected_rows}, got {actual_rows}"
                 )));
             }
@@ -590,28 +590,34 @@ async fn import_table_part(
     let target_columns = table_columns(conn, table).await?;
 
     let file = File::open(part_path).map_err(|error| {
-        AppError::Validation(format!("backup table payload missing for {table}: {error}"))
+        AppError::validation_refused(
+            crate::error_reasons::DATASTORE_BACKUP_TABLE_MISSING,
+            format!("backup table payload missing for {table}: {error}"),
+        )
     })?;
     let reader = BufReader::new(file);
 
     for (line_number, line) in reader.lines().enumerate() {
         let line = line.map_err(|error| {
-            AppError::Validation(format!(
-                "failed to read backup row {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_UNREADABLE,
+                format!("failed to read backup row {table}:{line_number}: {error}"),
+            )
         })?;
         if line.trim().is_empty() {
             continue;
         }
         let value: JsonValue = serde_json::from_str(&line).map_err(|error| {
-            AppError::Validation(format!(
-                "invalid backup row for {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_INVALID,
+                format!("invalid backup row for {table}:{line_number}: {error}"),
+            )
         })?;
         let mut object = value.as_object().cloned().ok_or_else(|| {
-            AppError::Validation(format!(
-                "backup row for {table}:{line_number} is not an object"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_NOT_OBJECT,
+                format!("backup row for {table}:{line_number} is not an object"),
+            )
         })?;
         normalize_import_object_for_target(
             table,
@@ -648,9 +654,10 @@ async fn import_table_part(
             query = bind_json_value(query, value)?;
         }
         query.execute(&mut **conn).await.map_err(|error| {
-            AppError::Validation(format!(
-                "failed to import backup row for {table}:{line_number}: {error}"
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::DATASTORE_BACKUP_ROW_IMPORT_FAILED,
+                format!("failed to import backup row for {table}:{line_number}: {error}"),
+            )
         })?;
     }
 
@@ -784,16 +791,18 @@ fn bind_json_value<'q>(
                 query.bind(value)
             } else if let Some(value) = value.as_u64() {
                 let value = i64::try_from(value).map_err(|_| {
-                    AppError::Validation(
-                        "backup row contains an integer outside SQLite i64 range".into(),
+                    AppError::validation_refused(
+                        crate::error_reasons::DATASTORE_BACKUP_INTEGER_OUT_OF_RANGE,
+                        "backup row contains an integer outside SQLite i64 range",
                     )
                 })?;
                 query.bind(value)
             } else if let Some(value) = value.as_f64() {
                 query.bind(value)
             } else {
-                return Err(AppError::Validation(
-                    "backup row contains an unsupported numeric value".into(),
+                return Err(AppError::validation_refused(
+                    crate::error_reasons::DATASTORE_BACKUP_NUMBER_UNSUPPORTED,
+                    "backup row contains an unsupported numeric value",
                 ));
             }
         }
@@ -805,10 +814,16 @@ fn bind_json_value<'q>(
                 .get(BLOB_MARKER_BASE64)
                 .and_then(JsonValue::as_str)
                 .ok_or_else(|| {
-                    AppError::Validation("backup blob payload is missing base64 bytes".into())
+                    AppError::validation_refused(
+                        crate::error_reasons::DATASTORE_BACKUP_BLOB_BYTES_MISSING,
+                        "backup blob payload is missing base64 bytes",
+                    )
                 })?;
             let bytes = STANDARD.decode(encoded).map_err(|error| {
-                AppError::Validation(format!("backup blob payload is invalid base64: {error}"))
+                AppError::validation_refused(
+                    crate::error_reasons::DATASTORE_BACKUP_BLOB_BASE64_INVALID,
+                    format!("backup blob payload is invalid base64: {error}"),
+                )
             })?;
             query.bind(bytes)
         }

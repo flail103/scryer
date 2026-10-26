@@ -92,25 +92,34 @@ fn parse_backup_download_authorization(
         .as_ref()
         .is_some_and(|query| query.split('&').any(|pair| pair.starts_with("ticket=")))
     {
-        return Err(AppError::Unauthorized(
-            "backup download ticket query is not accepted".into(),
+        return Err(AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_BACKUP_TICKET_QUERY_FORBIDDEN,
+            "backup download ticket query is not accepted",
         ));
     }
 
     let Some(value) = headers.get(header::AUTHORIZATION) else {
-        return Err(AppError::Unauthorized(
-            "backup download authorization is required".into(),
+        return Err(AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_BACKUP_DOWNLOAD_AUTHORIZATION_REQUIRED,
+            "backup download authorization is required",
         ));
     };
-    let value = value
-        .to_str()
-        .map_err(|_| AppError::Unauthorized("backup download authorization is invalid".into()))?;
-    let (scheme, token) = value
-        .split_once(' ')
-        .ok_or_else(|| AppError::Unauthorized("backup download authorization is invalid".into()))?;
+    let value = value.to_str().map_err(|_| {
+        AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_BACKUP_DOWNLOAD_AUTHORIZATION_INVALID,
+            "backup download authorization is invalid",
+        )
+    })?;
+    let (scheme, token) = value.split_once(' ').ok_or_else(|| {
+        AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_BACKUP_DOWNLOAD_AUTHORIZATION_INVALID,
+            "backup download authorization is invalid",
+        )
+    })?;
     if !scheme.eq_ignore_ascii_case("bearer") || token.trim().is_empty() || token.contains(' ') {
-        return Err(AppError::Unauthorized(
-            "backup download authorization is invalid".into(),
+        return Err(AppError::unauthorized_reason(
+            crate::error_reasons::HTTP_BACKUP_DOWNLOAD_AUTHORIZATION_INVALID,
+            "backup download authorization is invalid",
         ));
     }
 
@@ -230,8 +239,12 @@ fn cleanup_restore_promotion_artifacts(targets: &[PathBuf]) -> std::io::Result<(
 
 fn load_backup_metadata(backup_dir: &Path, filename: &str) -> Result<BackupInfo, AppError> {
     let path = metadata_path_for_backup(backup_dir, filename);
-    let bytes = std::fs::read(&path)
-        .map_err(|error| AppError::NotFound(format!("backup metadata not found: {error}")))?;
+    let bytes = std::fs::read(&path).map_err(|error| {
+        AppError::not_found_reason(
+            crate::error_reasons::HTTP_BACKUP_METADATA_NOT_FOUND,
+            format!("backup metadata not found: {error}"),
+        )
+    })?;
     serde_json::from_slice::<BackupInfo>(&bytes)
         .map_err(|error| AppError::Repository(format!("backup metadata is invalid: {error}")))
 }
@@ -260,7 +273,10 @@ pub(crate) async fn download_backup_handler(
         Err(error) => return map_app_error(error),
     };
     if !is_supported_backup_filename(&filename) {
-        return map_app_error(AppError::Validation("invalid backup filename".into()));
+        return map_app_error(AppError::validation_refused(
+            crate::error_reasons::HTTP_BACKUP_FILENAME_INVALID,
+            "invalid backup filename",
+        ));
     }
     let info = match load_backup_metadata(&backup_dir, &filename) {
         Ok(info) => info,
@@ -290,9 +306,10 @@ pub(crate) async fn download_backup_handler(
     let file = match tokio::fs::File::open(&bundle).await {
         Ok(file) => file,
         Err(error) => {
-            return map_app_error(AppError::NotFound(format!(
-                "backup bundle not found: {error}"
-            )));
+            return map_app_error(AppError::not_found_reason(
+                crate::error_reasons::HTTP_BACKUP_BUNDLE_NOT_FOUND,
+                format!("backup bundle not found: {error}"),
+            ));
         }
     };
     let content_length = match file.metadata().await {
@@ -437,16 +454,25 @@ mod tests {
     #[test]
     fn parse_backup_download_authorization_requires_bearer_token() {
         let missing = parse_backup_download_authorization(&HeaderMap::new(), None).unwrap_err();
-        assert!(matches!(missing, AppError::Unauthorized(_)));
+        assert!(matches!(
+            missing,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ));
 
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
         let blank = parse_backup_download_authorization(&headers, None).unwrap_err();
-        assert!(matches!(blank, AppError::Unauthorized(_)));
+        assert!(matches!(
+            blank,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ));
 
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic abc"));
         let wrong_scheme = parse_backup_download_authorization(&headers, None).unwrap_err();
-        assert!(matches!(wrong_scheme, AppError::Unauthorized(_)));
+        assert!(matches!(
+            wrong_scheme,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ));
     }
 
     #[test]
@@ -472,7 +498,10 @@ mod tests {
 
         let error = parse_backup_download_authorization(&headers, Some("ticket=abc.def"))
             .expect_err("query tickets should be rejected");
-        assert!(matches!(error, AppError::Unauthorized(_)));
+        assert!(matches!(
+            error,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ));
     }
 
     #[tokio::test]

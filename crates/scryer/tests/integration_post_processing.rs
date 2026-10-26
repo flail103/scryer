@@ -847,7 +847,11 @@ async fn script_interpreter_settings_require_system_settings_permission() {
         .await
         .expect_err("reading requires system settings");
     assert!(
-        matches!(read_error, scryer_application::AppError::Unauthorized(_)),
+        matches!(
+            read_error,
+            scryer_application::AppError::Unauthorized(_)
+                | scryer_application::AppError::UnauthorizedReason { .. }
+        ),
         "unexpected error: {read_error:?}"
     );
     let update_error = ctx
@@ -862,7 +866,11 @@ async fn script_interpreter_settings_require_system_settings_permission() {
         .await
         .expect_err("updating requires system settings");
     assert!(
-        matches!(update_error, scryer_application::AppError::Unauthorized(_)),
+        matches!(
+            update_error,
+            scryer_application::AppError::Unauthorized(_)
+                | scryer_application::AppError::UnauthorizedReason { .. }
+        ),
         "unexpected error: {update_error:?}"
     );
 }
@@ -889,7 +897,11 @@ async fn script_interpreter_pins_must_be_absolute_paths_or_command_names() {
             .await
             .expect_err("relative interpreter paths are rejected");
         assert!(
-            matches!(error, scryer_application::AppError::Validation(_)),
+            matches!(
+                error,
+                scryer_application::AppError::Validation(_)
+                    | scryer_application::AppError::ValidationRefused { .. }
+            ),
             "{rejected:?} gave {error:?}"
         );
     }
@@ -1015,7 +1027,10 @@ fn scheduled_script(id: &str, schedule: scryer_domain::ScriptSchedule) -> PostPr
 
 fn assert_unauthorized<T: std::fmt::Debug>(result: Result<T, scryer_application::AppError>) {
     match result {
-        Err(scryer_application::AppError::Unauthorized(_)) => {}
+        Err(
+            scryer_application::AppError::Unauthorized(_)
+            | scryer_application::AppError::UnauthorizedReason { .. },
+        ) => {}
         other => panic!("expected Unauthorized, got {other:?}"),
     }
 }
@@ -1133,7 +1148,10 @@ async fn trigger_cannot_change_on_update() {
         .update_post_processing_script(&system, relabelled)
         .await
     {
-        Err(scryer_application::AppError::Validation(_)) => {}
+        Err(
+            scryer_application::AppError::Validation(_)
+            | scryer_application::AppError::ValidationRefused { .. },
+        ) => {}
         other => panic!("expected Validation, got {other:?}"),
     }
 }
@@ -1154,7 +1172,10 @@ async fn cron_schedule_that_never_fires_is_rejected_on_create() {
         )
         .await;
     match result {
-        Err(scryer_application::AppError::Validation(_)) => {}
+        Err(
+            scryer_application::AppError::Validation(_)
+            | scryer_application::AppError::ValidationRefused { .. },
+        ) => {}
         other => panic!("expected Validation, got {other:?}"),
     }
 }

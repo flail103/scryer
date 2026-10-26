@@ -64,9 +64,7 @@ impl AppUseCase {
             .title_image_cache_clear_scheduled
             .clone();
         if scheduled.swap(true, std::sync::atomic::Ordering::AcqRel) {
-            return Err(AppError::Validation(
-                "title image cache refresh is already running".to_string(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::settings::TITLE_IMAGE_CACHE_REFRESH_ALREADY_RUNNING, "title image cache refresh is already running".to_string()));
         }
         let _scheduled_guard = TitleImageCacheClearScheduledGuard { flag: scheduled };
 

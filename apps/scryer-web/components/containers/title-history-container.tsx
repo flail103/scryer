@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from '../../lib/graphql/error-message.ts';
 import * as React from "react";
 import { useClient } from "urql";
 import { librariesQuery, titleHistoryQuery } from "@/lib/graphql/queries";
@@ -82,7 +83,7 @@ export function TitleHistoryContainer({
     } catch (fetchError) {
       if (requestSequenceRef.current !== requestId) return;
       setError(
-        fetchError instanceof Error ? fetchError.message : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(fetchError, t("status.failedToLoad"), t),
       );
       setEvents([]);
       setTotalCount(0);
@@ -119,7 +120,7 @@ export function TitleHistoryContainer({
       .catch((fetchError) => {
         if (!cancelled) {
           setGlobalStatus(
-            fetchError instanceof Error ? fetchError.message : t("status.failedToLoad"),
+            userFacingGraphQlErrorMessage(fetchError, t("status.failedToLoad"), t),
             { level: "ERROR" },
           );
         }
@@ -211,7 +212,7 @@ export function TitleHistoryContainer({
         await fetchHistory();
       } catch (retryError) {
         setGlobalStatus(
-          retryError instanceof Error ? retryError.message : t("status.apiError"),
+          userFacingGraphQlErrorMessage(retryError, t("status.apiError"), t),
           { level: "ERROR" },
         );
       }

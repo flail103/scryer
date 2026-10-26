@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from '../../lib/graphql/error-message.ts';
 import * as React from "react";
 import { DatabaseBackup, LockKeyhole, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -236,9 +237,7 @@ export function SetupRestoreView({
       setSummary(result.summary);
     } catch (nextError) {
       setError(
-        nextError instanceof Error && nextError.message.trim()
-          ? nextError.message.trim()
-          : t("status.failedToLoad"),
+        userFacingGraphQlErrorMessage(nextError, t("status.failedToLoad"), t),
       );
     } finally {
       setInspecting(false);
@@ -281,9 +280,7 @@ export function SetupRestoreView({
     } catch (nextError) {
       setApplying(false);
       setError(
-        nextError instanceof Error && nextError.message.trim()
-          ? nextError.message.trim()
-          : t("status.failedToUpdate"),
+        userFacingGraphQlErrorMessage(nextError, t("status.failedToUpdate"), t),
       );
     }
   }, [onBackendRestarting, password, summary, t, uploadId]);

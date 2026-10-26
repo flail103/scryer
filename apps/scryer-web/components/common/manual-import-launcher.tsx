@@ -170,7 +170,7 @@ export function useManualImportLauncher({
         notifyImportQueued(item);
       } catch (error: unknown) {
         setGlobalStatus(
-          userFacingGraphQlErrorMessage(error, t("queue.manualImportFailed")),
+          userFacingGraphQlErrorMessage(error, t("queue.manualImportFailed"), t),
           { level: "ERROR" },
         );
       } finally {

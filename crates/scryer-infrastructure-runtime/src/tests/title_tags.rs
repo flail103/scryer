@@ -314,7 +314,7 @@ async fn assert_title_tag_registry_behaviour(
     // A missing row is a not-found, not a silent success.
     assert!(matches!(
         TitleRepository::delete_title_tag_definition(catalog, "tag-absent").await,
-        Err(AppError::NotFound(_))
+        Err(AppError::NotFound(_) | AppError::NotFoundReason { .. })
     ));
 
     Ok(())

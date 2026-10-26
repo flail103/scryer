@@ -153,6 +153,84 @@ fn tracked_for(
     }
 }
 
+/// A retained torrent can have multiple canonical attempts, even for one
+/// title. Cleanup may settle its own attempt but cannot settle the regrab.
+#[tokio::test]
+async fn regrab_reconciliation_preserves_independent_attempts() {
+    let client = Arc::new(StubDownloadClient::default());
+    let (app, user, _) = bootstrap_with_torrent_clients(client.clone());
+    let config = create_enabled_download_client_config(&app, &user, "qBit", "qbittorrent").await;
+    let title = movie_title(&app, &user, "Regrab Fixture").await;
+
+    for previous_state in [
+        TrackedDownloadState::Imported,
+        TrackedDownloadState::Failed,
+        TrackedDownloadState::Ignored,
+    ] {
+        for live_state in [
+            TrackedDownloadState::Downloading,
+            TrackedDownloadState::ImportPending,
+            TrackedDownloadState::Importing,
+            TrackedDownloadState::ImportedSeeding,
+        ] {
+            for (previous_title, previous_client) in [
+                (Some(title.id.as_str()), config.id.as_str()),
+                (Some("other-title"), config.id.as_str()),
+                (None, config.id.as_str()),
+                (Some(title.id.as_str()), "other-client"),
+            ] {
+                let mut tracker = crate::tracked_downloads::TrackedDownloadService::new();
+                let mut previous = tracked_for(
+                    &config.id,
+                    "qbittorrent",
+                    "shared-hash",
+                    &title,
+                    previous_state,
+                    true,
+                );
+                previous.title_id = previous_title.map(str::to_owned);
+                previous.client_id = previous_client.to_owned();
+                previous.client_item.client_id = previous_client.to_owned();
+                previous.retained_in_client_after_cleanup = true;
+                let previous_id = tracker.insert_for_tests(previous);
+                let mut live = tracked_for(
+                    &config.id,
+                    "qbittorrent",
+                    "shared-hash",
+                    &title,
+                    live_state,
+                    true,
+                );
+                // A retained seeding row has already passed through the gate.
+                live.retained_in_client_after_cleanup =
+                    live_state == TrackedDownloadState::ImportedSeeding;
+                let live_id = tracker.insert_for_tests(live);
+                for _ in 0..2 {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        crate::app_usecase_integration::reconcile_terminal_tracked_downloads(
+                            &app,
+                            &mut tracker,
+                        ),
+                    )
+                    .await
+                    .expect("reconciliation completes");
+                    assert_eq!(
+                        tracker.get_by_download_id(live_id).unwrap().state,
+                        live_state
+                    );
+                    assert_eq!(
+                        tracker.get_by_download_id(previous_id).unwrap().state,
+                        previous_state
+                    );
+                }
+                assert_eq!(tracker.get_all().len(), 2);
+            }
+        }
+    }
+    assert!(client.deleted_requests.lock().await.is_empty());
+}
+
 #[tokio::test]
 async fn an_imported_torrent_is_held_instead_of_removed_when_seeding_cannot_be_proven_done() {
     let download_client = Arc::new(StubDownloadClient::default());
@@ -3318,7 +3396,9 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     before_restart.client_item.download_id =
         Some("scryer-download:torrent-burned-restart-1".to_string());
     before_restart.status = scryer_domain::TrackedDownloadStatus::Error;
-    before_restart.status_messages = vec![message.to_string()];
+    before_restart.status_messages = vec![crate::tracked_downloads::TrackedStatusMessage::from(
+        message.to_string(),
+    )];
     let id = crate::tracked_downloads::tracked_download_id_for_item(&before_restart.client_item);
     let identity =
         crate::tracked_downloads::observed_queue_item_identity(&before_restart.client_item);
@@ -3347,7 +3427,10 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     assert_eq!(restored.state, TrackedDownloadState::Failed);
     assert!(restored.burned_by_import_gate);
     assert_eq!(restored.status, scryer_domain::TrackedDownloadStatus::Error);
-    assert_eq!(restored.status_messages, vec![message.to_string()]);
+    assert_eq!(
+        crate::tracked_downloads::status_texts(&restored.status_messages),
+        vec![message.to_string()]
+    );
 
     crate::app_usecase_integration::finalize_tracked_terminal_state(
         &app,
@@ -3371,8 +3454,7 @@ async fn a_restarted_burned_torrent_stays_failed_while_held_for_seeding() {
     assert_eq!(held.state, TrackedDownloadState::Failed);
     assert!(held.burned_by_import_gate);
     assert_eq!(held.status, scryer_domain::TrackedDownloadStatus::Error);
-    assert_eq!(
-        held.status_messages,
+    assert_eq!(crate::tracked_downloads::status_texts(&held.status_messages),
         vec![
             message.to_string(),
             "Kept in the download client until its seeding goal is met; the entry and its data are removed then."
@@ -6597,7 +6679,7 @@ async fn nzbget_recoverable_warnings_fail_only_after_the_warning_timeout() {
             failed
                 .status_messages
                 .iter()
-                .any(|message| message.contains(reason)),
+                .any(|message| message.text.contains(reason)),
             "{reason}: timeout message carries the attention reason"
         );
         // Promotion alone touches nothing on the client or disk.

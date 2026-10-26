@@ -98,52 +98,7 @@ pub(crate) fn same_snapshot_content(left: Option<&str>, right: Option<&str>) -> 
     }
 }
 
-#[derive(Clone)]
-enum FetchFailure {
-    Temporary(String, Option<std::time::Duration>, RateLimitCooldownAction),
-    Quota(u16, String),
-    Validation(String),
-    Canceled(String),
-    Plugin(String, crate::PluginFailure),
-    Repository(String),
-}
-
-impl FetchFailure {
-    fn from_error(error: AppError) -> Self {
-        match error {
-            AppError::TemporaryUnavailable {
-                message,
-                retry_after,
-                rate_limit_cooldown,
-            } => Self::Temporary(message, retry_after, rate_limit_cooldown),
-            AppError::NewznabQuotaExceeded { code, message } => Self::Quota(code, message),
-            AppError::Validation(message) => Self::Validation(message),
-            AppError::Canceled(message) => Self::Canceled(message),
-            AppError::PluginFailed { message, failure } => Self::Plugin(message, failure),
-            AppError::Repository(message) => Self::Repository(message),
-            other => Self::Repository(other.to_string()),
-        }
-    }
-
-    fn into_error(self) -> AppError {
-        match self {
-            Self::Temporary(message, retry_after, rate_limit_cooldown) => {
-                AppError::TemporaryUnavailable {
-                    message,
-                    retry_after,
-                    rate_limit_cooldown,
-                }
-            }
-            Self::Quota(code, message) => AppError::NewznabQuotaExceeded { code, message },
-            Self::Validation(message) => AppError::Validation(message),
-            Self::Canceled(message) => AppError::Canceled(message),
-            Self::Plugin(message, failure) => AppError::PluginFailed { message, failure },
-            Self::Repository(message) => AppError::Repository(message),
-        }
-    }
-}
-
-type SharedFetch = tokio::sync::Mutex<Option<Result<Option<String>, FetchFailure>>>;
+type SharedFetch = tokio::sync::Mutex<Option<Result<Option<String>, AppError>>>;
 
 /// Only overlapping callers share a result. Durable snapshots own the seven-day cache.
 #[derive(Default)]
@@ -170,6 +125,7 @@ impl CapsRequestCache {
             } else {
                 if flights.len() >= 128 {
                     return Err(AppError::TemporaryUnavailable {
+                        reason: None,
                         message: "Too many concurrent indexer caps refreshes; try again later"
                             .into(),
                         retry_after: None,
@@ -183,13 +139,13 @@ impl CapsRequestCache {
         };
         let mut result = flight.lock().await;
         if result.is_none() {
-            *result = Some(request.await.map_err(FetchFailure::from_error));
+            *result = Some(request.await.map_err(std::convert::identity));
         }
         result
             .as_ref()
             .expect("caps fetch completed")
             .clone()
-            .map_err(FetchFailure::into_error)
+            .map_err(std::convert::identity)
     }
 }
 

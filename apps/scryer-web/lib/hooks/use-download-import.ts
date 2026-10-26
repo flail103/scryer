@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 
@@ -121,7 +122,7 @@ export function useDownloadImport({
       } catch (error) {
         if (!current()) return;
         const message = error instanceof QueryTimeoutError ? t("activity.refreshTimedOut") :
-          error instanceof Error ? error.message : "Failed to load import activity.";
+          userFacingGraphQlErrorMessage(error, t("error.fallback.failedToLoadImportActivity"), t);
         setImportError(message);
         setGlobalStatus(message, error instanceof QueryTimeoutError ? undefined : { level: "ERROR" });
       } finally {

@@ -85,11 +85,211 @@ impl WeaverErrorCode {
     }
 }
 
+/// Compatibility features recognized from async-graphql's schema validator.
+/// This is distinct from Weaver's runtime refusal codes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WeaverSchemaFeature {
+    SystemMetrics,
+    QueueItems,
+    AttributeEquals,
+    HistoryItem,
+    HistoryItems,
+    PostedFileNames,
+    PasswordCandidates,
+    SubmitNzbInput,
+    SubmitInputArgument,
+    SubmissionAccepted,
+    SubmissionStatus,
+    SubmissionMessage,
+    SubmissionJobId,
+    SubmissionErrorCode,
+    PauseQueueItem,
+    ResumeQueueItem,
+    PasswordArgument,
+    ReprocessJob,
+    DeleteFiles,
+    DeleteFilesVariable,
+    RemoveHistoryItems,
+    CancelQueueItem,
+}
+
+impl WeaverSchemaFeature {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::SystemMetrics => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SYSTEM_METRICS_UNSUPPORTED
+            }
+            Self::QueueItems => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_QUEUE_ITEMS_UNSUPPORTED
+            }
+            Self::AttributeEquals => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_ATTRIBUTE_EQUALS_UNSUPPORTED
+            }
+            Self::HistoryItem => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_HISTORY_ITEM_UNSUPPORTED
+            }
+            Self::HistoryItems => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_HISTORY_ITEMS_UNSUPPORTED
+            }
+            Self::PostedFileNames => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_POSTED_FILE_NAMES_UNSUPPORTED
+            }
+            Self::PasswordCandidates => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_PASSWORD_CANDIDATES_UNSUPPORTED
+            }
+            Self::SubmitNzbInput => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMIT_NZB_INPUT_UNSUPPORTED
+            }
+            Self::SubmitInputArgument => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMIT_INPUT_ARGUMENT_UNSUPPORTED
+            }
+            Self::SubmissionAccepted => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMISSION_ACCEPTED_UNSUPPORTED
+            }
+            Self::SubmissionStatus => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMISSION_STATUS_UNSUPPORTED
+            }
+            Self::SubmissionMessage => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMISSION_MESSAGE_UNSUPPORTED
+            }
+            Self::SubmissionJobId => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMISSION_JOB_ID_UNSUPPORTED
+            }
+            Self::SubmissionErrorCode => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_SUBMISSION_ERROR_CODE_UNSUPPORTED
+            }
+            Self::PauseQueueItem => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_PAUSE_QUEUE_ITEM_UNSUPPORTED
+            }
+            Self::ResumeQueueItem => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_RESUME_QUEUE_ITEM_UNSUPPORTED
+            }
+            Self::PasswordArgument => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_PASSWORD_ARGUMENT_UNSUPPORTED
+            }
+            Self::ReprocessJob => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_REPROCESS_JOB_UNSUPPORTED
+            }
+            Self::DeleteFiles => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_DELETE_FILES_UNSUPPORTED
+            }
+            Self::DeleteFilesVariable => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_DELETE_FILES_VARIABLE_UNSUPPORTED
+            }
+            Self::RemoveHistoryItems => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_REMOVE_HISTORY_ITEMS_UNSUPPORTED
+            }
+            Self::CancelQueueItem => {
+                crate::error_reasons::ACQUISITION_WEAVER_SCHEMA_CANCEL_QUEUE_ITEM_UNSUPPORTED
+            }
+        }
+    }
+}
+
+/// The sole owner of opaque third-party GraphQL validator diagnostics.
+/// Runtime errors with an extensions.code never enter this compatibility path.
+fn classify_weaver_schema_error(message: &str) -> Option<WeaverSchemaFeature> {
+    let normalized = message.to_ascii_lowercase();
+    [
+        (
+            "unknown field \"systemmetrics\"",
+            WeaverSchemaFeature::SystemMetrics,
+        ),
+        (
+            "unknown field \"queueitems\"",
+            WeaverSchemaFeature::QueueItems,
+        ),
+        (
+            "unknown field \"attributeequals\"",
+            WeaverSchemaFeature::AttributeEquals,
+        ),
+        (
+            "unknown field \"historyitem\"",
+            WeaverSchemaFeature::HistoryItem,
+        ),
+        (
+            "unknown field \"historyitems\"",
+            WeaverSchemaFeature::HistoryItems,
+        ),
+        (
+            "unknown field \"postedfilenames\"",
+            WeaverSchemaFeature::PostedFileNames,
+        ),
+        (
+            "unknown field \"passwordcandidates\"",
+            WeaverSchemaFeature::PasswordCandidates,
+        ),
+        (
+            "unknown type \"submitnzbinput\"",
+            WeaverSchemaFeature::SubmitNzbInput,
+        ),
+        (
+            "unknown argument \"input\"",
+            WeaverSchemaFeature::SubmitInputArgument,
+        ),
+        (
+            "unknown field \"accepted\"",
+            WeaverSchemaFeature::SubmissionAccepted,
+        ),
+        (
+            "unknown field \"status\"",
+            WeaverSchemaFeature::SubmissionStatus,
+        ),
+        (
+            "unknown field \"message\"",
+            WeaverSchemaFeature::SubmissionMessage,
+        ),
+        (
+            "unknown field \"jobid\"",
+            WeaverSchemaFeature::SubmissionJobId,
+        ),
+        (
+            "unknown field \"errorcode\"",
+            WeaverSchemaFeature::SubmissionErrorCode,
+        ),
+        (
+            "unknown field \"pausequeueitem\"",
+            WeaverSchemaFeature::PauseQueueItem,
+        ),
+        (
+            "unknown field \"resumequeueitem\"",
+            WeaverSchemaFeature::ResumeQueueItem,
+        ),
+        (
+            "unknown argument \"password\"",
+            WeaverSchemaFeature::PasswordArgument,
+        ),
+        (
+            "unknown field \"reprocessjob\"",
+            WeaverSchemaFeature::ReprocessJob,
+        ),
+        (
+            "unknown argument \"deletefiles\"",
+            WeaverSchemaFeature::DeleteFiles,
+        ),
+        (
+            "variable \"$deletefiles\"",
+            WeaverSchemaFeature::DeleteFilesVariable,
+        ),
+        (
+            "unknown field \"removehistoryitems\"",
+            WeaverSchemaFeature::RemoveHistoryItems,
+        ),
+        (
+            "unknown field \"cancelqueueitem\"",
+            WeaverSchemaFeature::CancelQueueItem,
+        ),
+    ]
+    .into_iter()
+    .find_map(|(needle, feature)| normalized.contains(needle).then_some(feature))
+}
+
 /// One GraphQL-level refusal from Weaver, kept typed so callers route on the
 /// server's code rather than its prose.
 #[derive(Debug)]
 struct WeaverRefusal {
     code: WeaverErrorCode,
+    schema_feature: Option<WeaverSchemaFeature>,
     message: String,
 }
 
@@ -106,10 +306,8 @@ impl WeaverRequestError {
         matches!(self, Self::Refused(refusal) if refusal.code == code)
     }
 
-    /// Schema errors have no code, so the published-schema fallbacks still
-    /// need the validator's message text.
-    fn is_schema_error(&self, needle: &str) -> bool {
-        matches!(self, Self::Refused(refusal) if refusal.message.contains(needle))
+    fn is_schema_error(&self, feature: WeaverSchemaFeature) -> bool {
+        matches!(self, Self::Refused(refusal) if refusal.schema_feature == Some(feature))
     }
 }
 
@@ -132,7 +330,14 @@ impl From<WeaverRequestError> for AppError {
     fn from(error: WeaverRequestError) -> Self {
         match error {
             WeaverRequestError::Refused(refusal) => {
-                AppError::Repository(format!("weaver GraphQL error: {}", refusal.message))
+                let message = format!("weaver GraphQL error: {}", refusal.message);
+                match refusal.schema_feature {
+                    Some(feature) => AppError::RepositoryFailed {
+                        message,
+                        reason: feature.reason(),
+                    },
+                    None => AppError::Repository(message),
+                }
             }
             WeaverRequestError::Failed(error) => error,
         }
@@ -160,6 +365,8 @@ pub struct WeaverAttribute {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaverAttention {
+    #[serde(default)]
+    pub code: Option<String>,
     pub message: String,
 }
 
@@ -532,10 +739,10 @@ impl WeaverDownloadClient {
     ) -> AppResult<Self> {
         let parsed_config = parse_download_client_config_json(&config.config_json)?;
         let base_url = resolve_download_client_base_url(&parsed_config).ok_or_else(|| {
-            AppError::Validation(format!(
-                "download client {} has no valid base URL",
-                config.id
-            ))
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_DOWNLOAD_CLIENT_BASE_URL_INVALID,
+                format!("download client {} has no valid base URL", config.id),
+            )
         })?;
         let api_key = read_config_string(&parsed_config, &["api_key", "apiKey", "apikey"]);
         Ok(Self::with_staged_nzb_store(
@@ -748,6 +955,14 @@ impl WeaverDownloadClient {
         if let Some(errors) = json.errors
             && let Some(first) = errors.into_iter().next()
         {
+            let raw_code = first
+                .extensions
+                .as_ref()
+                .and_then(|extensions| extensions.code.as_deref());
+            let schema_feature = raw_code
+                .is_none()
+                .then(|| classify_weaver_schema_error(&first.message))
+                .flatten();
             let code = WeaverErrorCode::from_extension(
                 first
                     .extensions
@@ -756,6 +971,7 @@ impl WeaverDownloadClient {
             );
             return Err(WeaverRequestError::Refused(WeaverRefusal {
                 code,
+                schema_feature,
                 message: first.message,
             }));
         }
@@ -787,7 +1003,7 @@ impl WeaverDownloadClient {
             .await
         {
             Ok(_) => {}
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"systemMetrics\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::SystemMetrics) => {
                 let _: VersionPayload = self
                     .graphql_request(graphql_docs::VERSION_COMPAT_QUERY, json!({}))
                     .await?;
@@ -826,7 +1042,7 @@ impl WeaverDownloadClient {
             .await
         {
             Ok(data) => Ok(data),
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"queueItems\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::QueueItems) => {
                 self.query_jobs_compat(
                     Some(&[
                         "QUEUED",
@@ -848,7 +1064,7 @@ impl WeaverDownloadClient {
             Err(error)
                 if use_title_filter
                     && title_id.is_some()
-                    && is_weaver_schema_error(&error, "unknown field \"attributeEquals\"") =>
+                    && is_weaver_schema_error(&error, WeaverSchemaFeature::AttributeEquals) =>
             {
                 self.query_queue_items_once(None, false).await
             }
@@ -897,7 +1113,7 @@ impl WeaverDownloadClient {
             Err(error)
                 if use_title_filter
                     && title_id.is_some()
-                    && is_weaver_schema_error(&error, "unknown field \"attributeEquals\"") =>
+                    && is_weaver_schema_error(&error, WeaverSchemaFeature::AttributeEquals) =>
             {
                 self.query_history_items_once(limit, offset, None, false)
                     .await
@@ -949,7 +1165,7 @@ impl WeaverDownloadClient {
 
         let item = match self.query_history_item(job_id).await {
             Ok(item) => item,
-            Err(error) if is_weaver_schema_error(&error, "historyItem") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::HistoryItem) => {
                 return self.query_completed_download_recent_fallback(trimmed).await;
             }
             Err(error) => return Err(error),
@@ -1012,7 +1228,7 @@ impl WeaverDownloadClient {
             .await
         {
             Ok(items) => Ok(items),
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"historyItems\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::HistoryItems) => {
                 self.query_jobs_compat(Some(&["COMPLETE", "FAILED"]), Some(limit), Some(offset))
                     .await
             }
@@ -1139,6 +1355,19 @@ fn map_weaver_status(status: WeaverQueueState) -> DownloadQueueState {
     }
 }
 
+/// Compatibility with Weaver's currently published sentence-only archive
+/// failure contract. Its generic JOB_FAILED attention code does not distinguish
+/// password failures; no downstream Scryer code reads the legacy prefix.
+fn legacy_weaver_password_failure(reason: &str) -> Option<scryer_domain::DownloadPasswordFailure> {
+    if reason.starts_with("WEAVER_PASSWORD_REQUIRED:") {
+        Some(scryer_domain::DownloadPasswordFailure::Required)
+    } else if reason.starts_with("WEAVER_PASSWORD_OR_CORRUPTION:") {
+        Some(scryer_domain::DownloadPasswordFailure::PasswordOrCorruption)
+    } else {
+        None
+    }
+}
+
 /// Map a Weaver queue/history item to a scryer DownloadQueueItem.
 pub fn weaver_item_to_queue_item(job: &WeaverQueueItem) -> DownloadQueueItem {
     let state = map_weaver_status(job.state);
@@ -1150,19 +1379,27 @@ pub fn weaver_item_to_queue_item(job: &WeaverQueueItem) -> DownloadQueueItem {
     } else {
         job.attention.as_ref().map(|value| value.message.clone())
     };
-    let attention_reason = attention_reason.map(|reason| {
-        if reason.starts_with("WEAVER_PASSWORD_REQUIRED:") {
-            scryer_domain::DownloadPasswordFailure::Required
-                .message()
-                .into()
-        } else if reason.starts_with("WEAVER_PASSWORD_OR_CORRUPTION:") {
-            scryer_domain::DownloadPasswordFailure::PasswordOrCorruption
-                .message()
-                .into()
-        } else {
-            reason
-        }
-    });
+    let remote_code = job
+        .attention
+        .as_ref()
+        .and_then(|attention| attention.code.as_deref());
+    let password_failure = if matches!(remote_code, None | Some("JOB_FAILED" | "ATTENTION")) {
+        attention_reason
+            .as_deref()
+            .and_then(legacy_weaver_password_failure)
+    } else {
+        None
+    };
+    let attention_reason_code = password_failure
+        .map(|failure| failure.reason_code().to_string())
+        .or_else(|| {
+            job.attention
+                .as_ref()
+                .and_then(|attention| attention.code.clone())
+        });
+    let attention_reason = password_failure
+        .map(|failure| failure.message().to_string())
+        .or(attention_reason);
 
     let scryer_metadata =
         extract_scryer_metadata(&job.attributes, job.client_request_id.as_deref());
@@ -1177,6 +1414,7 @@ pub fn weaver_item_to_queue_item(job: &WeaverQueueItem) -> DownloadQueueItem {
     // Calculate remaining seconds from progress and download speed.
     // We don't have per-job speed, so leave it as None.
     DownloadQueueItem {
+        attention_reason_code,
         id: job.id.to_string(),
         title_id: scryer_metadata.title_id,
         episode_id: None,
@@ -1339,14 +1577,11 @@ fn compat_timestamp_to_utc(raw: Option<f64>) -> DateTime<Utc> {
 
 // A Weaver older than the posted-name record refuses the field.
 fn is_posted_file_names_schema_error(error: &AppError) -> bool {
-    is_weaver_schema_error(error, "Unknown field \"postedFileNames\"")
+    is_weaver_schema_error(error, WeaverSchemaFeature::PostedFileNames)
 }
 
-fn is_weaver_schema_error(error: &AppError, needle: &str) -> bool {
-    match error {
-        AppError::Repository(message) => message.contains(needle),
-        _ => false,
-    }
+fn is_weaver_schema_error(error: &AppError, feature: WeaverSchemaFeature) -> bool {
+    error.reason() == Some(feature.reason())
 }
 
 fn derive_nzb_filename(source_title: Option<&str>, source_hint: &str, title_name: &str) -> String {
@@ -1433,16 +1668,18 @@ impl DownloadClient for WeaverDownloadClient {
         {
             return Ok(DownloadClientObservation::Present(Box::new(item)));
         }
-        let id = locator
-            .item_id
-            .parse::<i32>()
-            .map_err(|_| AppError::Validation("invalid Weaver job identity".into()))?;
+        let id = locator.item_id.parse::<i32>().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_WEAVER_JOB_IDENTITY_INVALID,
+                "invalid Weaver job identity",
+            )
+        })?;
         match self.query_history_item(id).await {
             Ok(Some(item)) => Ok(DownloadClientObservation::Present(Box::new(
                 weaver_item_to_queue_item(&item),
             ))),
             Ok(None) => Ok(DownloadClientObservation::Absent),
-            Err(error) if is_weaver_schema_error(&error, "historyItem") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::HistoryItem) => {
                 let page = self.list_history_page(offset, 100).await?;
                 let count = page.len();
                 if count == 0 {
@@ -1596,7 +1833,7 @@ impl DownloadClient for WeaverDownloadClient {
                 // That is a schema gap, not a failure: resend the published
                 // single-password shape once and carry on silently.
                 let sent_candidates = variables["input"].get("passwordCandidates").is_some();
-                if sent_candidates && is_weaver_schema_error(error, "passwordCandidates") {
+                if sent_candidates && is_weaver_schema_error(error, WeaverSchemaFeature::PasswordCandidates) {
                     if let Some(input) = variables["input"].as_object_mut() {
                         input.remove("passwordCandidates");
                     }
@@ -1691,17 +1928,17 @@ impl DownloadClient for WeaverDownloadClient {
                     })
                 }
                 Err(error)
-                    if is_weaver_schema_error(&error, "Unknown type \"SubmitNzbInput\"")
-                        || is_weaver_schema_error(&error, "Unknown argument \"input\"")
-                        || is_weaver_schema_error(&error, "Unknown field \"accepted\"")
+                    if is_weaver_schema_error(&error, WeaverSchemaFeature::SubmitNzbInput)
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmitInputArgument)
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmissionAccepted)
                         // Selected alongside the idempotent-replay fix. `jobId`
                         // and `errorCode` postdate `accepted`, so a pre-2026-07-10
                         // Weaver lands here and falls back to the legacy mutation
                         // rather than hard-failing the grab.
-                        || is_weaver_schema_error(&error, "Unknown field \"status\"")
-                        || is_weaver_schema_error(&error, "Unknown field \"message\"")
-                        || is_weaver_schema_error(&error, "Unknown field \"jobId\"")
-                        || is_weaver_schema_error(&error, "Unknown field \"errorCode\"") =>
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmissionStatus)
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmissionMessage)
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmissionJobId)
+                        || is_weaver_schema_error(&error, WeaverSchemaFeature::SubmissionErrorCode) =>
                 {
                     let compressed_bytes = tokio::fs::read(&staged.staged_nzb.compressed_path)
                         .await
@@ -1833,7 +2070,7 @@ impl DownloadClient for WeaverDownloadClient {
             .await
         {
             Ok(items) => items,
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"historyItems\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::HistoryItems) => {
                 self.query_jobs_compat(Some(&["COMPLETE", "FAILED"]), Some(limit), Some(0))
                     .await?
             }
@@ -1896,9 +2133,12 @@ impl DownloadClient for WeaverDownloadClient {
     }
 
     async fn pause_queue_item(&self, id: &str) -> AppResult<()> {
-        let job_id: u64 = id
-            .parse()
-            .map_err(|_| AppError::Validation(format!("invalid weaver job id: {id}")))?;
+        let job_id: u64 = id.parse().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_WEAVER_JOB_ID_INVALID,
+                format!("invalid weaver job id: {id}"),
+            )
+        })?;
         match self
             .graphql_request_with_policy::<PauseQueueItemPayload>(
                 self.mutation_policy("weaver_pause_queue_item"),
@@ -1914,7 +2154,7 @@ impl DownloadClient for WeaverDownloadClient {
                     ));
                 }
             }
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"pauseQueueItem\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::PauseQueueItem) => {
                 let data: PublishedBoolPayload = self
                     .graphql_request_with_policy(
                         self.mutation_policy("weaver_pause_job"),
@@ -1934,9 +2174,12 @@ impl DownloadClient for WeaverDownloadClient {
     }
 
     async fn resume_queue_item(&self, id: &str) -> AppResult<()> {
-        let job_id: u64 = id
-            .parse()
-            .map_err(|_| AppError::Validation(format!("invalid weaver job id: {id}")))?;
+        let job_id: u64 = id.parse().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_WEAVER_JOB_ID_INVALID,
+                format!("invalid weaver job id: {id}"),
+            )
+        })?;
         match self
             .graphql_request_with_policy::<ResumeQueueItemPayload>(
                 self.mutation_policy("weaver_resume_queue_item"),
@@ -1952,7 +2195,7 @@ impl DownloadClient for WeaverDownloadClient {
                     ));
                 }
             }
-            Err(error) if is_weaver_schema_error(&error, "Unknown field \"resumeQueueItem\"") => {
+            Err(error) if is_weaver_schema_error(&error, WeaverSchemaFeature::ResumeQueueItem) => {
                 let data: PublishedBoolPayload = self
                     .graphql_request_with_policy(
                         self.mutation_policy("weaver_resume_job"),
@@ -1977,12 +2220,16 @@ impl DownloadClient for WeaverDownloadClient {
         password: &str,
     ) -> AppResult<scryer_application::DownloadClientRetryOutcome> {
         use scryer_application::DownloadClientRetryOutcome as Outcome;
-        let job_id: u64 = id
-            .parse()
-            .map_err(|_| AppError::Validation("invalid weaver job ID".into()))?;
+        let job_id: u64 = id.parse().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_WEAVER_JOB_ID_INVALID,
+                "invalid weaver job ID",
+            )
+        })?;
         if password.is_empty() {
-            return Err(AppError::Validation(
-                "replacement password is required".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_REPLACEMENT_PASSWORD_REQUIRED,
+                "replacement password is required",
             ));
         }
         let result = self.graphql_request_typed::<Value>(
@@ -2003,8 +2250,8 @@ impl DownloadClient for WeaverDownloadClient {
             // Schema validation cannot execute the mutation. In particular,
             // older Weaver rejects the optional password argument definitively.
             Err(error)
-                if error.is_schema_error("Unknown argument \"password\"")
-                    || error.is_schema_error("Unknown field \"reprocessJob\"") =>
+                if error.is_schema_error(WeaverSchemaFeature::PasswordArgument)
+                    || error.is_schema_error(WeaverSchemaFeature::ReprocessJob) =>
             {
                 Ok(Outcome::Refused)
             }
@@ -2036,9 +2283,12 @@ impl DownloadClient for WeaverDownloadClient {
         is_history: bool,
         remove_data: bool,
     ) -> AppResult<()> {
-        let job_id: u64 = id
-            .parse()
-            .map_err(|_| AppError::Validation(format!("invalid weaver job id: {id}")))?;
+        let job_id: u64 = id.parse().map_err(|_| {
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_WEAVER_JOB_ID_INVALID,
+                format!("invalid weaver job id: {id}"),
+            )
+        })?;
         if is_history {
             match self.remove_history_item(job_id, remove_data).await {
                 Ok(()) => Ok(()),
@@ -2119,8 +2369,8 @@ impl WeaverDownloadClient {
             }
             Err(error)
                 if remove_data
-                    && (error.is_schema_error("Unknown argument \"deleteFiles\"")
-                        || error.is_schema_error("Variable \"$deleteFiles\"")) =>
+                    && (error.is_schema_error(WeaverSchemaFeature::DeleteFiles)
+                        || error.is_schema_error(WeaverSchemaFeature::DeleteFilesVariable)) =>
             {
                 warn!(
                     error = %error,
@@ -2128,7 +2378,7 @@ impl WeaverDownloadClient {
                 );
                 return Err(error);
             }
-            Err(error) if error.is_schema_error("Unknown field \"removeHistoryItems\"") => {
+            Err(error) if error.is_schema_error(WeaverSchemaFeature::RemoveHistoryItems) => {
                 let data: PublishedDeleteHistoryPayload = self
                     .graphql_request_typed(
                         self.mutation_policy("weaver_delete_history_batch"),
@@ -2167,7 +2417,7 @@ impl WeaverDownloadClient {
                     .into());
                 }
             }
-            Err(error) if error.is_schema_error("Unknown field \"cancelQueueItem\"") => {
+            Err(error) if error.is_schema_error(WeaverSchemaFeature::CancelQueueItem) => {
                 let data: PublishedBoolPayload = self
                     .graphql_request_typed(
                         self.mutation_policy("weaver_cancel_job"),
@@ -3251,6 +3501,62 @@ mod tests {
         assert_eq!(item.title_id.as_deref(), Some("title-1"));
         assert!(item.is_scryer_origin);
         assert_eq!(item.attention_reason.as_deref(), Some("archive corrupt"));
+    }
+
+    #[test]
+    fn schema_compatibility_is_classified_at_decode_and_respects_runtime_codes() {
+        let body = r#"{"errors":[{"message":"Unknown field \"queueItems\""}]}"#;
+        let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
+            reqwest::StatusCode::OK,
+            body,
+        )
+        .unwrap_err();
+        assert!(super::is_weaver_schema_error(
+            &error,
+            super::WeaverSchemaFeature::QueueItems
+        ));
+        let coded = r#"{"errors":[{"message":"Unknown field \"queueItems\"","extensions":{"code":"NOT_FOUND"}}]}"#;
+        let error = super::WeaverDownloadClient::parse_graphql_response::<serde_json::Value>(
+            reqwest::StatusCode::OK,
+            coded,
+        )
+        .unwrap_err();
+        assert!(!super::is_weaver_schema_error(
+            &error,
+            super::WeaverSchemaFeature::QueueItems
+        ));
+    }
+
+    #[test]
+    fn weaver_attention_code_is_authoritative_over_legacy_password_text() {
+        for code in [
+            "JOB_FAILED",
+            "ATTENTION",
+            "WAITING_FOR_VOLUMES",
+            "UNKNOWN_FUTURE_CONDITION",
+        ] {
+            let job: WeaverQueueItem = serde_json::from_value(serde_json::json!({
+                "id": 1, "name": "synthetic", "state": "FAILED",
+                "error": "WEAVER_PASSWORD_REQUIRED: historical diagnostic",
+                "progressPercent": 0.0, "totalBytes": 0, "attributes": [],
+                "createdAt": "2026-01-01T00:00:00Z",
+                "attention": {"code": code, "message": "WEAVER_PASSWORD_REQUIRED: historical diagnostic"}
+            })).unwrap();
+            let item = weaver_item_to_queue_item(&job);
+            if matches!(code, "JOB_FAILED" | "ATTENTION") {
+                assert_eq!(
+                    item.attention_reason_code.as_deref(),
+                    Some("ARCHIVE_PASSWORD_REQUIRED")
+                );
+                assert_eq!(
+                    item.password_failure(),
+                    Some(scryer_domain::DownloadPasswordFailure::Required)
+                );
+            } else {
+                assert_eq!(item.attention_reason_code.as_deref(), Some(code));
+                assert_eq!(item.password_failure(), None);
+            }
+        }
     }
 
     #[test]

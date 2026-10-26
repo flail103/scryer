@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import * as React from "react";
 import {
   deleteQualityProfileMutation,
@@ -387,7 +388,7 @@ export function useQualityProfilesManager(
           toastId: QUALITY_PROFILES_SAVED_TOAST_ID,
         });
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
       } finally {
         setQualityProfilesSaving(false);
       }
@@ -417,7 +418,7 @@ export function useQualityProfilesManager(
           options,
         );
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       } finally {
         setMediaSettingsLoading(false);
         setInitialLoadComplete(true);
@@ -638,7 +639,7 @@ export function useQualityProfilesManager(
         });
         return true;
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
         return false;
       } finally {
         setQualityProfilesSaving(false);
@@ -696,7 +697,7 @@ export function useQualityProfilesManager(
           toastId: QUALITY_PROFILES_SAVED_TOAST_ID,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : t("status.failedToUpdate");
+        const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
         setGlobalStatus(message, { level: "ERROR" });
       } finally {
         setQualityProfilesSaving(false);
@@ -737,7 +738,7 @@ export function useQualityProfilesManager(
         });
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {
@@ -811,7 +812,7 @@ export function useQualityProfilesManager(
           toastId: QUALITY_PROFILES_SAVED_TOAST_ID,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : t("status.failedToUpdate");
+        const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
         setGlobalStatus(message, { level: "ERROR" });
       } finally {
         setCategoryQualityProfileSaving((previous) => ({
@@ -870,7 +871,7 @@ export function useQualityProfilesManager(
         });
       } catch (error) {
         setGlobalStatus(
-          error instanceof Error ? error.message : t("status.failedToUpdate"),
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
           { level: "ERROR" },
         );
       } finally {

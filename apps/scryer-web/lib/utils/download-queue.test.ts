@@ -7,6 +7,7 @@ import { createServer, type ViteDevServer } from "vite";
 const WEB_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 type DownloadQueueModule = {
+  buildQueueStatusDetail: (item: DownloadQueueItem, t?: (key: string) => string) => string;
   importRetrySucceeded: (result: { decision?: string; skipReason?: string | null } | null | undefined) => boolean;
   IMPORT_ATTENTION_STATUSES: string[];
   sameDownloadQueueItem: (
@@ -107,6 +108,18 @@ function queueItem(overrides: Partial<DownloadQueueItem> = {}): DownloadQueueIte
     ...overrides,
   };
 }
+
+test("HTTP queue refusals translate the code and preserve legacy sentences", () => {
+  const item = queueItem({
+    attentionReason: "HTTP_RELEASE_UNKNOWN_CONTAINER",
+    trackedStatusMessages: ["changed server wording"],
+  });
+  assert.equal(downloadQueue.buildQueueStatusDetail(item, (key) => key),
+    "httpRelease.refusal.unknownContainer");
+  assert.equal(downloadQueue.buildQueueStatusDetail(queueItem({
+    attentionReason: "legacy server wording",
+  }), (key) => key), "legacy server wording");
+});
 
 test("queue item equality ignores regenerated equivalent payload objects", () => {
   const current = queueItem({

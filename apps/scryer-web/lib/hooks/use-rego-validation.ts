@@ -1,3 +1,5 @@
+import { graphQlRuleValidationResult } from "../utils/rego-diagnostics";
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useClient } from "urql";
 import { makeAbortableFetch } from "../graphql/urql-client";
@@ -30,14 +32,14 @@ export function useRegoValidation(family: RegoFamily, source: string, ruleId: st
       }, { fetch: makeAbortableFetch(abort.signal) }).toPromise();
       if (error?.networkError) throw error;
       if (error?.graphQLErrors.length) {
-        return { valid: false, errors: error.graphQLErrors.map((item) => item.message) };
+        return graphQlRuleValidationResult(error, userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t));
       }
       if (!data?.[field]) throw new Error("Missing validation response");
       return data[field] as RegoValidationResult;
     } finally {
       clearTimeout(timeout);
     }
-  }, setSnapshot, unavailable), [client, family, ruleId, unavailable]);
+  }, setSnapshot, unavailable), [client, family, ruleId, unavailable, t]);
 
   useLayoutEffect(() => {
     latestKey.current = key;

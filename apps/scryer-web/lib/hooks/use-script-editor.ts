@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 
@@ -223,7 +224,7 @@ export function useScriptEditor(trigger: ScriptTriggerValue, options: { onChange
           .filter((script): script is PostProcessingScript => script !== null),
       );
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     }
   }, [client, setGlobalStatus, t, trigger]);
 
@@ -256,7 +257,7 @@ export function useScriptEditor(trigger: ScriptTriggerValue, options: { onChange
         }));
       } catch (error) {
         if (!isCurrent()) return;
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToLoad"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
       }
     },
     [client, setGlobalStatus, t],
@@ -329,7 +330,7 @@ export function useScriptEditor(trigger: ScriptTriggerValue, options: { onChange
         closeEditor();
         await afterChange();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingScriptId(null);
       }
@@ -375,7 +376,7 @@ export function useScriptEditor(trigger: ScriptTriggerValue, options: { onChange
         );
         await afterChange();
       } catch (error) {
-        setGlobalStatus(error instanceof Error ? error.message : t("status.failedToUpdate"), { level: "ERROR" });
+        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
       } finally {
         setMutatingScriptId(null);
       }
@@ -409,7 +410,7 @@ export function useScriptEditor(trigger: ScriptTriggerValue, options: { onChange
         closeEditor();
       }
     } catch (error) {
-      setGlobalStatus(error instanceof Error ? error.message : t("status.failedToDelete"), { level: "ERROR" });
+      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
     } finally {
       setMutatingScriptId(null);
       setPendingDeleteScript(null);

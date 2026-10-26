@@ -43,7 +43,10 @@ impl DirectNabConfig {
             .map(serde_json::from_str::<Value>)
             .transpose()
             .map_err(|error| {
-                AppError::Validation(format!("indexer config_json is invalid: {error}"))
+                AppError::validation_refused(
+                    crate::error_reasons::ACQUISITION_INDEXER_CONFIG_JSON_INVALID,
+                    format!("indexer config_json is invalid: {error}"),
+                )
             })?
             .unwrap_or(Value::Null);
 
@@ -59,8 +62,9 @@ impl DirectNabConfig {
             .map(|parts| parts.base_url.clone())
             .unwrap_or_else(|| raw_base_url.trim_end_matches('/').to_string());
         if base_url.is_empty() {
-            return Err(AppError::Validation(
-                "indexer caps refresh requires a base_url".into(),
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_INDEXER_CAPS_BASE_URL_REQUIRED,
+                "indexer caps refresh requires a base_url",
             ));
         }
 
@@ -107,7 +111,10 @@ impl DirectNabConfig {
         };
         let endpoint = format!("{}{}", self.base_url.trim_end_matches('/'), normalized_path);
         let mut url = reqwest::Url::parse(&endpoint).map_err(|error| {
-            AppError::Validation(format!("indexer caps base_url is invalid: {error}"))
+            AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_INDEXER_CAPS_BASE_URL_INVALID,
+                format!("indexer caps base_url is invalid: {error}"),
+            )
         })?;
         {
             let mut pairs = url.query_pairs_mut();
@@ -250,10 +257,13 @@ fn caps_request_client(
     direct: &reqwest::Client,
 ) -> AppResult<reqwest::Client> {
     if config.proxy_config_id.as_deref() != proxy.map(|proxy| proxy.id.as_str()) {
-        return Err(AppError::Validation(format!(
-            "caps refresh for indexer {} was not given its assigned proxy; refusing to send it directly",
-            config.name
-        )));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::ACQUISITION_INDEXER_CAPS_PROXY_REQUIRED,
+            format!(
+                "caps refresh for indexer {} was not given its assigned proxy; refusing to send it directly",
+                config.name
+            ),
+        ));
     }
     scryer_application::transport_proxy::indexer_host_request_client(proxy, || direct.clone())
         .map_err(AppError::Repository)
@@ -1019,6 +1029,7 @@ mod tests {
     #[test]
     fn direct_nab_config_canonicalizes_query_bearing_connection_urls_for_caps() {
         let config = IndexerConfig {
+            last_error_code: None,
             id: "cfg-1".to_string(),
             name: "NZBGeek".to_string(),
             provider_type: "nzbgeek".to_string(),
@@ -1070,6 +1081,7 @@ mod tests {
     #[tokio::test]
     async fn direct_nab_caps_refresher_ignores_prowlarr_proxy_configs() {
         let config = IndexerConfig {
+            last_error_code: None,
             id: "proxy-1".to_string(),
             name: "Prowlarr Proxy".to_string(),
             provider_type: "newznab".to_string(),
@@ -1117,6 +1129,7 @@ mod tests {
     /// A direct Newznab indexer pointed at `origin`, assigned `proxy_config_id`.
     fn direct_newznab_config(origin: &str, proxy_config_id: Option<&str>) -> IndexerConfig {
         IndexerConfig {
+            last_error_code: None,
             id: "cfg-proxied-caps".to_string(),
             name: "Proxied Newznab".to_string(),
             provider_type: "newznab".to_string(),

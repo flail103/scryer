@@ -1163,9 +1163,7 @@ impl AppUseCase {
         conflict: &SubmissionScopeConflict,
     ) -> AppResult<()> {
         if !conflict.replaceable {
-            return Err(AppError::Validation(
-                "the existing download is no longer safe to replace".into(),
-            ));
+            return Err(AppError::validation_refused(crate::error_reasons::catalog::EXISTING_DOWNLOAD_NO_LONGER_SAFE_REPLACE, "the existing download is no longer safe to replace"));
         }
 
         if let Some(client_id) = conflict.download_client_id.as_deref() {

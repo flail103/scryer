@@ -1,3 +1,4 @@
+import { userFacingGraphQlErrorMessage } from "../../lib/graphql/error-message.ts";
 import * as React from "react";
 import { Search } from "lucide-react";
 import { useClient } from "urql";
@@ -133,7 +134,7 @@ export function FixTitleMatchDialog({
           }
           setResults([]);
           setSelectedResultKey(null);
-          setError(err instanceof Error ? err.message : t("title.fixMatchSearchFailed"));
+          setError(userFacingGraphQlErrorMessage(err, t("title.fixMatchSearchFailed"), t));
         })
         .finally(() => {
           if (active) {
@@ -167,7 +168,7 @@ export function FixTitleMatchDialog({
       await onFixed?.(warnings);
       onOpenChange(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t("title.fixMatchApplyFailed"));
+      setError(userFacingGraphQlErrorMessage(err, t("title.fixMatchApplyFailed"), t));
     } finally {
       setApplying(false);
     }

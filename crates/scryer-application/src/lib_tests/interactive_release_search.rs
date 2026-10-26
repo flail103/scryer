@@ -989,7 +989,12 @@ async fn exactly_one_subject_is_required() {
             .await
             .expect_err(label);
         assert!(
-            matches!(error, AppError::Validation(_)),
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
             "{label} should be a validation error, got {error:?}"
         );
     }
@@ -1010,7 +1015,13 @@ async fn a_query_subject_search_requires_manage_system_settings() {
         .start_interactive_release_search(&viewer, query_request("q"))
         .await
         .expect_err("permission gate");
-    assert!(matches!(error, AppError::Unauthorized(_)), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ),
+        "{error:?}"
+    );
 }
 
 // ── Candidate tokens at grab time ──────────────────────────────────────
@@ -1145,7 +1156,15 @@ async fn a_season_only_token_binds_a_series_season_and_is_refused_for_a_movie() 
         )
         .await
         .expect_err("season-only token for a movie");
-    assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]
@@ -1277,7 +1296,12 @@ async fn a_token_is_issued_for_a_release_still_held_by_the_search() {
         )
         .await
         .expect_err("stale selection must be rejected before submission");
-    assert!(matches!(denied, AppError::Validation(_)));
+    assert!(matches!(
+        denied,
+        AppError::Validation(_)
+            | AppError::ValidationRefused { .. }
+            | AppError::ValidationRefusedWithCount { .. }
+    ));
     assert!(requests.lock().await.is_empty());
     let conflicting = app
         .queue_indexer_search_assignment(
@@ -1295,7 +1319,12 @@ async fn a_token_is_issued_for_a_release_still_held_by_the_search() {
         )
         .await
         .expect_err("additional imports must not replace primary files");
-    assert!(matches!(conflicting, AppError::Validation(_)));
+    assert!(matches!(
+        conflicting,
+        AppError::Validation(_)
+            | AppError::ValidationRefused { .. }
+            | AppError::ValidationRefusedWithCount { .. }
+    ));
     assert!(requests.lock().await.is_empty());
     let outcome = app
         .queue_indexer_search_assignment(
@@ -1343,7 +1372,13 @@ async fn a_token_is_issued_for_a_release_still_held_by_the_search() {
         )
         .await
         .expect_err("unknown release");
-    assert!(matches!(missing, AppError::NotFound(_)), "{missing:?}");
+    assert!(
+        matches!(
+            missing,
+            AppError::NotFound(_) | AppError::NotFoundReason { .. }
+        ),
+        "{missing:?}"
+    );
 }
 
 // ── Unlinked grab ──────────────────────────────────────────────────────
@@ -1931,7 +1966,13 @@ async fn an_unlinked_grab_refuses_unknown_releases_unusable_clients_and_unprivil
         )
         .await
         .expect_err("unknown release");
-    assert!(matches!(missing, AppError::NotFound(_)), "{missing:?}");
+    assert!(
+        matches!(
+            missing,
+            AppError::NotFound(_) | AppError::NotFoundReason { .. }
+        ),
+        "{missing:?}"
+    );
 
     for (label, client_id) in [("disabled", disabled.id.as_str()), ("unknown", "dc-nope")] {
         let error = app
@@ -1939,7 +1980,12 @@ async fn an_unlinked_grab_refuses_unknown_releases_unusable_clients_and_unprivil
             .await
             .expect_err(label);
         assert!(
-            matches!(error, AppError::Validation(_)),
+            matches!(
+                error,
+                AppError::Validation(_)
+                    | AppError::ValidationRefused { .. }
+                    | AppError::ValidationRefusedWithCount { .. }
+            ),
             "{label} client should be a validation error, got {error:?}"
         );
     }
@@ -1949,7 +1995,13 @@ async fn an_unlinked_grab_refuses_unknown_releases_unusable_clients_and_unprivil
         .queue_unlinked_release(&viewer, &start.id, &download_url, &enabled.id)
         .await
         .expect_err("permission gate");
-    assert!(matches!(denied, AppError::Unauthorized(_)), "{denied:?}");
+    assert!(
+        matches!(
+            denied,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ),
+        "{denied:?}"
+    );
 }
 
 /// An assigned grab is gated like any other grab for the title: a title
@@ -2057,7 +2109,13 @@ async fn an_assigned_grab_needs_only_title_management() {
         .indexer_grab_clients(&manager, &start.id, &download_url, None)
         .await
         .expect_err("title-less grab clients need ManageSystemSettings");
-    assert!(matches!(denied, AppError::Unauthorized(_)), "{denied:?}");
+    assert!(
+        matches!(
+            denied,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ),
+        "{denied:?}"
+    );
 
     // The grab the listing led to completes under the same gate.
     let outcome = app
@@ -2289,7 +2347,15 @@ async fn browser_downloads_count_against_the_indexer_even_when_a_later_member_fa
         .download_interactive_search_artifacts(&user, &targets(&search_id, &urls))
         .await
         .expect_err("the second fetch fails the batch");
-    assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
+        "{error:?}"
+    );
 
     // The indexer served the first file, so that grab happened and is counted
     // under the configured indexer name, exactly as the unlinked-queue path
@@ -2329,7 +2395,9 @@ async fn browser_download_rejects_an_oversized_aggregate_without_grab_history() 
         .download_interactive_search_artifacts(&user, &targets(&search_id, &urls))
         .await
         .expect_err("aggregate payload is bounded");
-    assert!(matches!(error, AppError::Validation(message) if message.contains("64 MiB")));
+    assert!(
+        matches!(error, AppError::Validation(message) | AppError::ValidationRefused { message, .. } | AppError::ValidationRefusedWithCount { message, .. } if message.contains("64 MiB"))
+    );
     assert!(grabbed_release_titles(&app).await.is_empty());
 }
 
@@ -2471,7 +2539,15 @@ async fn browser_downloads_refuse_empty_oversized_and_unprivileged_requests() {
         .download_interactive_search_artifacts(&user, &[])
         .await
         .expect_err("nothing selected");
-    assert!(matches!(empty, AppError::Validation(_)), "{empty:?}");
+    assert!(
+        matches!(
+            empty,
+            AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
+        "{empty:?}"
+    );
 
     let too_many = vec![urls[0].clone(); 51];
     let oversized = app
@@ -2479,7 +2555,12 @@ async fn browser_downloads_refuse_empty_oversized_and_unprivileged_requests() {
         .await
         .expect_err("over the per-request cap");
     assert!(
-        matches!(oversized, AppError::Validation(_)),
+        matches!(
+            oversized,
+            AppError::Validation(_)
+                | AppError::ValidationRefused { .. }
+                | AppError::ValidationRefusedWithCount { .. }
+        ),
         "{oversized:?}"
     );
 
@@ -2488,7 +2569,13 @@ async fn browser_downloads_refuse_empty_oversized_and_unprivileged_requests() {
         .download_interactive_search_artifacts(&viewer, &targets(&search_id, &urls[..1]))
         .await
         .expect_err("permission gate");
-    assert!(matches!(denied, AppError::Unauthorized(_)), "{denied:?}");
+    assert!(
+        matches!(
+            denied,
+            AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }
+        ),
+        "{denied:?}"
+    );
 }
 
 #[tokio::test]
