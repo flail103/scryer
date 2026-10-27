@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useClient } from "urql";
 import { Ban, CheckCircle2, Clipboard, Edit, KeyRound, Lock, Plus, RefreshCw, ShieldAlert } from "lucide-react";
@@ -55,6 +55,41 @@ const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
   NEWZNAB: "indexerClients.protocol.newznab",
   TORZNAB: "indexerClients.protocol.torznab",
 };
+
+/** *arr apps join the URL and API path fields; their API path defaults to this. */
+const ENDPOINT_API_PATH = "/api";
+
+function EndpointField({ id, label, value, copied, onCopy, className, t }: {
+  id: string;
+  label: string;
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+  className?: string;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className={`flex min-w-0 items-center ${className ?? ""}`}>
+      <Input
+        id={id}
+        aria-label={label}
+        readOnly
+        value={value}
+        onFocus={(event) => event.currentTarget.select()}
+        className="h-9 min-w-0 flex-1 rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
+      />
+      <IconButton
+        id={`${id}-copy`}
+        label={copied ? t("label.copied") : t("label.copy")}
+        tone={copied ? "enabled" : "neutral"}
+        className="-ml-px h-9 shrink-0 rounded-l-none"
+        onClick={onCopy}
+      >
+        {copied ? <CheckCircle2 className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+      </IconButton>
+    </div>
+  );
+}
 
 const emptyDraft = (): IndexerClientConfiguration => ({ name: "", enabled: true, protocols: ["NEWZNAB"], grants: [] });
 const configurationOf = (client: IndexerClientRecord): IndexerClientConfiguration => ({
@@ -129,15 +164,15 @@ export function SettingsIndexerClientsContainer() {
   const [pluginsTarget, setPluginsTarget] = useState<HTMLElement | null>(null);
   useEffect(() => { setPluginsTarget(document.getElementById(SETTINGS_REFERENCE_SLOT_ID)); }, []);
   const refreshAfterPluginChange = useCallback(async () => { await load(); }, [load]);
-  const [copiedEndpoint, setCopiedEndpoint] = useState<IndexerClientProtocol | null>(null);
+  const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
   const endpointUrl = (protocol: IndexerClientProtocol) => {
     const basePath = getRuntimeBasePath();
     return `${window.location.origin}${basePath === "/" ? "" : basePath}/${protocol.toLowerCase()}`;
   };
-  const copyEndpoint = async (protocol: IndexerClientProtocol) => {
+  const copyEndpoint = async (key: string, value: string) => {
     try {
-      await navigator.clipboard.writeText(endpointUrl(protocol));
-      setCopiedEndpoint(protocol);
+      await navigator.clipboard.writeText(value);
+      setCopiedEndpoint(key);
     } catch {
       setError(t("indexerClients.endpointCopyFailed"));
     }
@@ -218,32 +253,31 @@ export function SettingsIndexerClientsContainer() {
       <div className="border-b border-border px-3 py-2">
         <CardTitle className="text-base">{t("indexerClients.endpoints")}</CardTitle>
       </div>
-      <div className="space-y-2 p-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 p-3">
+        <span />
+        <span className="text-xs font-medium text-[var(--scry-muted3)]">{t("indexerClients.endpointUrl")}</span>
+        <span className="text-xs font-medium text-[var(--scry-muted3)]">{t("indexerClients.endpointApiPath")}</span>
         {PROTOCOLS.map((protocol) => (
-          <div key={protocol} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="w-20 shrink-0 font-medium text-[var(--scry-ink2)]">{t(PROTOCOL_LABEL_KEYS[protocol])}</span>
-            <div className="flex min-w-0 items-center">
-              <a
-                id={`indexer-client-endpoint-${protocol.toLowerCase()}`}
-                href={endpointUrl(protocol)}
-                target="_blank"
-                rel="noreferrer"
-                className="truncate font-[var(--font-code)] text-[var(--scry-accent-text)] underline-offset-2 hover:underline"
-              >
-                {endpointUrl(protocol)}
-              </a>
-              <IconButton
-                id={`indexer-client-endpoint-copy-${protocol.toLowerCase()}`}
-                label={copiedEndpoint === protocol ? t("label.copied") : t("label.copy")}
-                tone={copiedEndpoint === protocol ? "enabled" : "neutral"}
-                className="ml-2 h-8 w-8 shrink-0"
-                onClick={() => void copyEndpoint(protocol)}
-              >
-                {copiedEndpoint === protocol ? <CheckCircle2 className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
-              </IconButton>
-            </div>
-            <span className="text-[var(--scry-muted3)]">{t("indexerClients.endpointApiPath", { path: "/api" })}</span>
-          </div>
+          <Fragment key={protocol}>
+            <span className="font-medium text-[var(--scry-ink2)]">{t(PROTOCOL_LABEL_KEYS[protocol])}</span>
+            <EndpointField
+              id={`indexer-client-endpoint-${protocol.toLowerCase()}`}
+              label={`${t(PROTOCOL_LABEL_KEYS[protocol])} ${t("indexerClients.endpointUrl")}`}
+              value={endpointUrl(protocol)}
+              copied={copiedEndpoint === `${protocol}:url`}
+              onCopy={() => void copyEndpoint(`${protocol}:url`, endpointUrl(protocol))}
+              t={t}
+            />
+            <EndpointField
+              id={`indexer-client-endpoint-${protocol.toLowerCase()}-api-path`}
+              label={`${t(PROTOCOL_LABEL_KEYS[protocol])} ${t("indexerClients.endpointApiPath")}`}
+              value={ENDPOINT_API_PATH}
+              copied={copiedEndpoint === `${protocol}:path`}
+              onCopy={() => void copyEndpoint(`${protocol}:path`, ENDPOINT_API_PATH)}
+              className="w-28"
+              t={t}
+            />
+          </Fragment>
         ))}
       </div>
     </div>
