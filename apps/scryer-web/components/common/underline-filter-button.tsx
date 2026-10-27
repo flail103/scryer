@@ -125,6 +125,7 @@ function UnderlineIndicator({ large }: { large: boolean }) {
 type UnderlineTabLinkProps = Omit<LinkProps, "children" | "role"> & {
   selected: boolean;
   label: string;
+  icon?: React.ReactNode;
   /** A short tag after the label, such as one marking the pane as beta. */
   badge?: string;
 };
@@ -133,7 +134,7 @@ type UnderlineTabLinkProps = Omit<LinkProps, "children" | "role"> & {
  * A page section tab that is its own route: the large underline tab, as a
  * link. Place it in a `role="tablist"` row like the button form.
  */
-export function UnderlineTabLink({ selected, label, badge, className, ...linkProps }: UnderlineTabLinkProps) {
+export function UnderlineTabLink({ selected, icon, label, badge, className, ...linkProps }: UnderlineTabLinkProps) {
   return (
     <Link
       {...linkProps}
@@ -142,6 +143,11 @@ export function UnderlineTabLink({ selected, label, badge, className, ...linkPro
       aria-current={selected ? "page" : undefined}
       className={cn(underlineTabClassName(selected, true), className)}
     >
+      {icon ? (
+        <span className={cn("shrink-0", selected ? "text-[var(--scry-accent-text)]" : "text-[var(--scry-muted2)]")}>
+          {icon}
+        </span>
+      ) : null}
       <span className="whitespace-nowrap">{label}</span>
       {badge ? <UnderlineBadge label={badge} /> : null}
       {selected ? <UnderlineIndicator large /> : null}

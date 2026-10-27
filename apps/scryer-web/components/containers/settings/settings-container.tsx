@@ -29,6 +29,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { INDEXER_SETTINGS_TAB_ITEMS } from "@/components/views/settings/indexer-settings-tabs";
 import { UnderlineTabLink } from "@/components/common/underline-filter-button";
 import { Button } from "@/components/ui/button";
 import { GutterPanel, GutterPanelButton } from "@/components/common/gutter-panel";
@@ -165,15 +166,6 @@ const INDEXERS_FILTERED_PLUGIN_CONTENT_WIDTH = 1460;
 // keeps the wider pane it had before it carried the plugins rail.
 const INDEXER_SEARCH_FILTERED_PLUGIN_CONTENT_WIDTH = 1640;
 
-const INDEXER_SETTINGS_TAB_LABEL_KEYS: Record<IndexerSettingsTab, string> = {
-  indexers: "settings.indexers",
-  search: "settings.indexerSearch",
-  clients: "settings.indexerClients",
-  seedingProfiles: "settings.seedingProfiles",
-};
-
-const BETA_INDEXER_SETTINGS_TABS: ReadonlySet<IndexerSettingsTab> = new Set(["search", "clients"]);
-
 /// Pane tabs for the Indexers page. An indexer and the seeding profile it
 /// applies are two views of the same subject, so they share a page instead of
 /// scattering across the settings nav. Same shape as the Lists page's tabs.
@@ -192,16 +184,20 @@ function IndexerSettingsTabs({
         aria-label={t("settings.indexers")}
         className="relative top-px flex min-h-12 flex-wrap gap-x-2"
       >
-        {INDEXER_SETTINGS_TABS.map((tab) => (
-          <UnderlineTabLink
-            key={tab}
-            id={selectorId("settings-indexers-subnav", tab)}
-            to={buildIndexerSettingsPath(tab)}
-            selected={activeTab === tab}
-            label={t(INDEXER_SETTINGS_TAB_LABEL_KEYS[tab])}
-            badge={BETA_INDEXER_SETTINGS_TABS.has(tab) ? t("settings.pluginBeta") : undefined}
-          />
-        ))}
+        {INDEXER_SETTINGS_TABS.map((tab) => {
+          const item = INDEXER_SETTINGS_TAB_ITEMS[tab];
+          return (
+            <UnderlineTabLink
+              key={tab}
+              id={selectorId("settings-indexers-subnav", tab)}
+              to={buildIndexerSettingsPath(tab)}
+              selected={activeTab === tab}
+              icon={<item.icon className="h-4 w-4" />}
+              label={t(item.labelKey)}
+              badge={item.beta ? t("settings.pluginBeta") : undefined}
+            />
+          );
+        })}
       </div>
     </div>
   );

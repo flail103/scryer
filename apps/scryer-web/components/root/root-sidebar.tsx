@@ -65,6 +65,9 @@ import {
   Users,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { Link, useLocation } from "react-router";
+import { INDEXER_SETTINGS_TAB_ITEMS } from "@/components/views/settings/indexer-settings-tabs";
+import { buildIndexerSettingsPath, indexerSettingsTabFromPath, INDEXER_SETTINGS_TABS } from "@/lib/utils/routing";
 import { PalettePicker } from "@/components/views/settings/palette-picker";
 import { QuickHighlightColorPicker } from "@/components/views/settings/quick-highlight-color-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -952,6 +955,8 @@ function RootSidebarContent({
   );
   const visibleWantedSubPages = WANTED_SUB_PAGES;
 
+  const { pathname } = useLocation();
+  const activeIndexerSettingsTab = indexerSettingsTabFromPath(pathname);
   const handleNavigate = React.useCallback(
     (
       event: React.MouseEvent,
@@ -1215,6 +1220,37 @@ function RootSidebarContent({
                             {item.label}
                           </SidebarMenuButton>
                         </SidebarMenuItem>
+                        {item.id === "indexers" &&
+                        view === "settings" &&
+                        settingsSection === "indexers" ? (
+                          <SidebarGroupContent>
+                            <SidebarMenuSub className={SUB_NAV_MENU_CLASS}>
+                              {INDEXER_SETTINGS_TABS.map((tab) => {
+                                const tabItem = INDEXER_SETTINGS_TAB_ITEMS[tab];
+                                return (
+                                  <SidebarMenuSubItem key={tab}>
+                                    <SidebarMenuSubButton
+                                      asChild
+                                      isActive={activeIndexerSettingsTab === tab}
+                                      className={SUB_NAV_BUTTON_CLASS}
+                                    >
+                                      <Link
+                                        id={selectorId("root-sidebar-indexers", tab)}
+                                        to={buildIndexerSettingsPath(tab)}
+                                        onClick={() => {
+                                          if (isMobile) setOpenMobile(false);
+                                        }}
+                                      >
+                                        <tabItem.icon className="h-3.5 w-3.5 shrink-0" />
+                                        <span>{t(tabItem.labelKey)}</span>
+                                      </Link>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                );
+                              })}
+                            </SidebarMenuSub>
+                          </SidebarGroupContent>
+                        ) : null}
                       </React.Fragment>
                     );
                   }
