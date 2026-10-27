@@ -750,6 +750,13 @@ impl PluginHttpHost {
             })
             .unwrap_or_default();
         let tally = Self::request_tally(state);
+        let redirect_context = DirectPluginRedirects {
+            runtime: &runtime,
+            worker_runtime,
+            allowed_hosts: allowed_hosts.as_deref(),
+            egress_policy: &egress_policy,
+        };
+        let redirects = transport_policy.is_none().then_some(&redirect_context);
         let response = execute_request_with_extra_headers(
             &request_client,
             &request,
@@ -759,6 +766,7 @@ impl PluginHttpHost {
             destination_cooldown_key.as_ref(),
             transport_policy.map(|policy| &policy.config),
             tally.as_ref(),
+            redirects,
         )?;
         if let Some(policy) = transport_policy {
             transport_proxy::record_transport_proxy_success(&policy.config);
@@ -840,6 +848,7 @@ impl PluginHttpHost {
                     max_http_response_bytes,
                     destination_cooldown_key: destination_cooldown_key.as_ref(),
                     tally: tally.as_ref(),
+                    redirects,
                 },
             ) {
                 Ok(solved) => {
@@ -1189,6 +1198,150 @@ fn merge_cookie_headers(original: Option<&str>, solved: &str) -> Option<String> 
     })
 }
 
+struct DirectPluginRedirects<'a> {
+    runtime: &'a PluginHttpRuntime,
+    worker_runtime: &'a Mutex<PluginHttpWorkerRuntime>,
+    allowed_hosts: Option<&'a [String]>,
+    egress_policy: &'a scryer_outbound_http::PluginEgressPolicy,
+}
+
+impl DirectPluginRedirects<'_> {
+    fn client_for(&self, url: &str) -> HostResult<Client> {
+        enforce_allowed_hosts(self.allowed_hosts, url)?;
+        self.worker_runtime
+            .lock()
+            .map_err(|error| format!("plugin HTTP worker runtime lock poisoned: {error}"))?
+            .pinned_request_client(self.runtime, url, self.egress_policy)
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared dispatch boundary carries request, proxy, redirect and accounting context explicitly"
+)]
+fn execute_request_with_extra_headers(
+    client: &Client,
+    request: &PluginHttpRequest,
+    body: Option<Vec<u8>>,
+    timeout: Option<Duration>,
+    extra_headers: &[(String, String)],
+    destination_cooldown_key: Option<&scryer_outbound_http::DestinationKey>,
+    transport_proxy_config: Option<&scryer_domain::ProxyConfig>,
+    tally: Option<&IndexerRequestTally>,
+    redirects: Option<&DirectPluginRedirects<'_>>,
+) -> HostResult<reqwest::blocking::Response> {
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    let Some(redirects) = redirects else {
+        return execute_single_request_with_extra_headers(
+            client,
+            request,
+            body,
+            deadline,
+            extra_headers,
+            destination_cooldown_key,
+            transport_proxy_config,
+            tally,
+        );
+    };
+    let mut client = client.clone();
+    let mut request = request.clone();
+    let mut body = body;
+    let mut extra_headers = extra_headers.to_vec();
+    let mut hops = 0;
+    loop {
+        let response = execute_single_request_with_extra_headers(
+            &client,
+            &request,
+            body.clone(),
+            deadline,
+            &extra_headers,
+            destination_cooldown_key,
+            None,
+            tally,
+        )?;
+        let status = response.status();
+        if !matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Ok(response);
+        }
+        let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+            return Ok(response);
+        };
+        if hops >= scryer_outbound_http::DEFAULT_TRUSTED_REDIRECT_HOPS {
+            return Err(HostHttpError::new(
+                HostHttpErrorKind::InvalidRequest,
+                "plugin HTTP redirect limit exceeded",
+            ));
+        }
+        let next = location
+            .to_str()
+            .ok()
+            .and_then(|location| response.url().join(location).ok())
+            .ok_or_else(|| {
+                HostHttpError::new(
+                    HostHttpErrorKind::InvalidRequest,
+                    "plugin HTTP redirect location is invalid",
+                )
+            })?;
+        // Rebuild a pinned client for every origin before dispatch, rather
+        // than letting reqwest resolve a redirect outside the egress guard.
+        client = redirects.client_for(next.as_str())?;
+        if response.url().origin() != next.origin() {
+            let keep_header = |name: &str| {
+                ![
+                    "authorization",
+                    "cookie",
+                    "cookie2",
+                    "proxy-authorization",
+                    "www-authenticate",
+                    "x-plex-token",
+                    "x-api-key",
+                ]
+                .iter()
+                .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
+            };
+            request.headers.retain(|name, _| keep_header(name));
+            extra_headers.retain(|(name, _)| keep_header(name));
+        }
+        let keep_header = |name: &str| {
+            !name.eq_ignore_ascii_case("host")
+                && !(response.url().scheme() == "https"
+                    && next.scheme() == "http"
+                    && name.eq_ignore_ascii_case("referer"))
+        };
+        request.headers.retain(|name, _| keep_header(name));
+        extra_headers.retain(|(name, _)| keep_header(name));
+        let method = request.method.as_deref().unwrap_or("GET");
+        if status == StatusCode::SEE_OTHER
+            || (matches!(status.as_u16(), 301 | 302) && method.eq_ignore_ascii_case("POST"))
+        {
+            if !method.eq_ignore_ascii_case("HEAD") {
+                request.method = Some("GET".into());
+            }
+            body = None;
+            let keep_header = |name: &str| {
+                ![
+                    "content-type",
+                    "content-length",
+                    "content-encoding",
+                    "transfer-encoding",
+                ]
+                .iter()
+                .any(|header| name.eq_ignore_ascii_case(header))
+            };
+            request.headers.retain(|name, _| keep_header(name));
+            extra_headers.retain(|(name, _)| keep_header(name));
+        }
+        hops += 1;
+        tracing::debug!(
+            status = status.as_u16(),
+            redirect_hop = hops,
+            destination_host = next.host_str(),
+            "plugin HTTP redirect followed"
+        );
+        request.url = next.into();
+    }
+}
+
 /// The one place a plugin's HTTP request reaches the network on this host.
 ///
 /// `tally` is counted here rather than at the call sites because both of them
@@ -1200,11 +1353,11 @@ fn merge_cookie_headers(original: Option<&str>, solved: &str) -> Option<String> 
     clippy::too_many_arguments,
     reason = "the shared dispatch boundary carries request, proxy, and accounting context explicitly"
 )]
-fn execute_request_with_extra_headers(
+fn execute_single_request_with_extra_headers(
     client: &Client,
     request: &PluginHttpRequest,
     body: Option<Vec<u8>>,
-    timeout: Option<Duration>,
+    deadline: Option<Instant>,
     extra_headers: &[(String, String)],
     destination_cooldown_key: Option<&scryer_outbound_http::DestinationKey>,
     // `Some` only when `client` dials through a transport proxy. It changes
@@ -1261,9 +1414,6 @@ fn execute_request_with_extra_headers(
             builder = builder.header(name, value);
         }
     }
-    if let Some(timeout) = timeout {
-        builder = builder.timeout(timeout);
-    }
     if let Some(body) = body {
         builder = builder.body(body);
     }
@@ -1276,19 +1426,31 @@ fn execute_request_with_extra_headers(
     } else {
         scryer_outbound_http::RateLimitRegistry::new()
     };
-    let result = scryer_outbound_http::send_blocking_reqwest_request_with_cooldown_policy_and_dispatch_observer(
-        &registry,
-        builder,
-        timeout,
-        destination_cooldown_key.cloned(),
-        || {
-            if let Some(tally) = tally
-                && !tally.try_note_sent(&request.url) {
-                return Err(scryer_outbound_http::BlockingOutboundHttpError::DispatchRejected);
-            }
-            Ok(())
-        },
-    );
+    let observe_dispatch = || {
+        if let Some(tally) = tally
+            && !tally.try_note_sent(&request.url)
+        {
+            return Err(scryer_outbound_http::BlockingOutboundHttpError::DispatchRejected);
+        }
+        Ok(())
+    };
+    let result = match deadline {
+        Some(deadline) => scryer_outbound_http::send_blocking_reqwest_request_with_cooldown_policy_until_and_dispatch_observer(
+            &registry,
+            builder,
+            Some(deadline.saturating_duration_since(Instant::now())),
+            destination_cooldown_key.cloned(),
+            deadline,
+            observe_dispatch,
+        ),
+        None => scryer_outbound_http::send_blocking_reqwest_request_with_cooldown_policy_and_dispatch_observer(
+            &registry,
+            builder,
+            None,
+            destination_cooldown_key.cloned(),
+            observe_dispatch,
+        ),
+    };
 
     if let Some(tally) = tally {
         match &result {
@@ -1453,6 +1615,7 @@ struct ChallengeSolverRequestOptions<'a> {
     /// two requests, and both are counted: the solver fetches the indexer URL
     /// itself, API key and all, and then we replay the request ourselves.
     tally: Option<&'a IndexerRequestTally>,
+    redirects: Option<&'a DirectPluginRedirects<'a>>,
 }
 
 fn execute_challenge_solver_request(
@@ -1468,6 +1631,7 @@ fn execute_challenge_solver_request(
         max_http_response_bytes,
         destination_cooldown_key,
         tally,
+        redirects,
     } = options;
     if !policy.config.is_enabled {
         return Err(HostHttpError::new(
@@ -1664,6 +1828,7 @@ fn execute_challenge_solver_request(
             // The solver replay is a direct hop, by construction.
             None,
             tally,
+            redirects,
         )?;
         let status = retry.status();
         let headers = response_headers(&retry);
@@ -1873,6 +2038,353 @@ mod tests {
             "expected an absolute-form proxied request line, got {}",
             seen[0]
         );
+    }
+
+    #[tokio::test]
+    async fn direct_plugin_redirects_read_feed_and_strip_cross_origin_credentials() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+        let origin = MockServer::start().await;
+        let feed = MockServer::start().await;
+        Mock::given(path("/start"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/middle"))
+            .expect(1)
+            .mount(&origin)
+            .await;
+        Mock::given(path("/middle"))
+            .respond_with(
+                ResponseTemplate::new(307)
+                    .insert_header("Location", format!("{}/feed", feed.uri())),
+            )
+            .expect(1)
+            .mount(&origin)
+            .await;
+        Mock::given(path("/feed"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw("<rss><channel/></rss>", "application/rss+xml"),
+            )
+            .expect(1)
+            .mount(&feed)
+            .await;
+        let url = format!("{}/start", origin.uri());
+        let stats = Arc::new(CountingIndexerStatsTracker::default());
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            tokio::task::spawn_blocking({
+                let stats = Arc::clone(&stats);
+                move || {
+                    let host = PluginHttpHost::new(
+                        vec!["127.0.0.1".into()],
+                        scryer_outbound_http::PluginEgressPolicy::default(),
+                        None,
+                        None,
+                        Some(64 * 1024),
+                    );
+                    host.set_indexer_request_accounting(Some(IndexerRequestAccountingContext {
+                        indexer_id: "redirect-fixture".into(),
+                        indexer_name: "Redirect fixture".into(),
+                        operation: IndexerErrorOperation::InteractiveSearch,
+                        stats,
+                        indexer_origin: None,
+                    }));
+                    let body = host.request(
+                        "plex-list",
+                        PluginHttpRequest {
+                            url,
+                            method: Some("GET".into()),
+                            headers: BTreeMap::from([
+                                ("Authorization".into(), "Bearer fixture".into()),
+                                ("Cookie".into(), "session=fixture".into()),
+                                ("X-Plex-Token".into(), "fixture-token".into()),
+                                ("Accept".into(), "application/rss+xml".into()),
+                            ]),
+                        },
+                        None,
+                        Duration::from_secs(30),
+                    )?;
+                    Ok::<_, HostHttpError>((
+                        body,
+                        host.status_code("plex-list")?,
+                        host.headers("plex-list")?,
+                    ))
+                }
+            }),
+        )
+        .await
+        .expect("redirect request must finish")
+        .expect("blocking request must join")
+        .expect("redirected feed must be readable");
+        assert_eq!(result.0, b"<rss><channel/></rss>");
+        assert_eq!(result.1, 200);
+        assert_eq!(
+            result.2.unwrap().get("content-type").map(String::as_str),
+            Some("application/rss+xml")
+        );
+        assert_eq!(stats.sent(), 3, "every dispatched hop must be counted");
+        let origin_requests = origin.received_requests().await.unwrap();
+        assert_eq!(origin_requests.len(), 2);
+        assert!(origin_requests[1].headers.contains_key("authorization"));
+        assert!(origin_requests[1].headers.contains_key("cookie"));
+        let feed_requests = feed.received_requests().await.unwrap();
+        assert_eq!(feed_requests.len(), 1);
+        for header in ["authorization", "cookie", "x-plex-token"] {
+            assert!(!feed_requests[0].headers.contains_key(header), "{header}");
+        }
+        assert_eq!(feed_requests[0].headers["accept"], "application/rss+xml");
+    }
+
+    #[tokio::test]
+    async fn direct_plugin_redirects_revalidate_destinations_and_bound_cycles() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+        let forbidden = MockServer::start().await;
+        let disallowed = format!("{}/private", forbidden.uri()).replace("127.0.0.1", "localhost");
+        for (destination, allowed_hosts, expected_requests) in [
+            (disallowed.as_str(), vec!["127.0.0.1".into()], 1),
+            (
+                "http://169.254.169.254/latest/meta-data/",
+                vec!["127.0.0.1".into(), "169.254.169.254".into()],
+                1,
+            ),
+            ("file:///etc/passwd", vec!["127.0.0.1".into()], 1),
+            (
+                "/start",
+                vec!["127.0.0.1".into()],
+                scryer_outbound_http::DEFAULT_TRUSTED_REDIRECT_HOPS + 1,
+            ),
+        ] {
+            let origin = MockServer::start().await;
+            Mock::given(path("/start"))
+                .respond_with(ResponseTemplate::new(302).insert_header("Location", destination))
+                .mount(&origin)
+                .await;
+            let url = format!("{}/start", origin.uri());
+            let stats = Arc::new(CountingIndexerStatsTracker::default());
+            let result = tokio::time::timeout(
+                Duration::from_secs(60),
+                tokio::task::spawn_blocking({
+                    let stats = Arc::clone(&stats);
+                    move || {
+                        let host = PluginHttpHost::new(
+                            allowed_hosts,
+                            scryer_outbound_http::PluginEgressPolicy::default(),
+                            None,
+                            None,
+                            Some(64 * 1024),
+                        );
+                        host.set_indexer_request_accounting(Some(
+                            IndexerRequestAccountingContext {
+                                indexer_id: "redirect-refusal-fixture".into(),
+                                indexer_name: "Redirect refusal fixture".into(),
+                                operation: IndexerErrorOperation::InteractiveSearch,
+                                stats,
+                                indexer_origin: None,
+                            },
+                        ));
+                        host.request(
+                            "plex-list",
+                            PluginHttpRequest {
+                                url,
+                                method: None,
+                                headers: BTreeMap::new(),
+                            },
+                            None,
+                            Duration::from_secs(30),
+                        )
+                    }
+                }),
+            )
+            .await
+            .expect("redirect refusal must finish")
+            .expect("blocking request must join");
+            assert!(result.is_err(), "{destination}: {result:?}");
+            assert_eq!(
+                stats.sent(),
+                u32::try_from(expected_requests).unwrap(),
+                "{destination}"
+            );
+            assert_eq!(
+                origin.received_requests().await.unwrap().len(),
+                expected_requests,
+                "{destination}"
+            );
+        }
+        assert!(forbidden.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_plugin_redirects_preserve_http_method_and_body_semantics() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+        for (status, method, expected_method, expected_body) in [
+            (301, "POST", "GET", b"".as_slice()),
+            (302, "POST", "GET", b"".as_slice()),
+            (303, "POST", "GET", b"".as_slice()),
+            (307, "POST", "POST", b"fixture".as_slice()),
+            (308, "POST", "POST", b"fixture".as_slice()),
+            (301, "PUT", "PUT", b"fixture".as_slice()),
+            (302, "PUT", "PUT", b"fixture".as_slice()),
+            (303, "PUT", "GET", b"".as_slice()),
+        ] {
+            let origin = MockServer::start().await;
+            Mock::given(path("/start"))
+                .respond_with(ResponseTemplate::new(status).insert_header("Location", "/final"))
+                .expect(1)
+                .mount(&origin)
+                .await;
+            Mock::given(path("/final"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+                .expect(1)
+                .mount(&origin)
+                .await;
+            let url = format!("{}/start", origin.uri());
+            let body = tokio::time::timeout(
+                Duration::from_secs(60),
+                tokio::task::spawn_blocking(move || {
+                    let host = PluginHttpHost::new(
+                        vec!["127.0.0.1".into()],
+                        scryer_outbound_http::PluginEgressPolicy::default(),
+                        None,
+                        None,
+                        Some(64 * 1024),
+                    );
+                    host.request(
+                        "redirect-fixture",
+                        PluginHttpRequest {
+                            url,
+                            method: Some(method.into()),
+                            headers: BTreeMap::from([("Content-Type".into(), "text/plain".into())]),
+                        },
+                        Some(b"fixture".to_vec()),
+                        Duration::from_secs(30),
+                    )
+                }),
+            )
+            .await
+            .expect("redirect request must finish")
+            .expect("blocking request must join")
+            .expect("redirected request must succeed");
+            assert_eq!(body, b"ok", "{status}");
+            let requests = origin.received_requests().await.unwrap();
+            assert_eq!(requests.len(), 2, "{status}");
+            assert_eq!(requests[1].method.as_str(), expected_method, "{status}");
+            assert_eq!(requests[1].body, expected_body, "{status}");
+            assert_eq!(
+                requests[1].headers.contains_key("content-type"),
+                !expected_body.is_empty(),
+                "{status}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_plugin_redirects_keep_terminal_status_and_response_size_limits() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+        for (status, max_bytes, succeeds) in [(200, 3, false), (200, 64, true), (429, 64, true)] {
+            let origin = MockServer::start().await;
+            Mock::given(path("/start"))
+                .respond_with(ResponseTemplate::new(302).insert_header("Location", "/final"))
+                .expect(1)
+                .mount(&origin)
+                .await;
+            Mock::given(path("/final"))
+                .respond_with(
+                    ResponseTemplate::new(status)
+                        .set_body_string("fixture")
+                        .insert_header("Retry-After", "90"),
+                )
+                .expect(1)
+                .mount(&origin)
+                .await;
+            let url = format!("{}/start", origin.uri());
+            let (result, last_status, headers, rate_limit) = tokio::time::timeout(
+                Duration::from_secs(60),
+                tokio::task::spawn_blocking(move || {
+                    let host = PluginHttpHost::new(
+                        vec!["127.0.0.1".into()],
+                        scryer_outbound_http::PluginEgressPolicy::default(),
+                        None,
+                        None,
+                        Some(max_bytes),
+                    );
+                    let result = host.request(
+                        "redirect-fixture",
+                        PluginHttpRequest {
+                            url,
+                            method: None,
+                            headers: BTreeMap::new(),
+                        },
+                        None,
+                        Duration::from_secs(30),
+                    );
+                    (
+                        result,
+                        host.status_code("redirect-fixture"),
+                        host.headers("redirect-fixture"),
+                        host.rate_limit_message("redirect-fixture"),
+                    )
+                }),
+            )
+            .await
+            .expect("redirected response must finish")
+            .expect("blocking request must join");
+            assert_eq!(result.is_ok(), succeeds, "{status}/{max_bytes}: {result:?}");
+            if succeeds {
+                assert_eq!(result.unwrap(), b"fixture");
+                assert_eq!(last_status.unwrap(), status);
+                assert_eq!(
+                    headers
+                        .unwrap()
+                        .unwrap()
+                        .get("retry-after")
+                        .map(String::as_str),
+                    Some("90")
+                );
+                assert_eq!(rate_limit.unwrap().is_some(), status == 429);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_plugin_redirects_do_not_dispatch_after_deadline() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+        let origin = MockServer::start().await;
+        Mock::given(path("/start"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/final"))
+            .expect(0)
+            .mount(&origin)
+            .await;
+        let url = format!("{}/start", origin.uri());
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            tokio::task::spawn_blocking(move || {
+                let host = PluginHttpHost::new(
+                    vec!["127.0.0.1".into()],
+                    scryer_outbound_http::PluginEgressPolicy::default(),
+                    None,
+                    None,
+                    Some(64 * 1024),
+                );
+                host.request(
+                    "redirect-fixture",
+                    PluginHttpRequest {
+                        url,
+                        method: None,
+                        headers: BTreeMap::new(),
+                    },
+                    None,
+                    Duration::ZERO,
+                )
+            }),
+        )
+        .await
+        .expect("expired request must finish")
+        .expect("blocking request must join");
+        assert!(result.is_err());
+        assert!(origin.received_requests().await.unwrap().is_empty());
     }
 
     #[tokio::test]

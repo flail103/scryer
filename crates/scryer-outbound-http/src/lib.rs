@@ -2520,6 +2520,29 @@ where
     )
 }
 
+/// Deadline-bound counterpart that preserves the caller's registry and
+/// destination override across manually followed redirect hops.
+pub fn send_blocking_reqwest_request_with_cooldown_policy_until_and_dispatch_observer<F>(
+    registry: &RateLimitRegistry,
+    request: reqwest::blocking::RequestBuilder,
+    max_cooldown_wait: Option<Duration>,
+    destination_cooldown_override: Option<DestinationKey>,
+    deadline: std::time::Instant,
+    observe_dispatch: F,
+) -> Result<reqwest::blocking::Response, BlockingOutboundHttpError>
+where
+    F: FnOnce() -> Result<(), BlockingOutboundHttpError>,
+{
+    send_blocking_reqwest_request_with_cooldown_policy_inner(
+        registry,
+        request,
+        max_cooldown_wait,
+        destination_cooldown_override,
+        Some(deadline),
+        observe_dispatch,
+    )
+}
+
 fn send_blocking_reqwest_request_with_cooldown_policy_inner(
     registry: &RateLimitRegistry,
     request: reqwest::blocking::RequestBuilder,
@@ -5047,6 +5070,45 @@ mod tests {
             error,
             BlockingOutboundHttpError::CooldownBudgetExceeded { .. }
         ));
+        assert_eq!(dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn blocking_policy_deadline_preserves_registry_and_destination_override() {
+        let (url, hits) =
+            spawn_http_server(vec![http_response(200, &[], "must not be sent")]).await;
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let observer_dispatches = Arc::clone(&dispatches);
+        let error = tokio::time::timeout(
+            Duration::from_secs(60),
+            tokio::task::spawn_blocking(move || {
+                let registry = RateLimitRegistry::isolated_indexers();
+                let destination = DestinationKey::from("redirect-deadline-fixture");
+                registry.record_destination_cooldown_blocking(
+                    &destination,
+                    Duration::from_secs(120),
+                    RetryAfterSource::Seconds,
+                );
+                let client = blocking_reqwest_client_builder().build().unwrap();
+                send_blocking_reqwest_request_with_cooldown_policy_until_and_dispatch_observer(
+                    &registry,
+                    client.get(url),
+                    Some(Duration::from_secs(120)),
+                    Some(destination),
+                    std::time::Instant::now() + Duration::from_secs(30),
+                    move || {
+                        observer_dispatches.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+            }),
+        )
+        .await
+        .expect("cooldown beyond the deadline must refuse without waiting")
+        .expect("blocking task should complete")
+        .expect_err("deadline must reject before dispatch");
+        assert!(matches!(error, BlockingOutboundHttpError::DeadlineExceeded));
         assert_eq!(dispatches.load(Ordering::SeqCst), 0);
         assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
