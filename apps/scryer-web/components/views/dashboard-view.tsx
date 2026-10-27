@@ -1,16 +1,11 @@
 import * as React from "react";
 import {
   ArrowDownToLine,
-  ActivitySquare,
   ArrowUp,
   CircleAlert,
-  Database,
-  Download,
   FileVideo,
-  FolderInput,
-  HardDrive,
   Hourglass,
-  Inbox,
+  Pencil,
   Puzzle,
   Trash2,
   TriangleAlert,
@@ -30,6 +25,7 @@ import {
   DashboardPanel,
   DashboardPanelEmpty,
 } from "@/components/views/dashboard/dashboard-panel";
+import { DASHBOARD_PANEL_ICONS } from "@/components/views/dashboard/dashboard-panel-icons";
 import {
   CalendarEventHoverCard,
   type CalendarEpisodeItem,
@@ -95,20 +91,26 @@ import {
   usageTone,
 } from "@/lib/utils/dashboard";
 import { selectPosterVariantUrl } from "@/lib/utils/poster-images";
-import { combinePanelStates, type DashboardPanelState, type DashboardPanelStates } from "@/lib/utils/dashboard-refresh";
+import type { DashboardPanelState, DashboardPanelStates } from "@/lib/utils/dashboard-refresh";
+import type { DashboardTier } from "@/lib/utils/dashboard-layout";
 import { buildOverviewDetailPath, buildViewPath } from "@/lib/utils/routing";
 import { episodeTitleOrTba } from "@/lib/utils/episode-title";
 
-/** Rows visible before the top panels start scrolling. */
-const PREVIEW_PANE_CLASS = "max-h-[172px] overflow-y-auto";
-const QUEUE_PREVIEW_LIMIT = 5;
+/** List panels scroll inside whatever height their grid cell gives them. */
+const PREVIEW_PANE_CLASS = "overflow-y-auto";
+/** Queue rows shown per tier; the expanded panel has room for a longer list. */
+const QUEUE_PREVIEW_LIMIT: Record<DashboardTier, number> = {
+  compact: 5,
+  regular: 5,
+  expanded: 25,
+};
 /**
- * Provider tables show about five rows before scrolling. This goes on the
- * table's own wrapper (`wrapperClassName`), not the panel body: `Table` already
- * makes that wrapper a scroll container, and a sticky header only sticks to the
- * scroller it lives inside.
+ * Provider tables scroll inside their grid cell. This goes on the table's own
+ * wrapper (`wrapperClassName`), not the panel body: `Table` already makes that
+ * wrapper a scroll container, and a sticky header only sticks to the scroller
+ * it lives inside.
  */
-const TABLE_PANE_CLASS = "max-h-[218px] overflow-y-auto";
+const TABLE_PANE_CLASS = "h-full overflow-y-auto";
 /**
  * Header stays put while rows scroll. `sticky` goes on the header *cells*, not
  * the header row: a sticky `<tr>` is constrained to its `<thead>`, which is one
@@ -121,7 +123,11 @@ const TABLE_HEAD_CLASS =
 const TABLE_HEAD_RIGHT_CLASS =
   "sticky top-0 z-10 h-8 bg-card px-3 text-right text-[10px] uppercase";
 
-export type DashboardViewProps = {
+/**
+ * Everything the grid's panels read and act on. The container owns the data;
+ * the lazily loaded grid hands it to whichever panels are placed.
+ */
+export type DashboardPanelData = {
   panels: DashboardPanelStates;
   storageRoots: DashboardStorageRoot[];
   overview: DashboardOverview | null;
@@ -131,8 +137,6 @@ export type DashboardViewProps = {
   recentImports: DashboardImportedItem[];
   queueItems: DownloadQueueItem[];
   queueTotal: number;
-  pluginUpdates: DashboardPluginUpdate[];
-  updatingPluginIds: string[];
   actionRequestId: string | null;
   /** Import-activity row currently running an action, disabling its buttons. */
   importActionItemId: string | null;
@@ -141,44 +145,59 @@ export type DashboardViewProps = {
   onImportItem: (item: DownloadQueueItem) => void;
   onMarkImportFailed: (item: DownloadQueueItem) => void;
   onRemoveImportItem: (item: DownloadQueueItem) => void;
-  onUpdatePlugin: (pluginId: string) => void;
-  onUpdateAllPlugins: () => void;
 };
 
-function DashboardPanelLoad({ state, children }: { state: DashboardPanelState; children: React.ReactNode }) {
-  return <div className="min-w-0" aria-busy={state.loading}>
-    {state.error ? <p role="alert" className="p-3 text-sm text-destructive">{state.error}</p> : null}
-    {state.ready ? children : state.loading ? <Skeleton className="h-48 w-full" /> : null}
+export type DashboardViewProps = {
+  overview: DashboardOverview | null;
+  pluginUpdates: DashboardPluginUpdate[];
+  updatingPluginIds: string[];
+  onUpdatePlugin: (pluginId: string) => void;
+  onUpdateAllPlugins: () => void;
+  /** Whether the grid is being arranged; the header's Edit control hides. */
+  editing: boolean;
+  onEdit: () => void;
+  /** The panel grid. */
+  children: React.ReactNode;
+};
+
+/** A panel's own loading and error state around its content, filling its cell. */
+export function DashboardPanelLoad({ state, children }: { state: DashboardPanelState; children: React.ReactNode }) {
+  return <div className="flex h-full min-h-0 min-w-0 flex-col" aria-busy={state.loading}>
+    {state.error ? <p role="alert" className="shrink-0 p-3 text-sm text-destructive">{state.error}</p> : null}
+    {state.ready ? <div className="min-h-0 min-w-0 flex-1">{children}</div> : state.loading ? <Skeleton className="h-full w-full rounded-xl" /> : null}
   </div>;
 }
 
+/** Stand-in while the grid's code loads: the default LG rhythm in outline. */
+export function DashboardGridFallback() {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true">
+      <Skeleton className="h-[52px] w-full rounded-xl" />
+      <Skeleton className="h-[212px] w-full rounded-xl" />
+      <Skeleton className="h-[276px] w-full rounded-xl" />
+    </div>
+  );
+}
+
+/**
+ * The fixed part of the dashboard: the greeting and the plugin-update strip
+ * are alert surfaces and always sit above the grid, which a user can arrange
+ * but never use to hide them.
+ */
 export function DashboardView({
-  panels,
-  storageRoots,
   overview,
-  requests,
-  importActivity,
-  importActivityTotal,
-  recentImports,
-  queueItems,
-  queueTotal,
   pluginUpdates,
   updatingPluginIds,
-  actionRequestId,
-  importActionItemId,
-  onApproveRequest,
-  onDismissRequest,
-  onImportItem,
-  onMarkImportFailed,
-  onRemoveImportItem,
   onUpdatePlugin,
   onUpdateAllPlugins,
+  editing,
+  onEdit,
+  children,
 }: DashboardViewProps) {
   const indexerHealth = React.useMemo(
     () => summarizeIndexerHealth(overview?.indexers ?? []),
     [overview?.indexers],
   );
-
 
   return (
     <div className="flex w-full flex-col gap-3 px-5 pb-10 pt-4">
@@ -188,6 +207,8 @@ export function DashboardView({
         importCount={overview?.activityImportCount ?? 0}
         pluginCount={pluginUpdates.length}
         indexerErrorCount={indexerHealth.erroring}
+        editing={editing}
+        onEdit={onEdit}
       />
 
       <PluginUpdateStrip
@@ -197,40 +218,7 @@ export function DashboardView({
         onUpdateAllPlugins={onUpdateAllPlugins}
       />
 
-      <DashboardPanelLoad state={panels.overview}><StatsRow overview={overview} /></DashboardPanelLoad>
-
-      <div className="grid grid-cols-1 gap-3 min-[1241px]:grid-cols-2 min-[1501px]:grid-cols-3">
-        <DashboardPanelLoad state={panels.requests}>
-        <RequestsPanel
-          requests={requests}
-          totalCount={overview?.pendingRequestCount ?? requests.length}
-          actionRequestId={actionRequestId}
-          onApprove={onApproveRequest}
-          onDismiss={onDismissRequest}
-        />
-        </DashboardPanelLoad>
-        <DashboardPanelLoad state={panels.imports}>
-        <ManualImportsPanel
-          items={importActivity}
-          totalCount={importActivityTotal}
-          busyItemId={importActionItemId}
-          onImport={onImportItem}
-          onMarkFailed={onMarkImportFailed}
-          onRemove={onRemoveImportItem}
-        />
-        </DashboardPanelLoad>
-        <DashboardPanelLoad state={panels.recent}><RecentlyImportedPanel items={recentImports} /></DashboardPanelLoad>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 min-[1241px]:grid-cols-2">
-        <DashboardPanelLoad state={panels.overview}><IndexersPanel overview={overview} /></DashboardPanelLoad>
-        <DashboardPanelLoad state={combinePanelStates(panels.overview, panels.queue)}><DownloadClientsPanel overview={overview} queueItems={queueItems} /></DashboardPanelLoad>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 min-[1241px]:grid-cols-2">
-        <DashboardPanelLoad state={panels.storage}><StoragePanel roots={storageRoots} /></DashboardPanelLoad>
-        <DashboardPanelLoad state={panels.queue}><ActiveQueuePanel items={queueItems} totalCount={queueTotal} /></DashboardPanelLoad>
-      </div>
+      {children}
     </div>
   );
 }
@@ -243,12 +231,16 @@ function DashboardHeader({
   importCount,
   pluginCount,
   indexerErrorCount,
+  editing,
+  onEdit,
 }: {
   username: string | null;
   requestCount: number;
   importCount: number;
   pluginCount: number;
   indexerErrorCount: number;
+  editing: boolean;
+  onEdit: () => void;
 }) {
   const t = useTranslate();
   const total = attentionTotal({
@@ -266,19 +258,34 @@ function DashboardHeader({
   ].filter((value): value is string => value !== null);
 
   return (
-    <header className="flex min-w-0 flex-col gap-1">
-      <h1 className="font-[var(--font-display)] text-[19px] font-bold text-[var(--scry-ink2)]">
-        {t(greetingKey(), { name: username ?? "" })}
-      </h1>
-      <p className="text-[12px] text-[var(--scry-muted)]">
-        {total === 0
-          ? t("dashboard.allClear")
-          : `${
-              total === 1
-                ? t("dashboard.attentionCountOne")
-                : t("dashboard.attentionCount", { count: total })
-            } · ${sources.join(", ")}`}
-      </p>
+    <header className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <h1 className="font-[var(--font-display)] text-[19px] font-bold text-[var(--scry-ink2)]">
+          {t(greetingKey(), { name: username ?? "" })}
+        </h1>
+        <p className="text-[12px] text-[var(--scry-muted)]">
+          {total === 0
+            ? t("dashboard.allClear")
+            : `${
+                total === 1
+                  ? t("dashboard.attentionCountOne")
+                  : t("dashboard.attentionCount", { count: total })
+              } · ${sources.join(", ")}`}
+        </p>
+      </div>
+      {editing ? null : (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          aria-label={t("dashboard.layout.edit")}
+          onClick={onEdit}
+        >
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("label.edit")}
+        </Button>
+      )}
     </header>
   );
 }
@@ -386,7 +393,17 @@ function PluginUpdateStrip({
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 
-function StatsRow({ overview }: { overview: DashboardOverview | null }) {
+const STATS_COLUMNS: Record<DashboardTier, string> = {
+  compact: "grid-cols-1",
+  regular: "grid-cols-2",
+  expanded: "grid-cols-[1.25fr_1fr_1fr]",
+};
+
+/**
+ * The three stat tiles as one panel. How many sit side by side follows the
+ * panel's size tier rather than the viewport, so a narrowed panel stacks them.
+ */
+export function StatsPanel({ overview, tier }: { overview: DashboardOverview | null; tier: DashboardTier }) {
   const t = useTranslate();
   const activity = overview?.activity;
   const grabbedDelta = activity
@@ -397,7 +414,7 @@ function StatsRow({ overview }: { overview: DashboardOverview | null }) {
     : 0;
 
   return (
-    <div className="grid grid-cols-1 gap-3 min-[701px]:grid-cols-2 min-[1081px]:grid-cols-[1.25fr_1fr_1fr]">
+    <div className={cn("grid h-full content-start gap-3", STATS_COLUMNS[tier])}>
       <StatTile
         label={t("dashboard.statLibrary")}
         metrics={[
@@ -531,13 +548,15 @@ function StatTile({
 
 // ── Requests ────────────────────────────────────────────────────────────────
 
-function RequestsPanel({
+export function RequestsPanel({
   requests,
   totalCount,
   actionRequestId,
   onApprove,
   onDismiss,
+  tier,
 }: {
+  tier: DashboardTier;
   requests: DashboardRequest[];
   totalCount: number;
   actionRequestId: string | null;
@@ -548,7 +567,7 @@ function RequestsPanel({
 
   return (
     <DashboardPanel
-      icon={Inbox}
+      icon={DASHBOARD_PANEL_ICONS.requests}
       title={t("nav.requests")}
       count={totalCount}
       linkTo="/requests"
@@ -577,8 +596,14 @@ function RequestsPanel({
                       </span>
                     ) : null}
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {requester ? (
+                  {tier === "compact" ? null : <span className="flex min-w-0 items-center gap-1.5">
+                    {tier === "expanded" && request.requesters.length > 1 ? (
+                      <span className="truncate text-[11px] text-[var(--scry-muted2)]">
+                        {t("dashboard.requestedBy", {
+                          names: request.requesters.map((entry) => entry.username).join(", "),
+                        })}
+                      </span>
+                    ) : requester ? (
                       <span className="flex min-w-0 items-center gap-1">
                         <AuthenticatedAvatar
                           avatarUrl={requester.avatarUrl}
@@ -592,9 +617,9 @@ function RequestsPanel({
                       </span>
                     ) : null}
                     <FacetChip facet={request.facet} />
-                  </span>
+                  </span>}
                 </span>
-                <AgeLabel isoDate={request.createdAt} />
+                {tier === "compact" ? null : <AgeLabel isoDate={request.createdAt} />}
                 <IconButton
                   appearance="boxed"
                   tone="enabled"
@@ -655,14 +680,16 @@ function RowPoster({
 
 // ── Manual imports ──────────────────────────────────────────────────────────
 
-function ManualImportsPanel({
+export function ManualImportsPanel({
   items,
   totalCount,
   busyItemId,
   onImport,
   onMarkFailed,
   onRemove,
+  tier,
 }: {
+  tier: DashboardTier;
   items: DownloadQueueItem[];
   totalCount: number;
   busyItemId: string | null;
@@ -674,7 +701,7 @@ function ManualImportsPanel({
 
   return (
     <DashboardPanel
-      icon={FolderInput}
+      icon={DASHBOARD_PANEL_ICONS["manual-imports"]}
       title={t("dashboard.manualImports")}
       count={totalCount}
       linkTo="/activity/import"
@@ -689,6 +716,7 @@ function ManualImportsPanel({
             <ImportActivityRow
               key={item.id}
               item={item}
+              tier={tier}
               busy={busyItemId === item.id}
               onImport={onImport}
               onMarkFailed={onMarkFailed}
@@ -703,12 +731,14 @@ function ManualImportsPanel({
 
 function ImportActivityRow({
   item,
+  tier,
   busy,
   onImport,
   onMarkFailed,
   onRemove,
 }: {
   item: DownloadQueueItem;
+  tier: DashboardTier;
   busy: boolean;
   onImport: (item: DownloadQueueItem) => void;
   onMarkFailed: (item: DownloadQueueItem) => void;
@@ -754,12 +784,19 @@ function ImportActivityRow({
           >
             {presentation.statusLabel}
           </span>
-          <span className="text-[var(--scry-muted2)] tabular-nums">
-            {formatBytes(item.sizeBytes)}
-          </span>
+          {tier === "compact" ? null : (
+            <span className="text-[var(--scry-muted2)] tabular-nums">
+              {formatBytes(item.sizeBytes)}
+            </span>
+          )}
+          {tier === "expanded" && presentation.failureReason ? (
+            <span className="min-w-0 truncate text-[var(--scry-muted2)]">
+              {presentation.failureReason}
+            </span>
+          ) : null}
         </span>
       </span>
-      <AgeLabel isoDate={item.queuedAt ?? item.lastUpdatedAt} />
+      {tier === "compact" ? null : <AgeLabel isoDate={item.queuedAt ?? item.lastUpdatedAt} />}
       <span className="flex shrink-0 items-center gap-1">
         {presentation.canInteractiveManualImport ||
         presentation.canDirectManualImport ? (
@@ -828,7 +865,7 @@ function calendarEpisodeForImportedItem(item: DashboardImportedItem): CalendarEp
   };
 }
 
-function RecentlyImportedPanel({ items }: { items: DashboardImportedItem[] }) {
+export function RecentlyImportedPanel({ items, tier }: { items: DashboardImportedItem[]; tier: DashboardTier }) {
   const t = useTranslate();
   const isMobile = useIsMobile();
   const [hoverPreview, setHoverPreview] =
@@ -884,7 +921,7 @@ function RecentlyImportedPanel({ items }: { items: DashboardImportedItem[] }) {
   return (
     <>
       <DashboardPanel
-        icon={Download}
+        icon={DASHBOARD_PANEL_ICONS["recently-imported"]}
         title={t("dashboard.recentlyImported")}
         linkTo={buildViewPath("activity", undefined, undefined, undefined, undefined, "history")}
         linkLabel={t("dashboard.viewAll")}
@@ -906,19 +943,26 @@ function RecentlyImportedPanel({ items }: { items: DashboardImportedItem[] }) {
                   onBlur={scheduleHoverPreviewClose}
                   onKeyDown={(event) => { if (event.key === "Escape") setHoverPreview(null); }}
                 >
-                  <RowPoster posterUrl={item.posterUrl} facet={facet} />
+                  {tier === "compact" ? null : <RowPoster posterUrl={item.posterUrl} facet={facet} />}
                   <span className="flex min-w-0 flex-1 flex-col">
                     <Link className="truncate text-[12px] font-medium text-[var(--scry-ink2)] hover:underline" to={`${buildOverviewDetailPath(facet === "MOVIE" ? "movies" : facet === "ANIME" ? "anime" : "series", null, null)}?id=${encodeURIComponent(item.titleId)}${item.episode ? `&episodeId=${encodeURIComponent(item.episode.id)}` : ""}`}>
                       {item.titleName ?? item.titleId}
                     </Link>
                     {item.episode ? <span className="truncate text-[11px]">{`S${item.episode.seasonNumber ?? "?"}E${item.episode.episodeNumber ?? "?"}`} {episodeTitleOrTba(item.episode.title, t)}</span> : null}
-                    <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--scry-muted2)]">
-                      {facet ? <FacetChip facet={facet} /> : null}
-                      {item.quality ? (
-                        <span className="truncate">{item.quality}</span>
-                      ) : null}
-                      <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
-                    </span>
+                    {tier === "compact" ? null : (
+                      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--scry-muted2)]">
+                        {facet ? <FacetChip facet={facet} /> : null}
+                        {item.quality ? (
+                          <span className="truncate">{item.quality}</span>
+                        ) : null}
+                        <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
+                      </span>
+                    )}
+                    {tier === "expanded" && item.episode?.overview ? (
+                      <span className="line-clamp-2 text-[11px] text-[var(--scry-muted)]">
+                        {item.episode.overview}
+                      </span>
+                    ) : null}
                   </span>
                   {item.kind === "UPGRADE" ? (
                     <Badge tone="info" className="shrink-0 px-1 py-0 text-[10px]">
@@ -950,7 +994,7 @@ function RecentlyImportedPanel({ items }: { items: DashboardImportedItem[] }) {
 
 // ── Indexers ────────────────────────────────────────────────────────────────
 
-function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
+export function IndexersPanel({ overview, tier }: { overview: DashboardOverview | null; tier: DashboardTier }) {
   const t = useTranslate();
   const { user } = useAuth();
   const canViewErrorHistory = hasAnyAppPermission(user, [
@@ -993,7 +1037,7 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
 
   return (
     <DashboardPanel
-      icon={Database}
+      icon={DASHBOARD_PANEL_ICONS.indexers}
       title={t("settings.indexers")}
       pills={
         <>
@@ -1021,7 +1065,7 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
       ) : (
         <Table
           density="dense"
-          className="min-w-[440px]"
+          className={tier === "compact" ? undefined : "min-w-[440px]"}
           wrapperClassName={TABLE_PANE_CLASS}
         >
           <TableHeader>
@@ -1029,6 +1073,12 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnIndexer")}
               </TableHead>
+              {tier === "expanded" ? (
+                <TableHead className={TABLE_HEAD_CLASS}>
+                  {t("dashboard.columnType")}
+                </TableHead>
+              ) : null}
+              {tier === "compact" ? null : <>
               <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
                 {t("dashboard.columnSearch")}
               </TableHead>
@@ -1041,6 +1091,7 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnQuota")}
               </TableHead>
+              </>}
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnStatus")}
               </TableHead>
@@ -1060,6 +1111,12 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
                       {indexer.name}
                     </span>
                   </TableCell>
+                  {tier === "expanded" ? (
+                    <TableCell className="px-3 py-[7px] text-[11px] text-[var(--scry-muted)]">
+                      {indexer.providerType}
+                    </TableCell>
+                  ) : null}
+                  {tier === "compact" ? null : <>
                   <TableCell className="px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]">
                     {stat?.queriesLast24H ?? 0}
                   </TableCell>
@@ -1082,6 +1139,7 @@ function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
                       max={stat?.apiMax ?? null}
                     />
                   </TableCell>
+                  </>}
                   <TableCell className="px-3 py-[7px]">
                     <ProviderStatus
                       isEnabled={indexer.isEnabled}
@@ -1238,10 +1296,12 @@ function ProviderStatus({
 
 // ── Download clients ────────────────────────────────────────────────────────
 
-function DownloadClientsPanel({
+export function DownloadClientsPanel({
   overview,
   queueItems,
+  tier,
 }: {
+  tier: DashboardTier;
   overview: DashboardOverview | null;
   queueItems: DownloadQueueItem[];
 }) {
@@ -1280,7 +1340,7 @@ function DownloadClientsPanel({
 
   return (
     <DashboardPanel
-      icon={Download}
+      icon={DASHBOARD_PANEL_ICONS["download-clients"]}
       title={t("settings.downloadClients")}
       pills={
         <>
@@ -1307,7 +1367,7 @@ function DownloadClientsPanel({
       ) : (
         <Table
           density="dense"
-          className="min-w-[420px]"
+          className={tier === "compact" ? undefined : "min-w-[420px]"}
           wrapperClassName={TABLE_PANE_CLASS}
         >
           <TableHeader>
@@ -1315,12 +1375,19 @@ function DownloadClientsPanel({
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnClient")}
               </TableHead>
+              {tier === "expanded" ? (
+                <TableHead className={TABLE_HEAD_CLASS}>
+                  {t("dashboard.columnType")}
+                </TableHead>
+              ) : null}
+              {tier === "compact" ? null : <>
               <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
                 {t("dashboard.columnActive")}
               </TableHead>
               <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
                 {t("dashboard.columnQueue")}
               </TableHead>
+              </>}
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnStatus")}
               </TableHead>
@@ -1345,6 +1412,12 @@ function DownloadClientsPanel({
                       </span>
                     </span>
                   </TableCell>
+                  {tier === "expanded" ? (
+                    <TableCell className="px-3 py-[7px] text-[11px] text-[var(--scry-muted)]">
+                      {client.clientType}
+                    </TableCell>
+                  ) : null}
+                  {tier === "compact" ? null : <>
                   <TableCell
                     className={cn(
                       "px-3 py-[7px] text-right tabular-nums",
@@ -1358,6 +1431,7 @@ function DownloadClientsPanel({
                   <TableCell className="px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]">
                     {counts.queued}
                   </TableCell>
+                  </>}
                   <TableCell className="px-3 py-[7px]">
                     {/* `lastSeenAt` is the last successful contact, not the
                         time of the error, so it is not passed as an error age. */}
@@ -1379,14 +1453,15 @@ function DownloadClientsPanel({
 
 // ── Storage ─────────────────────────────────────────────────────────────────
 
-function StoragePanel({ roots }: { roots: DashboardStorageRoot[] }) {
+export function StoragePanel({ roots, tier }: { roots: DashboardStorageRoot[]; tier: DashboardTier }) {
   const t = useTranslate();
   const groups = React.useMemo(() => groupStorageRootsByLibrary(roots), [roots]);
 
   return (
     <DashboardPanel
-      icon={HardDrive}
+      icon={DASHBOARD_PANEL_ICONS.storage}
       title={t("dashboard.storage")}
+      bodyClassName="overflow-y-auto"
       pills={
         <>
           <Badge className="whitespace-nowrap">
@@ -1403,17 +1478,41 @@ function StoragePanel({ roots }: { roots: DashboardStorageRoot[] }) {
         // Flex-wrap rather than an auto-fill grid: a grid materialises a track
         // per tile width regardless of item count, so a single-root library
         // leaves most of its row blank. Flex growth fills the last row exactly.
-        <div className="flex flex-wrap gap-2 p-3">
-          {groups.flatMap((group) =>
-            group.roots.map((root) => (
-              <StorageRootTile
-                key={`${group.libraryId}:${root.path}`}
-                libraryName={group.libraryName}
-                root={root}
-              />
-            )),
-          )}
-        </div>
+        tier === "expanded" ? (
+          // With room to spare, roots sit under their library's heading.
+          <div className="flex flex-col gap-3 p-3">
+            {groups.map((group) => (
+              <section key={group.libraryId} className="flex min-w-0 flex-col gap-1.5">
+                <h3 className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--scry-muted2)]">
+                  {group.libraryName}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {group.roots.map((root) => (
+                    <StorageRootTile
+                      key={`${group.libraryId}:${root.path}`}
+                      libraryName={group.libraryName}
+                      root={root}
+                      compact={false}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2 p-3">
+            {groups.flatMap((group) =>
+              group.roots.map((root) => (
+                <StorageRootTile
+                  key={`${group.libraryId}:${root.path}`}
+                  libraryName={group.libraryName}
+                  root={root}
+                  compact={tier === "compact"}
+                />
+              )),
+            )}
+          </div>
+        )
       )}
     </DashboardPanel>
   );
@@ -1422,9 +1521,12 @@ function StoragePanel({ roots }: { roots: DashboardStorageRoot[] }) {
 function StorageRootTile({
   libraryName,
   root,
+  compact,
 }: {
   libraryName: string;
   root: DashboardStorageRoot;
+  /** Path and percentage only, for a panel squeezed to its minimum. */
+  compact: boolean;
 }) {
   const t = useTranslate();
   const percent = usagePercent(root.usedBytes, root.totalBytes);
@@ -1463,7 +1565,7 @@ function StorageRootTile({
             {percent === null ? "—" : `${Math.round(percent)}%`}
           </span>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[10px] text-[var(--scry-muted2)]">
+        {compact ? null : <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[10px] text-[var(--scry-muted2)]">
           <span className="flex shrink-0 items-center gap-1">
             {Icon ? (
               <Icon
@@ -1498,7 +1600,7 @@ function StorageRootTile({
               </span>
             </>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -1506,20 +1608,23 @@ function StorageRootTile({
 
 // ── Active queue ────────────────────────────────────────────────────────────
 
-function ActiveQueuePanel({
+export function ActiveQueuePanel({
   items,
   totalCount,
+  tier,
 }: {
+  tier: DashboardTier;
   items: DownloadQueueItem[];
   totalCount: number;
 }) {
   const t = useTranslate();
-  const visible = items.slice(0, QUEUE_PREVIEW_LIMIT);
+  const visible = items.slice(0, QUEUE_PREVIEW_LIMIT[tier]);
 
   return (
     <DashboardPanel
-      icon={ActivitySquare}
+      icon={DASHBOARD_PANEL_ICONS["active-queue"]}
       title={t("dashboard.activeQueue")}
+      bodyClassName={PREVIEW_PANE_CLASS}
       pills={
         <Badge className="whitespace-nowrap">
           {totalCount === 1
@@ -1535,7 +1640,7 @@ function ActiveQueuePanel({
       ) : (
         <ul>
           {visible.map((item) => (
-            <QueueRow key={item.id} item={item} />
+            <QueueRow key={item.id} item={item} tier={tier} />
           ))}
         </ul>
       )}
@@ -1543,7 +1648,7 @@ function ActiveQueuePanel({
   );
 }
 
-function QueueRow({ item }: { item: DownloadQueueItem }) {
+function QueueRow({ item, tier }: { item: DownloadQueueItem; tier: DashboardTier }) {
   const t = useTranslate();
   // Reuses the activity view's state derivation so the dashboard can never
   // disagree with the queue page about what a row is doing.
@@ -1559,6 +1664,7 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
           {presentation.statusLabel}
         </span>
       </div>
+      {tier === "compact" ? null : <>
       <ActivityProgressBar
         percent={presentation.percent}
         remainingLabel={presentation.remainingLabel}
@@ -1567,12 +1673,16 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
         hideLabel
       />
       <div className="flex min-w-0 items-center gap-2 text-[10px] text-[var(--scry-muted2)]">
+        {tier === "expanded" ? (
+          <span className="min-w-0 truncate">{item.clientName}</span>
+        ) : null}
         <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
         <span className="tabular-nums">{presentation.percent}%</span>
         <span className="ml-auto shrink-0 tabular-nums">
           {presentation.remainingLabel ?? "—"}
         </span>
       </div>
+      </>}
     </li>
   );
 }

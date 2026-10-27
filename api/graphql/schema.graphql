@@ -19247,6 +19247,8 @@ type MutationRoot {
 		"""
 		input: SetMyCatalogViewInput!
 	): UiSettingsPayload!
+	setMyDashboardLayout(input: SetMyDashboardLayoutInput!): UiSettingsPayload!
+	resetMyDashboardLayout(breakpoint: UiDashboardBreakpoint): UiSettingsPayload!
 	"""
 	Saves subtitle preferences after checking the catalog-settings permission.
 	"""
@@ -28852,6 +28854,12 @@ input SetMyCatalogViewInput {
 	columns: [UiCatalogColumnInput!]
 }
 
+input SetMyDashboardLayoutInput {
+	breakpoint: UiDashboardBreakpoint!
+	columns: Int!
+	items: [UiDashboardLayoutItemInput!]!
+}
+
 """
 Complete caller presentation-preferences update.
 """
@@ -32231,6 +32239,35 @@ type UiCatalogViewSettingPayload {
 	viewMode: UiCatalogViewModeValue!
 }
 
+enum UiDashboardBreakpoint {
+	XS
+	SM
+	MD
+	LG
+}
+
+type UiDashboardLayout {
+	breakpoint: UiDashboardBreakpoint!
+	columns: Int!
+	items: [UiDashboardLayoutItem!]!
+}
+
+type UiDashboardLayoutItem {
+	panelId: String!
+	x: Int!
+	y: Int!
+	w: Int!
+	h: Int!
+}
+
+input UiDashboardLayoutItemInput {
+	panelId: String!
+	x: Int!
+	y: Int!
+	w: Int!
+	h: Int!
+}
+
 """
 Date and time display format preference.
 """
@@ -32439,6 +32476,7 @@ type UiSettingsPayload {
 	Persisted catalog view modes, per device class and facet.
 	"""
 	catalogViews: [UiCatalogViewSettingPayload!]!
+	dashboardLayouts: [UiDashboardLayout!]!
 }
 
 """

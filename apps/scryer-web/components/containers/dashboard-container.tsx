@@ -4,7 +4,11 @@ import { useClient, useMutation } from "urql";
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { useManualImportLauncher } from "@/components/common/manual-import-launcher";
-import { DashboardView } from "@/components/views/dashboard-view";
+import {
+  DashboardGridFallback,
+  DashboardView,
+  type DashboardPanelData,
+} from "@/components/views/dashboard-view";
 import { useGlobalStatus } from "@/lib/context/global-status-context";
 import { useTranslate } from "@/lib/context/translate-context";
 import {
@@ -39,6 +43,16 @@ import type {
 import { isBreakingVersionChange } from "@/lib/utils/dashboard";
 import { createDashboardRefresh, initialDashboardPanelStates } from "@/lib/utils/dashboard-refresh";
 import { isHistoryQueueState } from "@/lib/utils/download-queue";
+
+/**
+ * The arrangeable grid and react-grid-layout load only with the dashboard, in
+ * their own chunk.
+ */
+const DashboardGrid = React.lazy(() =>
+  import("@/components/views/dashboard/dashboard-grid").then((module) => ({
+    default: module.DashboardGrid,
+  })),
+);
 
 /** Trailing window the two 24h tiles compare against the window before it. */
 const ACTIVITY_WINDOW_HOURS = 24;
@@ -76,6 +90,7 @@ export function DashboardContainer() {
   const [queueTotal, setQueueTotal] = React.useState(0);
   const [storageRoots, setStorageRoots] = React.useState<DashboardStorageRoot[]>([]);
   const [panels, setPanels] = React.useState(initialDashboardPanelStates);
+  const [editingLayout, setEditingLayout] = React.useState(false);
   const refresh = React.useMemo(() => createDashboardRefresh((key, patch) => {
     setPanels((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
   }), []);
@@ -527,30 +542,44 @@ export function DashboardContainer() {
     void refreshPluginsRegistry();
   }, [mutatingPluginIds.length, refreshPluginsRegistry]);
 
+  const panelData: DashboardPanelData = {
+    panels,
+    storageRoots,
+    overview,
+    requests,
+    importActivity,
+    importActivityTotal,
+    recentImports,
+    queueItems,
+    queueTotal,
+    actionRequestId,
+    importActionItemId: importActionItemId ?? manualImport.busyItemId,
+    onApproveRequest: (request) => void approveRequest(request),
+    onDismissRequest: (request) => void dismissRequest(request),
+    onImportItem: (item) => void manualImport.launch(item),
+    onMarkImportFailed: (item) => void markImportFailed(item),
+    onRemoveImportItem: setDeleteConfirmItem,
+  };
+
   return (
     <>
       <DashboardView
-        panels={panels}
-        storageRoots={storageRoots}
         overview={overview}
-        requests={requests}
-        importActivity={importActivity}
-        importActivityTotal={importActivityTotal}
-        recentImports={recentImports}
-        queueItems={queueItems}
-        queueTotal={queueTotal}
         pluginUpdates={pluginUpdates}
         updatingPluginIds={mutatingPluginIds}
-        actionRequestId={actionRequestId}
-        importActionItemId={importActionItemId ?? manualImport.busyItemId}
-        onApproveRequest={(request) => void approveRequest(request)}
-        onDismissRequest={(request) => void dismissRequest(request)}
-        onImportItem={(item) => void manualImport.launch(item)}
-        onMarkImportFailed={(item) => void markImportFailed(item)}
-        onRemoveImportItem={setDeleteConfirmItem}
         onUpdatePlugin={updatePlugin}
         onUpdateAllPlugins={updateAllPlugins}
-      />
+        editing={editingLayout}
+        onEdit={() => setEditingLayout(true)}
+      >
+        <React.Suspense fallback={<DashboardGridFallback />}>
+          <DashboardGrid
+            data={panelData}
+            editing={editingLayout}
+            onEditingChange={setEditingLayout}
+          />
+        </React.Suspense>
+      </DashboardView>
       <ConfirmDialog
         open={deleteConfirmItem !== null}
         title={t("queue.deleteConfirmTitle")}

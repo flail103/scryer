@@ -940,6 +940,17 @@ export const setMyUiSettingsMutation = `mutation SetMyUiSettings($input: SetMyUi
       facet
       viewMode
     }
+    dashboardLayouts {
+      breakpoint
+      columns
+      items {
+        panelId
+        x
+        y
+        w
+        h
+      }
+    }
   }
 }`;
 
@@ -971,6 +982,68 @@ export const setMyCatalogViewMutation = `mutation SetMyCatalogView($input: SetMy
       facet
       viewMode
     }
+    dashboardLayouts {
+      breakpoint
+      columns
+      items {
+        panelId
+        x
+        y
+        w
+        h
+      }
+    }
+  }
+}`;
+
+const UI_SETTINGS_PAYLOAD_FIELDS = `
+    theme
+    palette
+    dateTimeFormat
+    highlightColor
+    secondaryColor
+    highContrastMode
+    reduceMotion
+    hideSponsorButton
+    noGlow
+    density
+    sidebarMode
+    defaultLandingView
+    language
+    tableColumns {
+      deviceClass
+      facet
+      tableViewMode
+      columnId
+      columnOrder
+      visible
+    }
+    catalogViews {
+      deviceClass
+      facet
+      viewMode
+    }
+    dashboardLayouts {
+      breakpoint
+      columns
+      items {
+        panelId
+        x
+        y
+        w
+        h
+      }
+    }`;
+
+/** Replaces the saved dashboard layout for one breakpoint. */
+export const setMyDashboardLayoutMutation = `mutation SetMyDashboardLayout($input: SetMyDashboardLayoutInput!) {
+  setMyDashboardLayout(input: $input) {${UI_SETTINGS_PAYLOAD_FIELDS}
+  }
+}`;
+
+/** Drops the saved dashboard layout for one breakpoint, or every one when null. */
+export const resetMyDashboardLayoutMutation = `mutation ResetMyDashboardLayout($breakpoint: UiDashboardBreakpoint) {
+  resetMyDashboardLayout(breakpoint: $breakpoint) {${UI_SETTINGS_PAYLOAD_FIELDS}
   }
 }`;
 

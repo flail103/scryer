@@ -26,6 +26,7 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   language: null,
   tableColumns: [],
   catalogViews: [],
+  dashboardLayouts: [],
 };
 
 type AppearanceChange = Partial<Pick<UiSettings, "palette" | "theme" | "highlightColor">>;
@@ -59,6 +60,7 @@ function normalizeUiSettings(settings: Partial<UiSettings> | null | undefined): 
     language: settings?.language ?? null,
     tableColumns: settings?.tableColumns ?? [],
     catalogViews: settings?.catalogViews ?? [],
+    dashboardLayouts: settings?.dashboardLayouts ?? [],
   };
 }
 
