@@ -33,8 +33,23 @@ export type Release = {
   grabs?: number | null;
   /** Torrent swarm counts; null for usenet results. Selected by the search documents. */
   seeders?: number | null;
+  /** Seeders plus leechers when the indexer reported those but no peer count. */
   peers?: number | null;
+  leechers?: number | null;
+  /** The indexer's freeleech claim, or a download volume factor of zero. */
   freeleech?: boolean | null;
+  downloadVolumeFactor?: number | null;
+  uploadVolumeFactor?: number | null;
+  /** Seeding the tracker requires; null when it reported none. */
+  minimumSeedRatio?: number | null;
+  minimumSeedTimeMinutes?: number | null;
+  /** Indexer flags such as freeleech or internal, in indexer order. */
+  indexerFlags?: string[];
+  languages?: string[];
+  subtitles?: string[];
+  files?: number | null;
+  year?: number | null;
+  posterUrl?: string | null;
   parsedRelease?: {
     rawTitle: string;
     normalizedTitle: string;

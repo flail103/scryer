@@ -79,26 +79,8 @@ pub fn from_delete_episode_files_job_accepted(
 }
 
 pub fn from_search_result(result: IndexerSearchResult) -> IndexerSearchResultPayload {
-    let seeders = result
-        .extra
-        .get("seeders")
-        .and_then(|v| v.as_i64())
-        .map(|v| v as i32);
-    let peers = result
-        .extra
-        .get("peers")
-        .and_then(|v| v.as_i64())
-        .map(|v| v as i32);
-    let info_hash = result
-        .extra
-        .get("info_hash")
-        .and_then(|v| v.as_str())
-        .map(|v| v.to_string());
-    let freeleech = result.extra.get("freeleech").and_then(|v| v.as_bool());
-    let download_volume_factor = result
-        .extra
-        .get("downloadvolumefactor")
-        .and_then(|v| v.as_f64());
+    let facts = result.release_facts();
+    let int = |value: Option<i64>| value.and_then(|value| i32::try_from(value).ok());
 
     IndexerSearchResultPayload {
         source: result.source,
@@ -121,11 +103,21 @@ pub fn from_search_result(result: IndexerSearchResult) -> IndexerSearchResultPay
         quality_profile_decision: result
             .quality_profile_decision
             .map(from_quality_profile_decision),
-        seeders,
-        peers,
-        info_hash,
-        freeleech,
-        download_volume_factor,
+        seeders: int(facts.seeders),
+        peers: int(facts.peers),
+        leechers: int(facts.leechers),
+        info_hash: facts.info_hash,
+        freeleech: facts.freeleech,
+        download_volume_factor: facts.download_volume_factor,
+        upload_volume_factor: facts.upload_volume_factor,
+        minimum_seed_ratio: facts.minimum_seed_ratio,
+        minimum_seed_time_minutes: int(facts.minimum_seed_time_minutes),
+        indexer_flags: facts.indexer_flags,
+        languages: facts.languages,
+        subtitles: facts.subtitles,
+        files: int(facts.files),
+        year: facts.year,
+        poster_url: facts.poster_url,
         candidate_token: result.candidate_token,
         queue_scope: result.queue_scope.map(from_submission_scope),
         auto_eligible: result.auto_eligible,

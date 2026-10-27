@@ -52,14 +52,36 @@ pub struct IndexerSearchResultPayload {
     // Torrent-specific fields
     /// Torrent seeder count, or null for non-torrent results.
     pub seeders: Option<i32>,
-    /// Torrent peer count, or null for non-torrent results.
+    /// Torrent peer count, or null for non-torrent results. Seeders plus
+    /// leechers when the indexer reported those but no peer count.
     pub peers: Option<i32>,
+    /// Torrent leecher count, or null when not reported.
+    pub leechers: Option<i32>,
     /// Torrent info hash, or null for non-torrent results.
     pub info_hash: Option<String>,
-    /// Whether the torrent is marked freeleech, or null for non-torrent results.
+    /// Whether the torrent is freeleech: the indexer's explicit claim, or else
+    /// whether the download volume factor is zero. Null when neither is known.
     pub freeleech: Option<bool>,
     /// Torrent download volume factor, or null for non-torrent results.
     pub download_volume_factor: Option<f64>,
+    /// Torrent upload volume factor, or null when not reported.
+    pub upload_volume_factor: Option<f64>,
+    /// Minimum seed ratio the tracker requires, or null when not reported.
+    pub minimum_seed_ratio: Option<f64>,
+    /// Minimum seed time the tracker requires in minutes, or null when not reported.
+    pub minimum_seed_time_minutes: Option<i32>,
+    /// Indexer flags such as freeleech or internal, in indexer order.
+    pub indexer_flags: Vec<String>,
+    /// Audio languages the indexer reported for the release.
+    pub languages: Vec<String>,
+    /// Subtitle languages the indexer reported for the release.
+    pub subtitles: Vec<String>,
+    /// Number of files in the release, or null when not reported.
+    pub files: Option<i32>,
+    /// Release year the indexer reported, or null when not reported.
+    pub year: Option<i32>,
+    /// Poster or cover image URL the indexer reported, or null when not reported.
+    pub poster_url: Option<String>,
     /// Opaque token accepted when queuing this candidate, or null when unavailable.
     pub candidate_token: Option<String>,
     /// Acquisition scope targeted by this result, or null when no scope was inferred.

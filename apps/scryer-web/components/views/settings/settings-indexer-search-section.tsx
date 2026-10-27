@@ -242,6 +242,14 @@ function useReleaseBadges(release: Release): { text: string; tone: BadgeTone }[]
   if (release.freeleech === true) {
     badges.push({ text: t("indexerSearch.facet.freeleech"), tone: "success" });
   }
+  if (release.uploadVolumeFactor != null && release.uploadVolumeFactor > 1) {
+    badges.push({
+      text: t("indexerSearch.facet.uploadFactor", {
+        factor: release.uploadVolumeFactor,
+      }),
+      tone: "success",
+    });
+  }
   if (parsed?.isProperUpload) {
     badges.push({ text: t("indexerSearch.facet.proper"), tone: "warning" });
   }
@@ -847,6 +855,47 @@ function RefineRail({
   );
 }
 
+/** Tracker facts shown only when the indexer reported them. */
+function torrentDetailFields(
+  release: Release,
+  t: ReturnType<typeof useTranslate>,
+): { key: string; label: string; value: string }[] {
+  const fields: { key: string; label: string; value: string }[] = [];
+  if (release.leechers != null) {
+    fields.push({
+      key: "leechers",
+      label: t("indexerSearch.detail.leechers"),
+      value: String(release.leechers),
+    });
+  }
+  if (release.downloadVolumeFactor != null || release.uploadVolumeFactor != null) {
+    fields.push({
+      key: "volumeFactors",
+      label: t("indexerSearch.detail.volumeFactors"),
+      value: `${release.downloadVolumeFactor ?? 1}× / ${release.uploadVolumeFactor ?? 1}×`,
+    });
+  }
+  if (release.minimumSeedRatio != null) {
+    fields.push({
+      key: "minimumSeedRatio",
+      label: t("indexerSearch.detail.minimumSeedRatio"),
+      value: String(release.minimumSeedRatio),
+    });
+  }
+  const minutes = release.minimumSeedTimeMinutes;
+  if (minutes != null) {
+    fields.push({
+      key: "minimumSeedTime",
+      label: t("indexerSearch.detail.minimumSeedTime"),
+      value:
+        minutes > 0 && minutes % 1440 === 0
+          ? t("indexerSearch.age.days", { count: minutes / 1440 })
+          : t("indexerSearch.age.hours", { count: Math.round(minutes / 6) / 10 }),
+    });
+  }
+  return fields;
+}
+
 function ReleaseDetail({ release }: { release: Release }) {
   const t = useTranslate();
   const dateTimeFormat = useUiDateTimeFormat();
@@ -865,6 +914,7 @@ function ReleaseDetail({ release }: { release: Release }) {
         release.parsedRelease?.releaseGroup ??
         t("indexerSearch.detail.notAvailable"),
     },
+    ...torrentDetailFields(release, t),
   ];
 
   return (
@@ -990,7 +1040,19 @@ function ReleaseRow({
         <span role="cell" className="text-right text-[12.5px] tabular-nums text-[var(--scry-muted2)]">
           {age ? t(age.unitKey, { count: age.value }) : "—"}
         </span>
-        <span role="cell" className="text-right text-[12.5px] tabular-nums text-[var(--scry-muted2)]">
+        <span
+          role="cell"
+          className="text-right text-[12.5px] tabular-nums text-[var(--scry-muted2)]"
+          title={
+            release.seeders != null && release.leechers != null
+              ? t("indexerSearch.row.swarm", {
+                  seeders: release.seeders,
+                  leechers: release.leechers,
+                  peers: release.peers ?? release.seeders + release.leechers,
+                })
+              : undefined
+          }
+        >
           {peers}
         </span>
         <div role="cell" className="flex justify-end gap-1.5">

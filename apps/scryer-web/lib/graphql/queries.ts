@@ -1368,6 +1368,16 @@ export const RELEASE_SEARCH_RESULT_FIELDS = `
     infoHash
     freeleech
     downloadVolumeFactor
+    leechers
+    uploadVolumeFactor
+    minimumSeedRatio
+    minimumSeedTimeMinutes
+    indexerFlags
+    languages
+    subtitles
+    files
+    year
+    posterUrl
     autoEligible
     autoDecisionCode
     autoDecisionSummary`;
