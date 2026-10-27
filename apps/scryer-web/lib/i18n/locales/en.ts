@@ -2641,7 +2641,7 @@ const en: LocaleDictionary = {
   "indexerClients.noCategories": "No categories selected: this indexer will return no results to the client.",
   "indexerClients.save": "Save client",
   "indexerClients.keyChangeWarning": "The current key and its retrieval links will stop working immediately. Update the tool with a new key to restore access.",
-  "indexerClients.error.session": "Sign in with an interactive session to manage indexer clients. Authless access and local bypass are not accepted.",
+  "indexerClients.error.session": "Sign in with your account to manage indexer clients. Skipping login for local IPs does not cover client keys.",
   "indexerClients.error.experimental": "Enable experimental features to use indexer clients.",
   "indexerClients.error.permissions": "Every application permission is required to manage indexer clients.",
   "indexerClients.error.key": "The client key is invalid, revoked, or disabled.",

@@ -63,17 +63,32 @@ pub fn verify_indexer_client_key(signing_salt: &str, raw_key: &str, stored_hash:
     verify_key_material(signing_salt, KEY_DOMAIN, &lookup, &secret, stored_hash)
 }
 
+/// How a request reached indexer client management. The interface derives it
+/// from trusted request context, never from a mutation input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexerClientManagementSession {
+    /// A signed-in session token.
+    Interactive,
+    /// The default actor while form login is off for the whole instance. With
+    /// no login there is no second factor to step up with.
+    AuthlessMode,
+    /// Anything else, including API keys, OAuth tokens and the local-IP login
+    /// bypass while form login is on.
+    Refused,
+}
+
 impl AppUseCase {
-    /// The interface derives `interactive_session` from trusted request context,
-    /// never a mutation input; authless/local-bypass contexts must pass false.
     pub async fn require_indexer_client_key_management(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
         step_up_verified_until: Option<i64>,
     ) -> AppResult<()> {
-        self.require_indexer_client_management_session(actor, interactive_session)
+        self.require_indexer_client_management_session(actor, session)
             .await?;
+        if session == IndexerClientManagementSession::AuthlessMode {
+            return Ok(());
+        }
         // Enrollment is checked even if a token carries a future timestamp.
         // The configuration step-up setting does not weaken this key boundary.
         let enrolled = self
@@ -93,12 +108,12 @@ impl AppUseCase {
     pub async fn require_indexer_client_management_session(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
     ) -> AppResult<()> {
-        if !interactive_session {
+        if session == IndexerClientManagementSession::Refused {
             return Err(AppError::unauthorized_reason(
                 reasons::INTERACTIVE_SESSION_REQUIRED,
-                "An authenticated interactive session is required for indexer client management",
+                "Sign in to manage indexer clients; the local network login bypass and API keys cannot manage them",
             ));
         }
         if !self
@@ -164,32 +179,41 @@ mod tests {
 
     #[tokio::test]
     async fn client_management_rejects_bypass_and_any_missing_permission() {
+        use IndexerClientManagementSession::{AuthlessMode, Interactive, Refused};
         let (app, mut actor) = crate::lib_tests::bootstrap();
         set_experimental_features(&app, true).await;
         actor.authorization.loaded = true;
         actor.authorization.app = AppPermissionMask::ALL;
         let bypass = app
-            .require_indexer_client_key_management(&actor, false, Some(i64::MAX))
+            .require_indexer_client_key_management(&actor, Refused, Some(i64::MAX))
             .await
             .unwrap_err();
         assert_eq!(bypass.reason(), Some(reasons::INTERACTIVE_SESSION_REQUIRED));
-        for permission in scryer_domain::AppPermission::ALL {
-            actor.authorization.app = AppPermissionMask::from_bits_retain(
-                AppPermissionMask::ALL.bits()
-                    & !AppPermissionMask::from_permission(*permission).bits(),
-            );
-            let denied = app
-                .require_indexer_client_key_management(&actor, true, Some(i64::MAX))
-                .await
-                .unwrap_err();
-            assert_eq!(denied.reason(), Some(reasons::ALL_PERMISSIONS_REQUIRED));
+        for session in [Interactive, AuthlessMode] {
+            for permission in scryer_domain::AppPermission::ALL {
+                actor.authorization.app = AppPermissionMask::from_bits_retain(
+                    AppPermissionMask::ALL.bits()
+                        & !AppPermissionMask::from_permission(*permission).bits(),
+                );
+                let denied = app
+                    .require_indexer_client_key_management(&actor, session, Some(i64::MAX))
+                    .await
+                    .unwrap_err();
+                assert_eq!(denied.reason(), Some(reasons::ALL_PERMISSIONS_REQUIRED));
+            }
         }
         actor.authorization.app = AppPermissionMask::ALL;
         assert!(matches!(
-            app.require_indexer_client_key_management(&actor, true, Some(i64::MAX))
+            app.require_indexer_client_key_management(&actor, Interactive, Some(i64::MAX))
                 .await,
             Err(AppError::TotpEnrollmentRequired(_))
         ));
+        // Login is off for the whole instance, so there is no factor to ask for.
+        assert!(
+            app.require_indexer_client_key_management(&actor, AuthlessMode, None)
+                .await
+                .is_ok()
+        );
     }
 
     #[test]

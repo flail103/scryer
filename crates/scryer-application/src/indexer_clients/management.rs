@@ -72,9 +72,9 @@ impl AppUseCase {
     pub async fn list_indexer_clients(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
     ) -> AppResult<Vec<IndexerClientRecord>> {
-        self.require_indexer_client_management_session(actor, interactive_session)
+        self.require_indexer_client_management_session(actor, session)
             .await?;
         self.indexer_client_repository()?.list().await
     }
@@ -82,16 +82,12 @@ impl AppUseCase {
     pub async fn create_indexer_client(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
         step_up_verified_until: Option<i64>,
         configuration: IndexerClientConfiguration,
     ) -> AppResult<CreatedIndexerClient> {
-        self.require_indexer_client_key_management(
-            actor,
-            interactive_session,
-            step_up_verified_until,
-        )
-        .await?;
+        self.require_indexer_client_key_management(actor, session, step_up_verified_until)
+            .await?;
         let configuration = self
             .validate_indexer_client_configuration(configuration)
             .await?;
@@ -125,18 +121,14 @@ impl AppUseCase {
     pub async fn update_indexer_client(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
         step_up_verified_until: Option<i64>,
         id: &str,
         expected_revision: u64,
         configuration: IndexerClientConfiguration,
     ) -> AppResult<IndexerClientRecord> {
-        self.require_indexer_client_key_management(
-            actor,
-            interactive_session,
-            step_up_verified_until,
-        )
-        .await?;
+        self.require_indexer_client_key_management(actor, session, step_up_verified_until)
+            .await?;
         let configuration = self
             .validate_indexer_client_configuration(configuration)
             .await?;
@@ -151,17 +143,13 @@ impl AppUseCase {
     pub async fn rotate_indexer_client_key(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
         step_up_verified_until: Option<i64>,
         id: &str,
         expected_revision: u64,
     ) -> AppResult<CreatedIndexerClient> {
-        self.require_indexer_client_key_management(
-            actor,
-            interactive_session,
-            step_up_verified_until,
-        )
-        .await?;
+        self.require_indexer_client_key_management(actor, session, step_up_verified_until)
+            .await?;
         let mut record = self
             .indexer_client_for_update(id, expected_revision)
             .await?;
@@ -181,17 +169,13 @@ impl AppUseCase {
     pub async fn revoke_indexer_client_key(
         &self,
         actor: &User,
-        interactive_session: bool,
+        session: IndexerClientManagementSession,
         step_up_verified_until: Option<i64>,
         id: &str,
         expected_revision: u64,
     ) -> AppResult<IndexerClientRecord> {
-        self.require_indexer_client_key_management(
-            actor,
-            interactive_session,
-            step_up_verified_until,
-        )
-        .await?;
+        self.require_indexer_client_key_management(actor, session, step_up_verified_until)
+            .await?;
         let mut record = self
             .indexer_client_for_update(id, expected_revision)
             .await?;

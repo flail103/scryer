@@ -1,11 +1,11 @@
 use async_graphql::{Context, Enum, ID, InputObject, Object, Result as GqlResult, SimpleObject};
 use scryer_application::indexer_clients::{
-    IndexerClientConfiguration, IndexerClientGrant, IndexerClientProtocol, IndexerClientRecord,
-    IndexerClientUseOutcome,
+    IndexerClientConfiguration, IndexerClientGrant, IndexerClientManagementSession,
+    IndexerClientProtocol, IndexerClientRecord, IndexerClientUseOutcome,
 };
 use scryer_interface_core::{
     AuthlessDefaultSession, InteractiveSession, actor_from_ctx, app_from_ctx,
-    mfa_verification_from_ctx, to_gql_error,
+    auth_runtime_from_ctx, mfa_verification_from_ctx, to_gql_error,
 };
 use scryer_interface_media::types::Long;
 
@@ -205,9 +205,22 @@ struct IssuedIndexerClientKeyPayload {
     api_key: String,
 }
 
-fn interactive(ctx: &Context<'_>) -> bool {
-    ctx.data_opt::<InteractiveSession>().is_some()
-        && ctx.data_opt::<AuthlessDefaultSession>().is_none()
+/// The default actor manages clients only while form login is off for the
+/// whole instance. While login is on, the same actor is the local-IP bypass,
+/// which is refused. Login is read live so a change applies to the next request.
+fn management_session(ctx: &Context<'_>) -> IndexerClientManagementSession {
+    let authless_default = ctx.data_opt::<AuthlessDefaultSession>().is_some();
+    if ctx.data_opt::<InteractiveSession>().is_some() && !authless_default {
+        IndexerClientManagementSession::Interactive
+    } else if authless_default
+        && !auth_runtime_from_ctx(ctx)
+            .snapshot()
+            .effective_form_login_enabled
+    {
+        IndexerClientManagementSession::AuthlessMode
+    } else {
+        IndexerClientManagementSession::Refused
+    }
 }
 
 fn revision(value: Long) -> GqlResult<u64> {
@@ -233,7 +246,7 @@ impl IndexerClientQueries {
         let app = app_from_ctx(ctx)?;
         let actor = actor_from_ctx(ctx)?;
         Ok(app
-            .list_indexer_clients(&actor, interactive(ctx))
+            .list_indexer_clients(&actor, management_session(ctx))
             .await
             .map_err(to_gql_error)?
             .into_iter()
@@ -259,7 +272,7 @@ impl IndexerClientMutations {
         let issued = app
             .create_indexer_client(
                 &actor,
-                interactive(ctx),
+                management_session(ctx),
                 mfa_verification_from_ctx(ctx).step_up_verified_until,
                 input.into(),
             )
@@ -285,7 +298,7 @@ impl IndexerClientMutations {
         let actor = actor_from_ctx(ctx)?;
         app.update_indexer_client(
             &actor,
-            interactive(ctx),
+            management_session(ctx),
             mfa_verification_from_ctx(ctx).step_up_verified_until,
             id.as_str(),
             revision(expected_revision)?,
@@ -308,7 +321,7 @@ impl IndexerClientMutations {
         let issued = app
             .rotate_indexer_client_key(
                 &actor,
-                interactive(ctx),
+                management_session(ctx),
                 mfa_verification_from_ctx(ctx).step_up_verified_until,
                 id.as_str(),
                 revision(expected_revision)?,
@@ -332,7 +345,7 @@ impl IndexerClientMutations {
         let actor = actor_from_ctx(ctx)?;
         app.revoke_indexer_client_key(
             &actor,
-            interactive(ctx),
+            management_session(ctx),
             mfa_verification_from_ctx(ctx).step_up_verified_until,
             id.as_str(),
             revision(expected_revision)?,

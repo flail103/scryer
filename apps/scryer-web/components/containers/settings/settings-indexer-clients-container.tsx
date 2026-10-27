@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
-import { Ban, CheckCircle2, Clipboard, Edit, KeyRound, Plus, RefreshCw, ShieldAlert } from "lucide-react";
+import { Ban, CheckCircle2, Clipboard, Edit, KeyRound, Lock, Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import { AddNewButton } from "@/components/common/add-new-button";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { LoadingMark } from "@/components/common/loading-mark";
@@ -42,7 +42,7 @@ import {
 import type { IndexerRecord } from "@/lib/types";
 import { formatUiDateTime } from "@/lib/utils/date-format";
 import { selectorId } from "@/lib/utils/dom-ids";
-import { indexerClientErrorMessage } from "@/lib/utils/indexer-client-error";
+import { indexerClientAccessRefusal, indexerClientErrorMessage } from "@/lib/utils/indexer-client-error";
 import { indexerClientOutcomeMessage } from "@/lib/utils/indexer-client-outcome";
 import { withMfaStepUp } from "@/lib/utils/with-mfa-step-up";
 
@@ -82,6 +82,7 @@ export function SettingsIndexerClientsContainer() {
   const [editing, setEditing] = useState<IndexerClientRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accessRefusal, setAccessRefusal] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [revealedCopied, setRevealedCopied] = useState(false);
   const [confirmation, setConfirmation] = useState<KeyChange | null>(null);
@@ -109,9 +110,13 @@ export function SettingsIndexerClientsContainer() {
       if (!mounted.current || version !== loadVersion.current) return;
       if (indexers.error || !indexers.data) { setClients(null); throw indexers.error; }
       setSources(indexers.data.indexers.filter((source) => !source.supportsManagedChildrenSync));
+      setAccessRefusal(null);
       setClients(result.data.indexerClients);
     } catch (failure) {
-      if (mounted.current && version === loadVersion.current) setError(indexerClientErrorMessage(failure, t));
+      if (!mounted.current || version !== loadVersion.current) return;
+      const refusal = indexerClientAccessRefusal(failure, t);
+      setAccessRefusal(refusal);
+      if (!refusal) setError(indexerClientErrorMessage(failure, t));
     } finally {
       if (mounted.current && version === loadVersion.current) setLoading(false);
     }
@@ -241,7 +246,12 @@ export function SettingsIndexerClientsContainer() {
           {loading ? <LoadingMark className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
         </IconButton>
       </CardHeader>
-      {loading && clients === null ? (
+      {accessRefusal && clients === null ? (
+        <div id="settings-indexer-clients-access" className="flex items-start gap-2 p-4 text-[var(--scry-muted3)]">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>{accessRefusal}</p>
+        </div>
+      ) : loading && clients === null ? (
         <p className="p-4 text-[var(--scry-muted3)]">{t("label.loading")}</p>
       ) : clients === null ? (
         <p className="p-4 text-[var(--scry-muted3)]">{t("status.failedToLoad")}</p>

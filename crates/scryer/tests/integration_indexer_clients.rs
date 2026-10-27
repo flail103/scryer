@@ -17,6 +17,9 @@ use std::sync::Arc;
 
 const CREATE: &str = "mutation { createIndexerClient(input: {name: \"Tool fixture\", enabled: true,
     protocols: [NEWZNAB, TORZNAB], grants: []}) { apiKey client { id name revision keyActive } } }";
+const CREATE_AUTHLESS: &str =
+    "mutation { createIndexerClient(input: {name: \"Authless fixture\", enabled: true,
+    protocols: [NEWZNAB], grants: []}) { apiKey client { id } } }";
 
 fn request(
     query: &str,
@@ -103,6 +106,8 @@ async fn client_management_graphql_requires_interactive_full_permissions_and_mfa
         )
         .await
         .unwrap();
+    // With login on, the default actor is the local-IP bypass and is refused.
+    ctx.auth_runtime.apply_saved_security_settings(true, true);
     for (interactive, bypass) in [(false, false), (false, true), (true, true)] {
         let response = schema
             .execute(request(CREATE, &actor, interactive, bypass, Some(i64::MAX)))
@@ -112,6 +117,39 @@ async fn client_management_graphql_requires_interactive_full_permissions_and_mfa
             "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED"
         );
     }
+    // With login off for the instance, the default actor manages clients and
+    // has no factor to step up with. Other non-interactive callers stay refused.
+    ctx.auth_runtime.apply_saved_security_settings(false, false);
+    let response = schema
+        .execute(request(CREATE, &actor, false, false, Some(i64::MAX)))
+        .await;
+    assert_eq!(
+        error_field(&response, "reason"),
+        "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED"
+    );
+    let authless = data(
+        schema
+            .execute(request(CREATE_AUTHLESS, &actor, false, true, None))
+            .await,
+    );
+    assert!(
+        authless["createIndexerClient"]["apiKey"]
+            .as_str()
+            .unwrap()
+            .starts_with("sck_")
+    );
+    let listed = data(
+        schema
+            .execute(request(
+                "{ indexerClients { id } }",
+                &actor,
+                false,
+                true,
+                None,
+            ))
+            .await,
+    );
+    assert_eq!(listed["indexerClients"].as_array().unwrap().len(), 1);
     let mut restricted = actor.clone();
     restricted.authorization.app = AppPermissionMask::NONE;
     let response = schema
