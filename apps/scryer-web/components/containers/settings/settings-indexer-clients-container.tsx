@@ -278,7 +278,6 @@ export function SettingsIndexerClientsContainer() {
     {pluginsTarget
       ? createPortal(<FilteredPluginList family="INDEXER" refreshProviderOptions={refreshAfterPluginChange} />, pluginsTarget)
       : null}
-    <p className="text-[var(--scry-muted3)]">{t("indexerClients.description")}</p>
 
     <div id="settings-indexer-client-endpoints" className="rounded border border-border">
       <div className="border-b border-border px-3 py-2">

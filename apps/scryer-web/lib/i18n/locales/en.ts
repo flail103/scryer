@@ -2603,7 +2603,6 @@ const en: LocaleDictionary = {
   "settings.indexers": "Indexers",
   "settings.indexerSearch": "Indexer Search",
   "settings.indexerClients": "Client management",
-  "indexerClients.description": "Give each tool its own key and explicit access to your existing indexers.",
   "indexerClients.endpoints": "Endpoints",
   "indexerClients.endpointCopyFailed": "Could not copy the endpoint URL.",
   "indexerClients.existing": "Indexer clients",
