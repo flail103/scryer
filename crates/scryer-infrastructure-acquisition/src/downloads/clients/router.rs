@@ -2362,7 +2362,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
     /// knows the release title to name in the message.
     async fn fetch_release_artifact(
         &self,
-        request: &DownloadClientAddRequest,
+        request: &IndexerArtifactResolutionRequest,
     ) -> AppResult<ResolvedDownloadArtifact> {
         let Some(resolver) = self.indexer_artifact_resolver.as_ref() else {
             return Err(AppError::validation_refused(
@@ -2371,28 +2371,13 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                     .to_string(),
             ));
         };
-        let source_url = request
-            .source_hint
-            .as_deref()
-            .map(str::trim)
-            .filter(|source| !source.is_empty())
-            .ok_or_else(|| {
-                AppError::validation_refused(
-                    crate::error_reasons::ACQUISITION_DOWNLOAD_ARTIFACT_REQUIRED,
-                    "release has no download artifact to fetch".to_string(),
-                )
-            })?;
-        let prepared = resolver
-            .resolve_artifact(&IndexerArtifactResolutionRequest {
-                indexer_id: request.indexer_id.clone(),
-                source_url: source_url.to_string(),
-                source_kind: request.source_kind,
-                info_hash_hint: request.info_hash_hint.clone(),
-                title_id: None,
-                search_facet: request.search_facet.clone(),
-                cancellation: tokio_util::sync::CancellationToken::new(),
-            })
-            .await?;
+        if request.source_url.trim().is_empty() {
+            return Err(AppError::validation_refused(
+                crate::error_reasons::ACQUISITION_DOWNLOAD_ARTIFACT_REQUIRED,
+                "release has no download artifact to fetch".to_string(),
+            ));
+        }
+        let prepared = resolver.resolve_artifact(request).await?;
         match prepared {
             PreparedIndexerArtifact::Resolved(artifact) => Ok(artifact),
             PreparedIndexerArtifact::StagedNzb(lease) => {

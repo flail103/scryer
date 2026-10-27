@@ -311,6 +311,7 @@ impl PushInput {
                 tmdb_id: self.tmdb_id.filter(|id| *id > 0).map(|id| id.to_string()),
                 imdb_id,
                 categories: vec![],
+                ..Default::default()
             },
             flags: flag_bits
                 .iter()

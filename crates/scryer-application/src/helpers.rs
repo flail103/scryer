@@ -340,6 +340,10 @@ pub enum HashDomain {
     IndexerListingPage,
     /// An indexer id lookup with its episode coordinates left out.
     IndexerListingFamily,
+    /// Authorized raw-search request and source configuration for page reuse.
+    RawSearchScope,
+    /// Stable source-qualified identity exposed to external indexer clients.
+    IndexerClientRelease,
 }
 
 impl HashDomain {
@@ -365,6 +369,8 @@ impl HashDomain {
             Self::RequestRuleInput => "scryer.request-rule.input.v1",
             Self::IndexerListingPage => "scryer.indexer.listing-page.v1",
             Self::IndexerListingFamily => "scryer.indexer.listing-family.v1",
+            Self::RawSearchScope => "scryer.raw-search.scope.v1",
+            Self::IndexerClientRelease => "scryer.indexer-client.release.v1",
         }
     }
 }

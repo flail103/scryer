@@ -1,5 +1,6 @@
 mod acquisition;
 mod api_keys;
+pub mod indexer_clients;
 pub mod application_upgrade;
 mod authorization;
 mod catalog;
@@ -222,6 +223,10 @@ pub use import::failed_download as failed_download_handler;
 pub use import::post_processing as app_usecase_post_processing;
 pub use import::srrdb::{SRRDB_API_BASE_URL, SrrdbHttpFilenameLookup};
 pub use import::upgrade;
+pub use integration::indexer_caps_cache::{
+    CapsRequestCache, IndexerCapsDiagnostic, IndexerCapsRefreshContext, IndexerCapsSource, ResolvedIndexerCaps,
+    cached_indexer_caps,
+};
 pub use integration::tracked_downloads;
 pub use library::filesystem_walk;
 pub use library::leftover_title_folders::EmptyDuplicateTitleFolderReport;
@@ -344,6 +349,7 @@ pub use catalog::interactive_release_search::{
     InteractiveReleaseSearchIndexerView, InteractiveReleaseSearchRequest,
     InteractiveReleaseSearchSnapshot, InteractiveReleaseSearchState,
     InteractiveSearchArtifactBundle, InteractiveSearchArtifactTarget, QueueUnlinkedReleaseOutcome,
+    SearchPrincipal, RawSearchOutputLease, RawSearchPage, RawSearchRow, RawSearchSourceProgress, RAW_SEARCH_PAGE_SIZE,
 };
 pub use catalog::release_search::release_candidate_fingerprint;
 pub use catalog::title_hydration::start_background_title_hydration_loop;
@@ -829,10 +835,11 @@ pub use types::{
     IndexerErrorSummary, IndexerFirstPageGate, IndexerFirstPageVerdict, IndexerQueryOutcome,
     IndexerResponseAttributes, IndexerRssCatchUp, IndexerSearchCompletion,
     IndexerSearchIncompleteReason, IndexerSearchOutcome, IndexerSearchPage,
-    IndexerSearchPageReservation, IndexerSearchPageSink, IndexerSearchPlanCapability,
-    IndexerSearchPlanRequest, IndexerSearchPlanSummary, IndexerSearchResponse, IndexerSearchResult,
-    IndexerSearchStrategyEvent, IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest,
-    NewIndexerError, RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
+    IndexerSearchPageMetadata, IndexerSearchPageReservation, IndexerSearchPageSink,
+    IndexerSearchPlanCapability, IndexerSearchPlanRequest, IndexerSearchPlanSummary,
+    IndexerSearchResponse, IndexerSearchResult, IndexerSearchStrategyEvent,
+    IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, NewIndexerError,
+    INDEXER_PAGE_CURSOR_MAX_BYTES, RawTextSearchPage, RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
     ReleaseStrategyKind, extract_magnet_info_hash, indexer_search_identity, is_valid_magnet_uri,
     search_relevant_indexer_caps, search_relevant_managed_indexer_metadata,
 };

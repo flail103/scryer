@@ -411,9 +411,21 @@ pub struct MediaRequest {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum AppPermission {
+// Keep enumeration and the complete permission set in one declaration. Gates
+// requiring every permission must automatically include future variants.
+macro_rules! app_permissions {
+    ($( $(#[$meta:meta])* $variant:ident ),* $(,)?) => {
+        #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+        #[serde(rename_all = "snake_case")]
+        pub enum AppPermission { $( $(#[$meta])* $variant ),* }
+
+        impl AppPermission {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),*];
+        }
+    };
+}
+
+app_permissions! {
     ManageUsers,
     ManagePermissions,
     ManageSystemSettings,
@@ -518,6 +530,16 @@ impl AppPermissionMask {
     pub const MANAGE_SYSTEM_SETTINGS: Self = Self(1 << 2);
     pub const MANAGE_CATALOG_SETTINGS: Self = Self(1 << 3);
     pub const MANAGE_LISTS: Self = Self(1 << 4);
+    /// Every declared application permission, including future variants.
+    pub const ALL: Self = {
+        let mut bits = 0;
+        let mut index = 0;
+        while index < AppPermission::ALL.len() {
+            bits |= Self::from_permission(AppPermission::ALL[index]).0;
+            index += 1;
+        }
+        Self(bits)
+    };
 
     pub fn bits(self) -> u64 {
         self.0
@@ -527,7 +549,7 @@ impl AppPermissionMask {
         Self(bits)
     }
 
-    pub fn from_permission(permission: AppPermission) -> Self {
+    pub const fn from_permission(permission: AppPermission) -> Self {
         match permission {
             AppPermission::ManageUsers => Self::MANAGE_USERS,
             AppPermission::ManagePermissions => Self::MANAGE_PERMISSIONS,
@@ -2284,7 +2306,7 @@ impl NabTransportKind {
 pub fn is_nab_provider_type(provider_type: &str) -> bool {
     matches!(
         provider_type.trim().to_ascii_lowercase().as_str(),
-        "amenzb" | "animetosho-xyz" | "dognzb" | "newznab" | "nzbgeek" | "torznab"
+        "amenzb" | "aninzb" | "animetosho-xyz" | "dognzb" | "newznab" | "nzbgeek" | "torznab"
     )
 }
 
@@ -7416,8 +7438,17 @@ pub struct IndexerCapsSearchNode {
     pub search_engine: Option<String>,
 }
 
+/// Stored snapshots from an older parser must be refreshed before use as fresh caps.
+pub const INDEXER_CAPS_PARSER_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexerCapsSnapshot {
+    #[serde(default)]
+    pub parser_version: u32,
+    /// An absent searching block is permissive; an absent mode in a present
+    /// block is unavailable. Keep those cases distinct across the host boundary.
+    #[serde(default)]
+    pub searching_present: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -7506,6 +7537,9 @@ pub struct IndexerResponseFeatures {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexerProviderCapabilities {
+    /// The adapter accepts exact Nab operations and explicit recent paging.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub raw_nab_search: bool,
     #[serde(default = "default_true")]
     pub rss: bool,
 
@@ -8780,6 +8814,20 @@ mod tests {
                 .app
                 .contains(AppPermissionMask::MANAGE_USERS)
         );
+    }
+
+    #[test]
+    fn all_application_permissions_cover_every_declared_variant() {
+        let permissions = AppPermission::ALL;
+        let rebuilt = AppPermissionMask::from_permissions(permissions.iter().copied());
+        assert_eq!(AppPermissionMask::ALL, rebuilt);
+        assert_eq!(AppPermissionMask::ALL.bits().count_ones() as usize, permissions.len());
+        for permission in permissions {
+            assert!(AppPermissionMask::ALL.contains(AppPermissionMask::from_permission(*permission)));
+            let missing_one = AppPermissionMask::from_bits_retain(AppPermissionMask::ALL.bits()
+                & !AppPermissionMask::from_permission(*permission).bits());
+            assert!(!missing_one.contains(AppPermissionMask::ALL));
+        }
     }
 }
 

@@ -1574,6 +1574,7 @@ mod tests {
         created: Arc<Mutex<Vec<IndexerConfig>>>,
         cleared_ids: Arc<Mutex<Vec<String>>>,
         recorded_errors: RecordedIndexerErrors,
+        recorded_error_codes: Arc<Mutex<Vec<Option<String>>>>,
         system_backoffs: Arc<Mutex<HashMap<String, crate::IndexerSystemBackoff>>>,
     }
 
@@ -1583,6 +1584,7 @@ mod tests {
                 created: Arc::new(Mutex::new(Vec::new())),
                 cleared_ids: Arc::new(Mutex::new(Vec::new())),
                 recorded_errors: Arc::new(Mutex::new(Vec::new())),
+                recorded_error_codes: Arc::new(Mutex::new(Vec::new())),
                 system_backoffs: Arc::new(Mutex::new(HashMap::new())),
             }
         }
@@ -1698,8 +1700,9 @@ mod tests {
             &self,
             id: &str,
             message: Option<String>,
-            _code: Option<String>,
+            code: Option<String>,
         ) -> AppResult<()> {
+            self.recorded_error_codes.lock().await.push(code);
             self.recorded_errors
                 .lock()
                 .await
@@ -2952,7 +2955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_caps_snapshot_prunes_coverage_and_learning() {
+    async fn deferred_caps_snapshot_preserves_coverage_and_learning() {
         let indexer_repo = Arc::new(RecordingIndexerConfigRepo::new());
         indexer_repo.created.lock().await.push(IndexerConfig {
             id: "cfg-caps".into(),
@@ -3012,24 +3015,13 @@ mod tests {
         let (refreshed, failures) = app
             .refresh_enabled_direct_nab_caps_snapshots(&test_admin())
             .await
-            .expect("caps refresh pass should report provider failures");
+            .expect("caps refresh pass should tolerate deferred discovery");
 
         assert_eq!(refreshed, 0);
-        assert_eq!(failures.len(), 1);
-        assert_eq!(indexer_client.pruned_indexers(), vec!["cfg-caps"]);
-        assert_eq!(
-            coverage.pruned_indexers.lock().unwrap().as_slice(),
-            &["cfg-caps"]
-        );
-        let errors = indexer_repo.recorded_errors.lock().await;
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].0, "cfg-caps");
-        assert!(
-            errors[0]
-                .1
-                .as_deref()
-                .is_some_and(|message| message.starts_with("caps refresh failed:"))
-        );
+        assert!(failures.is_empty());
+        assert!(indexer_client.pruned_indexers().is_empty());
+        assert!(coverage.pruned_indexers.lock().unwrap().is_empty());
+        assert!(indexer_repo.recorded_errors.lock().await.is_empty());
     }
 
     #[tokio::test]
@@ -3057,8 +3049,8 @@ mod tests {
             managed_metadata_json: None,
             caps_snapshot_json: None,
             last_health_status: None,
-            last_error_code: None,
-            last_error_message: Some("caps refresh failed: synthetic failure".into()),
+            last_error_code: Some(crate::error_reasons::indexer_caps::REFRESH_FAILED.into()),
+            last_error_message: Some("Synthetic capability failure".into()),
             last_error_at: Some(now),
             config_json: None,
             created_at: now,
@@ -3069,6 +3061,7 @@ mod tests {
         unrelated_error.name = "Synthetic Indexer B".into();
         unrelated_error.base_url = "https://indexer-b.example.test".into();
         unrelated_error.last_error_message = Some("authentication failed".into());
+        unrelated_error.last_error_code = None;
         indexer_repo
             .created
             .lock()
@@ -3526,11 +3519,9 @@ mod tests {
         assert_eq!(failures.len(), 2, "{failures:?}");
         let errors = indexer_repo.recorded_errors.lock().await;
         assert_eq!(errors.len(), 2, "{errors:?}");
-        assert!(errors.iter().all(|(_, message)| {
-            message
-                .as_deref()
-                .is_some_and(|message| message.starts_with("caps refresh failed:"))
-        }));
+        assert!(indexer_repo.recorded_error_codes.lock().await.iter().all(
+            |code| code.as_deref() == Some(crate::error_reasons::indexer_caps::REFRESH_FAILED)
+        ));
     }
 
     #[tokio::test]

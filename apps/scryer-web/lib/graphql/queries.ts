@@ -1400,6 +1400,9 @@ export const interactiveReleaseSearchQuery = `query InteractiveReleaseSearch($id
   interactiveReleaseSearch(id: $id) {
     id
     state
+    continuation
+    deadlineReached
+    failureCode
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {
@@ -1413,6 +1416,9 @@ export const interactiveReleaseSearchQuery = `query InteractiveReleaseSearch($id
       rateLimited
       skipReason
       skippedUntil
+      capsSource
+      capsReason
+      capsRetryAfterSeconds
     }
     startedAt
     completedAt

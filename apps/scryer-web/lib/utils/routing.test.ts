@@ -245,6 +245,7 @@ test("the indexers page carries its panes as a third path segment", () => {
   for (const path of [
     "/integrations/indexers",
     "/integrations/indexers/search",
+    "/integrations/indexers/clients",
     "/integrations/indexers/seeding-profiles",
   ]) {
     const route = canonical(path);
@@ -267,7 +268,7 @@ test("seeding profiles are no longer a settings section of their own", () => {
 });
 
 test("indexer pane paths round-trip through the tab helpers", () => {
-  for (const tab of ["indexers", "search", "seedingProfiles"] as const) {
+  for (const tab of ["indexers", "search", "clients", "seedingProfiles"] as const) {
     assert.equal(
       indexerSettingsTabFromPath(buildIndexerSettingsPath(tab)),
       tab,
@@ -344,6 +345,12 @@ test("indexerSettingsTabs always offers the search pane", () => {
   assert.deepEqual(indexerSettingsTabs(), [
     "indexers",
     "search",
+    "seedingProfiles",
+  ]);
+  assert.deepEqual(indexerSettingsTabs(true), [
+    "indexers",
+    "search",
+    "clients",
     "seedingProfiles",
   ]);
   assert.equal(buildIndexerSettingsPath("indexers"), "/integrations/indexers");

@@ -54,6 +54,7 @@ mod jemalloc_configuration_tests {
 mod application_upgrade_evidence;
 mod application_upgrade_helper;
 mod arr_compat;
+mod nab_api;
 mod backup_routes;
 mod base_path;
 /// The exit status this binary uses to ask `scryer-tray` to relaunch the
@@ -1655,6 +1656,13 @@ async fn bootstrap_application(
             .with_archive_extractor_provider(dynamic_archive_extractor_plugin_provider.clone()),
         ));
 
+    let indexer_caps_cache = Arc::new(scryer_application::CapsRequestCache::default());
+    let indexer_caps_refresher = Arc::new(
+        DirectNabCapsSnapshotRefresher::new()
+            .with_indexer_stats_tracker(indexer_stats.clone())
+            .with_upstream_scheduler(upstream_scheduler.clone())
+            .with_managed_indexers(indexer_configs.clone(), indexer_errors.clone()),
+    );
     let indexer_client = MultiIndexerSearchClient::new(
         indexer_configs.clone(),
         indexer_stats.clone(),
@@ -1663,7 +1671,8 @@ async fn bootstrap_application(
     .with_proxy_config_repository(datastore.proxy_configs())
     .with_search_learning_repository(indexer_learning)
     .with_indexer_error_repository(indexer_errors.clone())
-    .with_upstream_scheduler(upstream_scheduler.clone());
+    .with_upstream_scheduler(upstream_scheduler.clone())
+    .with_caps_resolution(indexer_caps_cache.clone(), indexer_caps_refresher.clone());
 
     let indexer_client = Arc::new(indexer_client);
     let title_images_for_route: Arc<dyn TitleImageRepository> = datastore.title_images();
@@ -1813,11 +1822,13 @@ async fn bootstrap_application(
         .with_indexer_stats(indexer_stats.clone())
         .with_indexer_artifact_resolver(Some(indexer_artifact_resolver))
         .with_upstream_scheduler(upstream_scheduler.clone())
-        .with_indexer_caps_refresher(Arc::new(
-            DirectNabCapsSnapshotRefresher::new()
-                .with_indexer_stats_tracker(indexer_stats)
-                .with_upstream_scheduler(upstream_scheduler.clone()),
+        .with_indexer_caps_cache(indexer_caps_cache)
+        .with_indexer_client_repository(Arc::new(
+            scryer_infrastructure_acquisition::indexers::client_store::IndexerClientStore::new(
+                datastore.datastore(),
+            ),
         ))
+        .with_indexer_caps_refresher(indexer_caps_refresher)
         .with_plugin_http_trust_runtime(plugin_http_runtime)
         .with_plugin_provider(plugin_provider)
         .with_builtin_download_client_connection_tester(Arc::new(
@@ -2460,6 +2471,17 @@ async fn bootstrap_application(
         base_path: base_path.clone(),
         auth_runtime: auth_runtime.clone(),
     };
+    let nab_key = bootstrap_settings_store.current_encryption_key_base64().await?
+        .ok_or("indexer reference encryption key is unavailable after bootstrap")?;
+    let nab_route_state = nab_api::NabState {
+        app: app_use_case.clone(),
+        cipher: Arc::new(scryer_infrastructure_crypto::artifact_reference::ArtifactReferenceCipher::new(
+            &EncryptionKey::from_base64(&nab_key)?,
+        )),
+        base_path: base_path.prefix().to_owned(),
+        tls: ["SCRYER_TLS_CERT", "SCRYER_TLS_KEY"].iter()
+            .all(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty())),
+    };
     let ws_auth_state = auth_state.clone();
 
     // WebSocket route must be outside CompressionLayer — compression wraps the
@@ -2483,6 +2505,7 @@ async fn bootstrap_application(
         )
         .merge(oauth_router(oauth_route_state))
         .merge(arr_compat::router(auth_state.clone()))
+        .merge(nab_api::router(nab_route_state))
         .route("/oauth/authorize", get(ui_fallback))
         .route(
             "/graphql",

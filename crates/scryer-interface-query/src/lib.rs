@@ -546,6 +546,16 @@ fn from_acquisition_search_job_view(
 pub fn from_interactive_release_search_snapshot(
     snapshot: scryer_application::InteractiveReleaseSearchSnapshot,
 ) -> InteractiveReleaseSearchPayload {
+    let continuation = snapshot.raw_continuation();
+    let deadline_reached = snapshot.raw_page.as_ref().is_some_and(|page| page.deadline_reached);
+    let safe_limit = snapshot.limit.map_or(usize::MAX, |limit| limit as usize);
+    let results = snapshot.result_iter().take(safe_limit).cloned()
+        .map(|mut result| {
+            if snapshot.raw_page.is_some() && result.parsed_release_metadata.is_none() {
+                result.parsed_release_metadata = Some(scryer_application::parse_release_metadata(&result.title));
+            }
+            crate::mappers::from_search_result(result)
+        }).collect();
     let state = match snapshot.state {
         scryer_application::InteractiveReleaseSearchState::Running => {
             InteractiveReleaseSearchStateValue::Running
@@ -586,6 +596,10 @@ pub fn from_interactive_release_search_snapshot(
                 .elapsed_ms
                 .map(|elapsed| i32::try_from(elapsed).unwrap_or(i32::MAX)),
             failure_reason: indexer.failure_reason,
+            caps_source: indexer.caps.map(|caps| caps.source.code().into()),
+            caps_reason: indexer.caps.and_then(|caps| caps.reason).map(str::to_owned),
+            caps_retry_after_seconds: indexer.caps.and_then(|caps| caps.retry_after)
+                .map(|delay| delay.as_secs().min(i32::MAX as u64) as i32),
             rate_limited: indexer.rate_limited,
             skip_reason: indexer.skip_reason.map(|reason| {
                 use scryer_application::InteractiveIndexerSkipReason as Reason;
@@ -603,20 +617,16 @@ pub fn from_interactive_release_search_snapshot(
             skipped_until: indexer.skipped_until,
         })
         .collect();
-    // A title search's limit is already capped; a raw query lists everything.
-    let safe_limit = snapshot.limit.map_or(usize::MAX, |limit| limit as usize);
     InteractiveReleaseSearchPayload {
         id: snapshot.id.into(),
         state,
-        results: snapshot
-            .results
-            .into_iter()
-            .take(safe_limit)
-            .map(crate::mappers::from_search_result)
-            .collect(),
+        results,
         indexers,
         started_at: snapshot.started_at,
         completed_at: snapshot.completed_at,
+        continuation,
+        deadline_reached,
+        failure_code: snapshot.raw_failure_reason.map(str::to_owned),
     }
 }
 
@@ -845,6 +855,7 @@ pub struct QueryRoot(
     ActivityQueries,
     JobAndDownloadQueries,
     SettingsQueries,
+    scryer_interface_settings::IndexerClientQueries,
     SystemQueries,
     AcquisitionQueries,
     ExternalImportQueries,

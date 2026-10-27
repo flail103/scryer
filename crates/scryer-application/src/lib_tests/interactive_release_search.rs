@@ -92,6 +92,7 @@ impl ScriptedIndexerClient {
             grab_max: None,
             indexer_outcomes: outcome
                 .map(|outcome| crate::IndexerQueryOutcome {
+                    page: None,
                     indexer_id,
                     outcome,
                 })
@@ -234,13 +235,26 @@ fn bootstrap_search(
     bootstrap_with_search_settings_indexer_and_configs(settings, Arc::new(client), configs)
 }
 
-/// Poll until the job leaves `Running`, then return the final snapshot.
+/// A test consumer reads both scored title rows and shared raw-page rows via
+/// the application's iterator, just as the GraphQL projection does.
+#[derive(Debug)]
+struct CompletedSearch {
+    snapshot: InteractiveReleaseSearchSnapshot,
+    results: Vec<IndexerSearchResult>,
+}
+
+impl std::ops::Deref for CompletedSearch {
+    type Target = InteractiveReleaseSearchSnapshot;
+    fn deref(&self) -> &Self::Target { &self.snapshot }
+}
+
+/// Poll until the job leaves `Running`, then read the completed page.
 async fn await_completion(
     app: &AppUseCase,
     user: &User,
     job_id: &str,
-) -> InteractiveReleaseSearchSnapshot {
-    wait_for(
+) -> CompletedSearch {
+    let snapshot = wait_for(
         "the interactive release search to reach a terminal state",
         || async {
             let snapshot = app
@@ -251,7 +265,9 @@ async fn await_completion(
             (snapshot.state != InteractiveReleaseSearchState::Running).then_some(snapshot)
         },
     )
-    .await
+    .await;
+    let results = snapshot.result_iter().cloned().collect();
+    CompletedSearch { snapshot, results }
 }
 
 fn indexer_view<'a>(
@@ -371,6 +387,19 @@ async fn a_query_asks_indexers_left_out_of_title_interactive_searches() {
     let done = await_completion(&app, &user, &start.id).await;
     assert_eq!(done.results.len(), 1, "{done:?}");
     assert_eq!(client.calls().await.len(), 1);
+}
+
+#[tokio::test]
+async fn raw_query_preserves_the_all_limited_reason_in_the_ui_snapshot() {
+    let client = ScriptedIndexerClient::default().with_outcome("limited",
+        crate::IndexerSearchOutcome::Deferred { retry_after: Some(Duration::from_secs(30)) }).await;
+    let (app, user) = bootstrap_search(Arc::new(StoredSettingsRepo::default()), client,
+        vec![synthetic_direct_nab_indexer_config("limited", "newznab")]);
+    let start = app.start_interactive_release_search(&user, query_request("example")).await.unwrap();
+    let done = await_completion(&app, &user, &start.id).await;
+    assert_eq!(done.raw_failure_reason, Some(crate::error_reasons::raw_search::ALL_SOURCES_LIMITED));
+    assert!(done.results.is_empty());
+    assert!(indexer_view(&done, "limited").rate_limited);
 }
 
 #[tokio::test]
@@ -2179,9 +2208,9 @@ impl DownloadClient for ArtifactDownloadClient {
 
     async fn fetch_release_artifact(
         &self,
-        request: &DownloadClientAddRequest,
+        request: &IndexerArtifactResolutionRequest,
     ) -> AppResult<ResolvedDownloadArtifact> {
-        let url = request.source_hint.clone().unwrap_or_default();
+        let url = request.source_url.clone();
         self.artifacts
             .get(&url)
             .cloned()

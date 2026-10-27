@@ -560,8 +560,6 @@ async fn select_reusable_strategies(
 struct ManagedIndexerMetadata {
     enable_rss: Option<bool>,
     enable_automatic_search: Option<bool>,
-    #[serde(default)]
-    caps_snapshot: Option<IndexerCapsSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2207,6 +2205,7 @@ fn reusable_candidate_from_record(
             tmdb_id: normalized.response_tmdb_id,
             imdb_id: normalized.response_imdb_id,
             categories: normalized.response_categories,
+            ..Default::default()
         },
         guid: normalized.provider_ref,
         info_url: None,
@@ -4594,6 +4593,8 @@ pub struct MultiIndexerSearchClient {
     indexer_errors: Arc<dyn IndexerErrorRepository>,
     plugin_provider: Arc<dyn IndexerPluginProvider>,
     upstream_scheduler: Arc<dyn UpstreamScheduler>,
+    caps_cache: Arc<scryer_application::CapsRequestCache>,
+    caps_refresher: Option<Arc<dyn scryer_application::IndexerCapsSnapshotRefresher>>,
     rate_limiter: IndexerRateLimiter,
     backoff_tracker: IndexerBackoffTracker,
     rss_feed_cache: RssFeedCache,
@@ -4632,6 +4633,8 @@ impl MultiIndexerSearchClient {
             indexer_errors: Arc::new(NullIndexerErrorRepository),
             plugin_provider,
             upstream_scheduler: Arc::new(NullUpstreamScheduler),
+            caps_cache: Arc::new(scryer_application::CapsRequestCache::default()),
+            caps_refresher: None,
             rate_limiter: IndexerRateLimiter::new(),
             backoff_tracker: IndexerBackoffTracker::new(),
             rss_feed_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -4687,6 +4690,65 @@ impl MultiIndexerSearchClient {
                 SearchMode::Auto => SchedulerIntent::BackgroundAcquisition,
             }
         }
+    }
+
+    pub fn with_caps_resolution(
+        mut self,
+        cache: Arc<scryer_application::CapsRequestCache>,
+        refresher: Arc<dyn scryer_application::IndexerCapsSnapshotRefresher>,
+    ) -> Self {
+        self.caps_cache = cache;
+        self.caps_refresher = Some(refresher);
+        self
+    }
+
+    async fn resolved_caps_config(
+        &self,
+        config: &IndexerConfig,
+        proxies: &HashMap<String, Option<scryer_domain::ProxyConfig>>,
+    ) -> (IndexerConfig, scryer_application::IndexerCapsDiagnostic) {
+        let mut resolved_config = config.clone();
+        let Some(refresher) = self.caps_refresher.as_ref() else {
+            let diagnostic = scryer_application::cached_indexer_caps(config, Utc::now()).diagnostic();
+            return (resolved_config, diagnostic);
+        };
+        let proxy = config
+            .proxy_config_id
+            .as_ref()
+            .and_then(|id| proxies.get(id))
+            .and_then(Option::as_ref);
+        let accounting = scryer_application::IndexerAccountingContext::for_config(config);
+        let resolved = self
+            .caps_cache
+            .resolve(
+                config,
+                scryer_application::IndexerCapsRefreshContext {
+                    configs: self.indexer_configs.as_ref(),
+                    refresher: refresher.as_ref(),
+                    proxy,
+                    accounting: accounting.as_ref(),
+                    intent: SchedulerIntent::InteractiveSearch,
+                },
+            )
+            .await;
+        let diagnostic = resolved.diagnostic();
+        if let Some(error) = resolved.refresh_error {
+            tracing::debug!(indexer_id = %config.id, caps_source = ?resolved.source, %error,
+                "search proceeding with cached or permissive indexer capabilities");
+        }
+        if let Some(snapshot) = resolved.snapshot {
+            let mut snapshot =
+                serde_json::to_value(snapshot).expect("capabilities are JSON serializable");
+            if matches!(
+                resolved.source,
+                scryer_application::IndexerCapsSource::Fresh
+                    | scryer_application::IndexerCapsSource::Refreshed
+            ) {
+                snapshot["cache_fetched_at"] = serde_json::json!(Utc::now().to_rfc3339());
+            }
+            resolved_config.caps_snapshot_json = serde_json::to_string(&snapshot).ok();
+        }
+        (resolved_config, diagnostic)
     }
 
     fn scheduler_keys_for_indexer(config: &IndexerConfig) -> (HostKey, DestinationKey) {
@@ -5107,6 +5169,7 @@ impl MultiIndexerSearchClient {
         held.sort_unstable();
         held.into_iter()
             .map(|indexer_id| IndexerQueryOutcome {
+                page: None,
                 indexer_id,
                 outcome: IndexerSearchOutcome::Deferred { retry_after },
             })
@@ -6555,10 +6618,13 @@ impl IndexerClient for MultiIndexerSearchClient {
                 );
                 continue;
             }
-            // Without caps a managed child would be searched query-only and
-            // miss id searches it supports; leave it out of automatic searches
-            // until its caps arrive. The RSS sweep needs no caps.
-            if matches!(mode, SearchMode::Auto) && !is_rss_request && awaits_managed_caps(c) {
+            // Legacy embeddings without the host resolver retain the existing
+            // pending-caps guard. The shared resolver handles this in production.
+            if self.caps_refresher.is_none()
+                && matches!(mode, SearchMode::Auto)
+                && !is_rss_request
+                && awaits_managed_caps(c)
+            {
                 log_indexer_skip(
                     mode,
                     is_rss_request,
@@ -6692,6 +6758,27 @@ impl IndexerClient for MultiIndexerSearchClient {
             };
             proxy_configs_by_id.insert(proxy_config_id.to_string(), fetched);
         }
+        let resolved_configs =
+            futures_util::future::join_all(enabled.iter().map(|(config, _)| async {
+                if matches!(
+                    indexer_search_eligibility(
+                        indexer_routing.as_ref(),
+                        page_sink.indexer_restriction(),
+                        &config.id
+                    ),
+                    IndexerSearchEligibility::Eligible
+                ) {
+                    self.resolved_caps_config(config, &proxy_configs_by_id)
+                        .await.0
+                } else {
+                    (*config).clone()
+                }
+            }))
+            .await;
+        let enabled = resolved_configs
+            .iter()
+            .zip(enabled.iter().map(|(_, backed_off)| *backed_off))
+            .collect::<Vec<_>>();
         // Only a background pass reads learned facet emptiness; interactive
         // and operator searches always ask every indexer.
         let background_facet_context = learning_context.as_ref().filter(|context| {
@@ -6987,6 +7074,7 @@ impl IndexerClient for MultiIndexerSearchClient {
         let mut unsupported_outcomes = unsupported_indexer_ids
             .into_iter()
             .map(|indexer_id| IndexerQueryOutcome {
+                page: None,
                 indexer_id,
                 outcome: IndexerSearchOutcome::Unsupported,
             })
@@ -7155,6 +7243,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     facet, "skipping indexer: no supported IDs for facet and no freetext"
                 );
                 indexer_outcomes.push(IndexerQueryOutcome {
+                    page: None,
                     indexer_id: config.id.clone(),
                     outcome: IndexerSearchOutcome::Unsupported,
                 });
@@ -7226,6 +7315,7 @@ impl IndexerClient for MultiIndexerSearchClient {
             let is_rss_only = !caps.supports_any_search() && caps.rss;
             if is_rss_only && let Some(outcome) = scheduler_blocked_outcome {
                 indexer_outcomes.push(IndexerQueryOutcome {
+                    page: None,
                     indexer_id: config.id.clone(),
                     outcome,
                 });
@@ -7289,6 +7379,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                                 "skipping indexer: candidate deadline expired while queued"
                             );
                             indexer_outcomes.push(IndexerQueryOutcome {
+                                page: None,
                                 indexer_id: config.id.clone(),
                                 outcome: IndexerSearchOutcome::Skipped { retry_after: None },
                             });
@@ -8906,6 +8997,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 let task_indexer_outcomes = scheduler_blocked_outcome
                     .filter(|_| !all_strategies_complete)
                     .map(|outcome| IndexerQueryOutcome {
+                        page: None,
                         indexer_id: indexer_id.clone(),
                         outcome,
                     })
@@ -8965,6 +9057,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 "scheduler returned no decision for indexer search candidate"
             );
             indexer_outcomes.push(IndexerQueryOutcome {
+                page: None,
                 indexer_id: dispatch.config.id.clone(),
                 outcome: IndexerSearchOutcome::Skipped { retry_after: None },
             });
@@ -9077,6 +9170,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     }
                     if explicit_outcomes.is_empty() {
                         indexer_outcomes.push(IndexerQueryOutcome {
+                            page: None,
                             indexer_id: id,
                             outcome,
                         });
@@ -9097,6 +9191,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                             .is_some_and(|lease| lease.operation == SchedulerOperation::Rss);
                     if !was_fired {
                         indexer_outcomes.push(IndexerQueryOutcome {
+                            page: None,
                             indexer_id: id,
                             outcome: IndexerSearchOutcome::Skipped { retry_after: None },
                         });
@@ -9116,6 +9211,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                         rate_limit_signal_from_error(&err).and_then(|signal| signal.retry_after);
                     warn!(indexer = name.as_str(), error = %err, "indexer search failed");
                     indexer_outcomes.push(IndexerQueryOutcome {
+                        page: None,
                         indexer_id: id,
                         outcome: if retry_after.is_some() {
                             IndexerSearchOutcome::Deferred { retry_after }
@@ -9225,7 +9321,17 @@ impl IndexerClient for MultiIndexerSearchClient {
         request: RawTextSearchRequest,
         cancel_token: CancellationToken,
     ) -> AppResult<IndexerSearchResponse> {
-        let now = Utc::now();
+        if request.page.is_some()
+            && request
+                .indexer_ids
+                .as_ref()
+                .is_none_or(|ids| ids.len() != 1)
+        {
+            return Err(AppError::validation_refused(
+                scryer_application::error_reasons::catalog::RAW_SEARCH_PAGE_REQUIRES_SINGLE_INDEXER,
+                "A raw page read requires exactly one selected indexer",
+            ));
+        }
         let configs = self.indexer_configs.list(None).await?;
         let system_backoffs = self
             .indexer_configs
@@ -9236,7 +9342,6 @@ impl IndexerClient for MultiIndexerSearchClient {
             .iter()
             .filter(|config| {
                 config.is_enabled
-                    && config.disabled_until.is_none_or(|until| until <= now)
                     && request
                         .indexer_ids
                         .as_ref()
@@ -9274,29 +9379,83 @@ impl IndexerClient for MultiIndexerSearchClient {
             )
         }))
         .await;
-        let mut results = Vec::new();
-        let mut indexer_outcomes = Vec::new();
-        for (config, answer) in selected.iter().zip(answers) {
-            let (found, outcome) = answer?;
-            results.extend(found.into_iter().map(|mut result| {
-                result.indexer_id = Some(config.id.clone());
-                result
-            }));
-            indexer_outcomes.push(IndexerQueryOutcome {
-                indexer_id: config.id.clone(),
-                outcome,
-            });
-        }
-        Ok(IndexerSearchResponse {
+        let mut response = IndexerSearchResponse {
             next_cursor: None,
-            results,
+            results: Vec::new(),
             completion: IndexerSearchCompletion::Complete,
             api_current: None,
             api_max: None,
             grab_current: None,
             grab_max: None,
-            indexer_outcomes,
-        })
+            indexer_outcomes: Vec::new(),
+        };
+        for (config, answer) in selected.iter().zip(answers) {
+            let (source, outcome, caps) = answer?;
+            let mut page = source.as_ref().map(IndexerSearchResponse::page_metadata);
+            let completion = match outcome {
+                IndexerSearchOutcome::Complete { .. } | IndexerSearchOutcome::Unsupported => {
+                    IndexerSearchCompletion::Complete
+                }
+                IndexerSearchOutcome::Partial {
+                    reason,
+                    retry_after,
+                    ..
+                } => IndexerSearchCompletion::Partial {
+                    reason,
+                    retry_after,
+                },
+                IndexerSearchOutcome::Deferred { retry_after }
+                | IndexerSearchOutcome::Skipped { retry_after } => {
+                    IndexerSearchCompletion::Partial {
+                        reason: None,
+                        retry_after,
+                    }
+                }
+                IndexerSearchOutcome::BackedOff { .. } | IndexerSearchOutcome::Errored => {
+                    IndexerSearchCompletion::Partial {
+                        reason: Some(IndexerSearchIncompleteReason::UpstreamFailure),
+                        retry_after: None,
+                    }
+                }
+            };
+            if caps.is_some() {
+                page.get_or_insert_with(|| scryer_application::IndexerSearchPageMetadata {
+                    caps: None, completion, next_cursor: None,
+                    api_current: None, api_max: None, grab_current: None, grab_max: None,
+                }).caps = caps;
+            }
+            if !completion.is_complete() {
+                response.completion = if selected.len() == 1 {
+                    completion
+                } else {
+                    IndexerSearchCompletion::Partial {
+                        reason: Some(IndexerSearchIncompleteReason::FanoutBranchFailed),
+                        retry_after: None,
+                    }
+                };
+            }
+            if let Some(source) = source {
+                if selected.len() == 1 {
+                    response.next_cursor = source.next_cursor;
+                    response.api_current = source.api_current;
+                    response.api_max = source.api_max;
+                    response.grab_current = source.grab_current;
+                    response.grab_max = source.grab_max;
+                }
+                response
+                    .results
+                    .extend(source.results.into_iter().map(|mut result| {
+                        result.indexer_id = Some(config.id.clone());
+                        result
+                    }));
+            }
+            response.indexer_outcomes.push(IndexerQueryOutcome {
+                page,
+                indexer_id: config.id.clone(),
+                outcome,
+            });
+        }
+        Ok(response)
     }
 
     async fn prune_search_learning(&self, indexer_id: &str) -> AppResult<()> {
@@ -9405,9 +9564,12 @@ impl MultiIndexerSearchClient {
         proxy_configs_by_id: &HashMap<String, Option<scryer_domain::ProxyConfig>>,
         request: RawTextSearchRequest,
         cancel_token: &CancellationToken,
-    ) -> AppResult<(Vec<IndexerSearchResult>, IndexerSearchOutcome)> {
+    ) -> AppResult<(Option<IndexerSearchResponse>, IndexerSearchOutcome, Option<scryer_application::IndexerCapsDiagnostic>)> {
         let canceled = || AppError::canceled("indexer search canceled");
         let (id, name) = (config.id.as_str(), config.name.as_str());
+        if let Some(until) = config.disabled_until.filter(|until| *until > Utc::now()) {
+            return Ok((None, IndexerSearchOutcome::BackedOff { until: Some(until) }, None));
+        }
         if let Some(backoff) = persisted_backoff {
             self.backoff_tracker.seed_persisted(id, name, backoff).await;
         }
@@ -9420,20 +9582,31 @@ impl MultiIndexerSearchClient {
                 Some(until),
             );
             let outcome = IndexerSearchOutcome::BackedOff { until: Some(until) };
-            return Ok((Vec::new(), outcome));
+            return Ok((None, outcome, None));
         }
         let caps = self
             .plugin_provider
             .capabilities_for_provider(&config.provider_type);
-        if caps.query_param.is_none() {
-            return Ok((Vec::new(), IndexerSearchOutcome::Unsupported));
+        let exact_nab = request.nab.is_some() || request.recent_paging;
+        if (exact_nab && !caps.raw_nab_search)
+            || (!exact_nab && caps.query_param.is_none())
+            || (request.page.is_some()
+                && ((!exact_nab && request.query.trim().is_empty())
+                    || !caps
+                        .limits
+                        .as_ref()
+                        .is_some_and(|limits| limits.paged_search)))
+        {
+            return Ok((None, IndexerSearchOutcome::Unsupported, None));
         }
+        let (resolved_config, caps_diagnostic) = self.resolved_caps_config(config, proxy_configs_by_id).await;
+        let config = &resolved_config;
         let (client, _, search_timeout) =
             match Self::client_from_config(config, &self.plugin_provider, proxy_configs_by_id) {
                 Ok(client) => client,
                 Err(error) => {
                     warn!(indexer = name, %error, "raw text search: indexer unavailable");
-                    return Ok((Vec::new(), IndexerSearchOutcome::Errored));
+                    return Ok((None, IndexerSearchOutcome::Errored, Some(caps_diagnostic)));
                 }
             };
         let pacing = IndexerPacing::resolve(config, SchedulerIntent::InteractiveSearch);
@@ -9445,7 +9618,7 @@ impl MultiIndexerSearchClient {
                     reason: Some(IndexerSearchIncompleteReason::QueryBudgetExhausted),
                     retry_after: Some(wait),
                 };
-                return Ok((Vec::new(), outcome));
+                return Ok((None, outcome, Some(caps_diagnostic)));
             }
             Err(_) => return Err(canceled()),
         }
@@ -9480,7 +9653,18 @@ impl MultiIndexerSearchClient {
                     response.grab_max,
                 );
                 let empty = response.results.is_empty();
-                (response.results, IndexerSearchOutcome::Complete { empty })
+                let outcome = match response.completion {
+                    IndexerSearchCompletion::Complete => IndexerSearchOutcome::Complete { empty },
+                    IndexerSearchCompletion::Partial {
+                        reason,
+                        retry_after,
+                    } => IndexerSearchOutcome::Partial {
+                        empty,
+                        reason,
+                        retry_after,
+                    },
+                };
+                (Some(response), outcome)
             }
             Err(error) if error.is_canceled() => return Err(error),
             Err(error) => {
@@ -9503,7 +9687,7 @@ impl MultiIndexerSearchClient {
                     },
                     None => IndexerSearchOutcome::Errored,
                 };
-                (Vec::new(), outcome)
+                (None, outcome)
             }
         };
         health
@@ -9515,7 +9699,7 @@ impl MultiIndexerSearchClient {
                 persisted_backoff.is_some(),
             )
             .await;
-        Ok(answer)
+        Ok((answer.0, answer.1, Some(caps_diagnostic)))
     }
 }
 
@@ -9783,17 +9967,7 @@ fn awaits_managed_caps(config: &IndexerConfig) -> bool {
 }
 
 fn stored_caps_snapshot(config: &IndexerConfig) -> Option<IndexerCapsSnapshot> {
-    if let Some(raw) = config.caps_snapshot_json.as_deref()
-        && let Ok(snapshot) = serde_json::from_str::<IndexerCapsSnapshot>(raw)
-    {
-        return Some(snapshot);
-    }
-
-    config
-        .managed_metadata_json
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<ManagedIndexerMetadata>(raw).ok())
-        .and_then(|metadata| metadata.caps_snapshot)
+    scryer_application::cached_indexer_caps(config, Utc::now()).snapshot
 }
 
 fn supported_ids_from_caps_snapshot(
@@ -12005,6 +12179,8 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct RecordedCall {
         query: String,
+        nab: Option<scryer_plugin_sdk::PluginNabSearch>,
+        recent_paging: bool,
         ids: HashMap<String, String>,
         category: Option<String>,
         facet: Option<String>,
@@ -12058,6 +12234,8 @@ mod tests {
         ) -> AppResult<IndexerSearchResponse> {
             let call = RecordedCall {
                 query,
+                nab: None,
+                recent_paging: false,
                 ids,
                 category,
                 facet,
@@ -12082,6 +12260,8 @@ mod tests {
         ) -> AppResult<IndexerSearchResponse> {
             let call = RecordedCall {
                 query: request.query,
+                nab: None,
+                recent_paging: false,
                 ids: request.ids,
                 category: request.category,
                 facet: request.facet,
@@ -12106,6 +12286,8 @@ mod tests {
         ) -> AppResult<IndexerSearchResponse> {
             self.answer(RecordedCall {
                 query: request.query,
+                nab: request.nab,
+                recent_paging: request.recent_paging,
                 ids: HashMap::new(),
                 category: None,
                 facet: None,
@@ -12115,8 +12297,8 @@ mod tests {
                 absolute_episode: None,
                 rss_catch_up: None,
                 limit: request.limit,
-                page_cursor: None,
-                page_budget: None,
+                page_cursor: request.page.as_ref().and_then(|page| page.cursor.clone()),
+                page_budget: request.page.as_ref().map(|_| 1),
             })
         }
     }
@@ -14401,6 +14583,7 @@ mod tests {
         assert_eq!(
             response.indexer_outcomes,
             vec![IndexerQueryOutcome {
+                page: None,
                 indexer_id: "idx-anime-only".to_string(),
                 outcome: IndexerSearchOutcome::Unsupported,
             }]
@@ -18650,11 +18833,349 @@ mod tests {
                 categories: categories.iter().map(|value| value.to_string()).collect(),
                 indexer_ids: None,
                 limit: Some(25),
+                page: None,
+                ..Default::default()
             },
             CancellationToken::new(),
         )
         .await
         .expect("raw search should succeed")
+    }
+
+    #[tokio::test]
+    async fn raw_search_page_requires_one_explicit_source() {
+        let (multi, calls) = raw_search_client(mock_indexer_config(), movie_caps(), &[]);
+        for indexer_ids in [
+            None,
+            Some(HashSet::new()),
+            Some(HashSet::from(["idx1".into(), "idx2".into()])),
+        ] {
+            let error = IndexerClient::search_raw_text(
+                &multi,
+                RawTextSearchRequest {
+                    query: "Example".into(),
+                    indexer_ids,
+                    page: Some(Default::default()),
+                    ..Default::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .expect_err("a cursor cannot be shared across sources");
+            assert_eq!(
+                error.validation_reason(),
+                Some(scryer_application::error_reasons::catalog::RAW_SEARCH_PAGE_REQUIRES_SINGLE_INDEXER)
+            );
+        }
+        assert!(calls.lock().expect("calls").is_empty());
+    }
+
+    #[tokio::test]
+    async fn raw_nab_requests_preserve_typed_parameters_and_explicit_recent_mode() {
+        let mut caps = movie_caps();
+        caps.raw_nab_search = true;
+        caps.limits = Some(scryer_domain::IndexerLimitCapabilities {
+            paged_search: true,
+            ..Default::default()
+        });
+        let (multi, calls) = scripted_search_client(caps, |_| response_with_titles(&["Raw item"]));
+        for operation in [
+            scryer_plugin_sdk::PluginNabOperation::Movie,
+            scryer_plugin_sdk::PluginNabOperation::Tv,
+            scryer_plugin_sdk::PluginNabOperation::Music,
+            scryer_plugin_sdk::PluginNabOperation::Book,
+        ] {
+            let nab = scryer_plugin_sdk::PluginNabSearch {
+                operation,
+                parameters: std::collections::BTreeMap::from([(
+                    "custom".into(),
+                    "exact & value".into(),
+                )]),
+            };
+            IndexerClient::search_raw_text(
+                &multi,
+                RawTextSearchRequest {
+                    nab: Some(nab.clone()),
+                    indexer_ids: Some(HashSet::from([mock_indexer_config().id])),
+                    categories: vec!["6000".into(), "100001".into()],
+                    page: Some(Default::default()),
+                    ..Default::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let calls = calls.lock().unwrap();
+            let call = calls.last().unwrap();
+            assert_eq!(call.nab, Some(nab));
+            assert!(call.query.is_empty(), "no manufactured text fallback");
+            assert_eq!(call.categories, ["6000", "100001"]);
+            assert!(
+                call.ids.is_empty(),
+                "typed parameters bypass acquisition ID strategy"
+            );
+        }
+        IndexerClient::search_raw_text(
+            &multi,
+            RawTextSearchRequest {
+                recent_paging: true,
+                indexer_ids: Some(HashSet::from([mock_indexer_config().id])),
+                page: Some(scryer_application::RawTextSearchPage {
+                    cursor: Some("recent-next".into()),
+                }),
+                ..Default::default()
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        let call = calls.last().unwrap();
+        assert!(call.recent_paging);
+        assert_eq!(call.page_cursor.as_deref(), Some("recent-next"));
+        assert!(call.rss_catch_up.is_none());
+    }
+
+    #[tokio::test]
+    async fn raw_nab_requests_never_reach_legacy_adapters() {
+        let (multi, calls) = raw_search_client(mock_indexer_config(), movie_caps(), &[]);
+        for request in [
+            RawTextSearchRequest {
+                recent_paging: true,
+                ..Default::default()
+            },
+            RawTextSearchRequest {
+                nab: Some(scryer_plugin_sdk::PluginNabSearch {
+                    operation: scryer_plugin_sdk::PluginNabOperation::Movie,
+                    parameters: Default::default(),
+                }),
+                ..Default::default()
+            },
+        ] {
+            let response =
+                IndexerClient::search_raw_text(&multi, request, CancellationToken::new())
+                    .await
+                    .unwrap();
+            assert_eq!(
+                response.indexer_outcomes[0].outcome,
+                IndexerSearchOutcome::Unsupported
+            );
+        }
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn raw_search_page_forwards_the_cursor_without_replanning() {
+        let mut caps = movie_caps();
+        caps.limits = Some(scryer_domain::IndexerLimitCapabilities {
+            paged_search: true,
+            ..Default::default()
+        });
+        let (multi, calls) = scripted_search_client(caps, |_| {
+            let mut response = response_with_titles(&["A", "B", "C"])?;
+            response.next_cursor = Some("opaque-next".into());
+            Ok(response)
+        });
+        for cursor in [None, Some("opaque-current".to_string())] {
+            let response = IndexerClient::search_raw_text(
+                &multi,
+                RawTextSearchRequest {
+                    query: "exact query".into(),
+                    categories: vec!["custom-category".into()],
+                    indexer_ids: Some(HashSet::from([mock_indexer_config().id])),
+                    limit: Some(2),
+                    page: Some(scryer_application::RawTextSearchPage {
+                        cursor: cursor.clone(),
+                    }),
+                    ..Default::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .expect("raw page");
+            assert_eq!(response.results.len(), 3, "retain the full page tail");
+            assert_eq!(response.next_cursor.as_deref(), Some("opaque-next"));
+            let calls = calls.lock().expect("calls");
+            let call = calls.last().unwrap();
+            assert_eq!(call.query, "exact query");
+            assert_eq!(call.categories, vec!["custom-category"]);
+            assert_eq!(call.limit, Some(2));
+            assert_eq!(call.page_cursor, cursor);
+            assert_eq!(call.page_budget, Some(1));
+            assert!(call.ids.is_empty());
+            assert!(call.rss_catch_up.is_none());
+        }
+        assert_eq!(calls.lock().expect("calls").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn raw_search_page_does_not_call_an_unpaged_source() {
+        let (multi, calls) = raw_search_client(mock_indexer_config(), movie_caps(), &[]);
+        let response = IndexerClient::search_raw_text(
+            &multi,
+            RawTextSearchRequest {
+                query: "Example".into(),
+                indexer_ids: Some(HashSet::from([mock_indexer_config().id])),
+                page: Some(Default::default()),
+                ..Default::default()
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("unsupported source is skipped");
+        assert!(calls.lock().expect("calls").is_empty());
+        assert_eq!(
+            response.indexer_outcomes[0].outcome,
+            IndexerSearchOutcome::Unsupported
+        );
+        assert!(response.indexer_outcomes[0].page.is_none());
+    }
+
+    #[tokio::test]
+    async fn raw_search_preserves_source_page_completion_cursor_and_limits() {
+        for completion in [
+            IndexerSearchCompletion::Complete,
+            IndexerSearchCompletion::Partial {
+                reason: None,
+                retry_after: None,
+            },
+            IndexerSearchCompletion::Partial {
+                reason: Some(IndexerSearchIncompleteReason::RateLimited),
+                retry_after: Some(std::time::Duration::from_secs(90)),
+            },
+        ] {
+            for empty in [false, true] {
+                let (multi, calls) = scripted_search_client(movie_caps(), move |_| {
+                    let mut response =
+                        response_with_titles(if empty { &[] } else { &["Raw.Result"] })?;
+                    response.completion = completion;
+                    response.next_cursor = Some("opaque-next-page".into());
+                    response.api_current = Some(7);
+                    response.api_max = Some(300);
+                    response.grab_current = Some(2);
+                    response.grab_max = Some(40);
+                    Ok(response)
+                });
+                let response = run_raw_search(&multi, "raw", &[]).await;
+                assert_eq!(calls.lock().expect("calls").len(), 1);
+                assert_eq!(response.completion, completion);
+                assert_eq!(response.results.is_empty(), empty);
+                assert_eq!(response.next_cursor.as_deref(), Some("opaque-next-page"));
+                assert_eq!(response.api_current, Some(7));
+                assert_eq!(response.api_max, Some(300));
+                assert_eq!(response.grab_current, Some(2));
+                assert_eq!(response.grab_max, Some(40));
+                let source = &response.indexer_outcomes[0];
+                assert_eq!(source.indexer_id, "idx-1");
+                assert_eq!(source.page, Some(response.page_metadata()));
+                assert_eq!(
+                    source.outcome,
+                    match completion {
+                        IndexerSearchCompletion::Complete =>
+                            IndexerSearchOutcome::Complete { empty },
+                        IndexerSearchCompletion::Partial {
+                            reason,
+                            retry_after,
+                        } => {
+                            IndexerSearchOutcome::Partial {
+                                empty,
+                                reason,
+                                retry_after,
+                            }
+                        }
+                    }
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_search_keeps_each_sources_cursor_and_quota_separate() {
+        let calls = StdArc::new(StdMutex::new(Vec::new()));
+        let sequence = AtomicUsize::new(0);
+        let client = Arc::new(ScriptedIndexerClient {
+            calls,
+            responder: StdArc::new(move |_| {
+                let ordinal = sequence.fetch_add(1, Ordering::SeqCst);
+                let mut response = response_with_titles(&[&format!("Result-{ordinal}")])?;
+                response.next_cursor = Some(format!("cursor-{ordinal}"));
+                response.api_current = Some(ordinal as u32 + 1);
+                response.api_max = Some(100 + ordinal as u32);
+                response.grab_current = Some(10 + ordinal as u32);
+                response.grab_max = Some(20 + ordinal as u32);
+                if ordinal == 1 {
+                    response.completion = IndexerSearchCompletion::Partial {
+                        reason: Some(IndexerSearchIncompleteReason::MalformedContent),
+                        retry_after: None,
+                    };
+                }
+                Ok(response)
+            }),
+        });
+        let first = mock_indexer_config();
+        let mut second = first.clone();
+        second.id = "idx-2".into();
+        second.base_url = "https://other-indexer.invalid".into();
+        let multi = MultiIndexerSearchClient::new(
+            Arc::new(MockIndexerConfigRepository {
+                configs: vec![first, second],
+            }),
+            Arc::new(MockIndexerStatsTracker),
+            Arc::new(ScriptedIndexerPluginProvider {
+                client,
+                caps: movie_caps(),
+            }),
+        );
+        let response = run_raw_search(&multi, "raw", &[]).await;
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.indexer_outcomes.len(), 2);
+        assert_eq!(
+            response.completion,
+            IndexerSearchCompletion::Partial {
+                reason: Some(IndexerSearchIncompleteReason::FanoutBranchFailed),
+                retry_after: None,
+            }
+        );
+        assert_eq!(response.next_cursor, None);
+        assert_eq!((response.api_current, response.api_max), (None, None));
+        assert_eq!((response.grab_current, response.grab_max), (None, None));
+        for source in &response.indexer_outcomes {
+            let result = response
+                .results
+                .iter()
+                .find(|result| result.indexer_id.as_deref() == Some(source.indexer_id.as_str()))
+                .expect("result belongs to a source");
+            let ordinal = if result.title == "Result-0" { 0 } else { 1 };
+            let page = source.page.as_ref().expect("source page metadata");
+            assert_eq!(
+                page.next_cursor.as_deref(),
+                Some(format!("cursor-{ordinal}").as_str())
+            );
+            assert_eq!(
+                (page.api_current, page.api_max),
+                (Some(ordinal + 1), Some(ordinal + 100))
+            );
+            assert_eq!(
+                (page.grab_current, page.grab_max),
+                (Some(ordinal + 10), Some(ordinal + 20))
+            );
+            assert_eq!(page.completion.is_complete(), ordinal == 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_search_does_not_report_a_failed_source_as_complete() {
+        let (multi, _) = scripted_search_client(movie_caps(), |_| {
+            Err(AppError::Repository("synthetic upstream failure".into()))
+        });
+        let response = run_raw_search(&multi, "raw", &[]).await;
+        assert!(response.results.is_empty());
+        assert!(!response.completion.is_complete());
+        assert_eq!(
+            response.indexer_outcomes[0].outcome,
+            IndexerSearchOutcome::Errored
+        );
+        assert_eq!(response.indexer_outcomes[0].page, None);
     }
 
     #[tokio::test]
@@ -18693,6 +19214,8 @@ mod tests {
                     recorded,
                     vec![RecordedCall {
                         query: "Sample Movie 2021".into(),
+                        nab: None,
+                        recent_paging: false,
                         ids: HashMap::new(),
                         category: None,
                         facet: None,
@@ -18782,10 +19305,87 @@ mod tests {
         assert_eq!(
             response.indexer_outcomes,
             vec![IndexerQueryOutcome {
+                page: None,
                 indexer_id: "idx-1".to_string(),
                 outcome: IndexerSearchOutcome::Unsupported,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn raw_search_retains_caps_diagnostics_without_changing_completion() {
+        struct DeferredCaps;
+        #[async_trait]
+        impl scryer_application::IndexerCapsSnapshotRefresher for DeferredCaps {
+            async fn fetch_for_config(&self, _: &IndexerConfig, _: Option<&scryer_domain::ProxyConfig>)
+                -> AppResult<Option<scryer_domain::IndexerCapsSnapshot>> {
+                Err(AppError::TemporaryUnavailable {
+                    reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_BUSY),
+                    message: "Discovery deferred".into(),
+                    retry_after: Some(std::time::Duration::from_secs(31)),
+                    rate_limit_cooldown: scryer_application::RateLimitCooldownAction::None,
+                })
+            }
+        }
+        let mut config = mock_indexer_config();
+        config.provider_type = "newznab".into();
+        config.caps_snapshot_json = Some(serde_json::to_string(&scryer_domain::IndexerCapsSnapshot::default()).unwrap());
+        let (multi, calls) = raw_search_client(config, movie_caps(), &["Software.Release"]);
+        let multi = multi.with_caps_resolution(Arc::new(scryer_application::CapsRequestCache::default()), Arc::new(DeferredCaps));
+        let response = run_raw_search(&multi, "Software", &[]).await;
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert!(response.completion.is_complete());
+        let page = response.indexer_outcomes[0].page.as_ref().unwrap();
+        assert!(page.completion.is_complete());
+        assert_eq!(page.caps, Some(scryer_application::IndexerCapsDiagnostic {
+            source: scryer_application::IndexerCapsSource::Stale,
+            reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_BUSY),
+            retry_after: Some(std::time::Duration::from_secs(31)),
+        }));
+    }
+
+    #[tokio::test]
+    async fn raw_search_reports_config_cooldown_without_claiming_empty_success() {
+        let mut config = mock_indexer_config();
+        let until = Utc::now() + chrono::Duration::hours(1);
+        config.disabled_until = Some(until);
+        let (multi, calls) = raw_search_client(config, movie_caps(), &[]);
+        let response = run_raw_search(&multi, "Software", &[]).await;
+        assert!(calls.lock().unwrap().is_empty());
+        assert!(!response.completion.is_complete());
+        assert_eq!(response.indexer_outcomes[0].outcome, IndexerSearchOutcome::BackedOff { until: Some(until) });
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_search_admission_wait_is_outside_the_source_operation_timeout() {
+        use std::future::Future;
+        let (multi, calls) = raw_search_client(mock_indexer_config(), movie_caps(), &[]);
+        assert_eq!(multi.interactive_search_limit.available_permits(), 24);
+        let occupied = multi.interactive_search_limit.clone().try_acquire_many_owned(24).unwrap();
+        let read = run_raw_search(&multi, "Queued Source", &[]);
+        tokio::pin!(read);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(read.as_mut().poll(&mut context).is_pending());
+        assert!(calls.lock().unwrap().is_empty());
+        tokio::time::advance(std::time::Duration::from_secs(121)).await;
+        assert!(read.as_mut().poll(&mut context).is_pending());
+        assert!(calls.lock().unwrap().is_empty());
+        drop(occupied);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(10), read).await.unwrap();
+        assert!(response.completion.is_complete());
+        assert_eq!(calls.lock().unwrap().len(), 1);
+
+        let occupied = multi.interactive_search_limit.clone().try_acquire_many_owned(24).unwrap();
+        let cancel = CancellationToken::new();
+        let read = IndexerClient::search_raw_text(&multi, RawTextSearchRequest {
+            query: "Cancelled Queue".into(), ..Default::default()
+        }, cancel.clone());
+        tokio::pin!(read);
+        assert!(read.as_mut().poll(&mut context).is_pending());
+        cancel.cancel();
+        assert!(tokio::time::timeout(std::time::Duration::from_secs(10), read).await.unwrap().unwrap_err().is_canceled());
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        drop(occupied);
     }
 
     #[tokio::test]
@@ -18834,13 +19434,14 @@ mod tests {
         assert_eq!(
             response.indexer_outcomes,
             vec![IndexerQueryOutcome {
+                page: None,
                 indexer_id: "idx-1".to_string(),
                 outcome: IndexerSearchOutcome::BackedOff {
                     until: Some(backoff.disabled_until),
                 },
             }]
         );
-        assert!(response.completion.is_complete());
+        assert!(!response.completion.is_complete());
 
         // Other searches keep leaving a backed-off indexer out silently.
         let faceted = multi
@@ -22725,6 +23326,8 @@ mod tests {
         ) -> AppResult<IndexerSearchResponse> {
             let call = RecordedCall {
                 query: request.query.clone(),
+                nab: None,
+                recent_paging: false,
                 ids: request.ids.clone(),
                 category: request.category.clone(),
                 facet: request.facet.clone(),

@@ -9,6 +9,7 @@ import type { Client } from "urql";
 import type { Release } from "@/lib/types";
 import {
   cancelInteractiveReleaseSearchMutation,
+  continueInteractiveReleaseSearchMutation,
   startInteractiveReleaseSearchMutation,
 } from "./mutations";
 import { interactiveReleaseSearchQuery } from "./queries";
@@ -34,6 +35,10 @@ export type InteractiveSearchIndexerProgress = {
   skipReason?: InteractiveSearchSkipReason | null;
   /** When a skip that lifts on its own ends, if known. */
   skippedUntil?: string | null;
+  /** Host capability provenance; does not change the source's search outcome. */
+  capsSource?: string | null;
+  capsReason?: string | null;
+  capsRetryAfterSeconds?: number | null;
 };
 
 export type InteractiveSearchSkipReason =
@@ -54,6 +59,9 @@ export type InteractiveSearchProgress = {
   state: "RUNNING" | "COMPLETED" | "CANCELLED";
   startedAt?: string;
   completedAt?: string | null;
+  continuation?: string | null;
+  deadlineReached?: boolean;
+  failureCode?: string | null;
 };
 
 export {
@@ -68,10 +76,13 @@ type InteractiveReleaseSearchJobPayload = {
   indexers: InteractiveSearchIndexerProgress[] | null;
   startedAt?: string;
   completedAt?: string | null;
+  continuation?: string | null;
+  deadlineReached?: boolean;
+  failureCode?: string | null;
 };
 
 const POLL_INTERVAL_MS = 1_000;
-// Defensive client-side stop; the server enforces its own 55s job deadline.
+// Raw pages answer within 75 seconds; this leaves room for the final poll.
 const CLIENT_DEADLINE_MS = 90_000;
 
 function waitForNextPoll(signal?: AbortSignal): Promise<void> {
@@ -95,6 +106,7 @@ export async function runIterativeReleaseSearch(
   input: InteractiveReleaseSearchInput,
   options: {
     signal?: AbortSignal;
+    continuation?: string;
     onUpdate?: (snapshot: InteractiveSearchProgress) => void;
   } = {},
 ): Promise<Release[]> {
@@ -124,6 +136,9 @@ export async function runIterativeReleaseSearch(
       state: job.state,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
+      continuation: job.continuation,
+      deadlineReached: job.deadlineReached,
+      failureCode: job.failureCode,
     });
   };
 
@@ -134,10 +149,14 @@ export async function runIterativeReleaseSearch(
   let job: InteractiveReleaseSearchJobPayload | undefined;
   try {
     const { data, error } = await client
-      .mutation(startInteractiveReleaseSearchMutation, { input }, fetchOptions)
+      .mutation(
+        options.continuation ? continueInteractiveReleaseSearchMutation : startInteractiveReleaseSearchMutation,
+        options.continuation ? { continuation: options.continuation, aggregatePageSize: input.aggregatePageSize } : { input },
+        fetchOptions,
+      )
       .toPromise();
     if (error) throw error;
-    job = data?.startInteractiveReleaseSearch as
+    job = (options.continuation ? data?.continueInteractiveReleaseSearch : data?.startInteractiveReleaseSearch) as
       | InteractiveReleaseSearchJobPayload
       | undefined;
   } catch (startError) {

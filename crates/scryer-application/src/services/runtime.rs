@@ -1156,6 +1156,8 @@ pub struct AppRuntimeAcquisitionState {
             >,
         >,
     >,
+    pub(crate) raw_search_budget:
+        Arc<crate::catalog::interactive_release_search::memory::RawSearchBudget>,
     /// Landed bars the background cutoff pass already derived, keyed by every
     /// input of the derivation. See [`crate::quality::landed_bar_memo`].
     pub(crate) landed_bar_memo: Arc<crate::quality::landed_bar_memo::LandedBarMemo>,
@@ -2668,6 +2670,7 @@ impl AppRuntimeState {
                 download_client_category_admission: DownloadClientCategorySnapshotStore::default(),
                 acquisition_search_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
                 interactive_release_searches: Arc::new(Mutex::new(HashMap::new())),
+                raw_search_budget: Arc::default(),
                 landed_bar_memo: Arc::default(),
             },
             imports: AppRuntimeImportState {

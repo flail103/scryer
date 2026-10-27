@@ -10,8 +10,9 @@ const require = createRequire(import.meta.url);
 type QueryResult = { data?: { instanceFeatures: Partial<InstanceFeatures> }; error?: Error };
 type ProviderValue = { instanceFeatures: InstanceFeatures; instanceFeaturesLoaded: boolean };
 
-test("a failed re-read keeps the last successful switches", async (t) => {
+test("feature refresh preserves gated forms for the same session identity and resets on account changes", async (t) => {
   const browser = new EventTarget();
+  let token: string | null = "operator:initial";
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   Object.defineProperty(globalThis, "window", { configurable: true, value: browser });
   const restoreWindow = () => {
@@ -80,7 +81,8 @@ test("a failed re-read keeps the last successful switches", async (t) => {
       useClient: () => client,
     },
     "@/lib/graphql/queries": { instanceFeaturesQuery: "instanceFeatures" },
-    "@/lib/hooks/use-auth": { AUTH_SESSION_CHANGED_EVENT: "auth-changed", getAuthToken: () => "token" },
+    "@/lib/hooks/use-auth": { AUTH_SESSION_CHANGED_EVENT: "auth-changed", getAuthToken: () => token },
+    "@/lib/utils/jwt": { decodeJwtPayload: (value: string) => ({ iss: "scryer", sub: value.split(":")[0] }) },
     "@/lib/runtime-config": { getRuntimeBasePath: () => "/" },
     "@/lib/utils/scheduling": { scheduleAfterFirstPaint: (callback: () => void) => { callback(); return () => {}; } },
   };
@@ -125,10 +127,27 @@ test("a failed re-read keeps the last successful switches", async (t) => {
   assert.equal(value.instanceFeatures.experimentalFeaturesEnabled, true, "a failed re-read must not hide switched surfaces");
   assert.equal(value.instanceFeaturesLoaded, true);
 
+  token = "operator:mfa-step-up";
+  browser.dispatchEvent(new Event("auth-changed"));
+  value = render();
+  assert.equal(value.instanceFeatures.experimentalFeaturesEnabled, true, "MFA must not unmount the pending key form");
+  assert.equal(value.instanceFeaturesLoaded, true);
+  assert.equal(pending.length, 1, "the refreshed session still revalidates instance switches");
+  await settle({ data: { instanceFeatures: { experimentalFeaturesEnabled: true } } });
+
+  token = "member:login";
   browser.dispatchEvent(new Event("auth-changed"));
   value = render();
   assert.equal(value.instanceFeatures.experimentalFeaturesEnabled, false, "a new session starts from the defaults");
   assert.equal(value.instanceFeaturesLoaded, false);
   await settle({ data: { instanceFeatures: { experimentalFeaturesEnabled: true } } });
   assert.equal(render().instanceFeatures.experimentalFeaturesEnabled, true);
+
+  token = null;
+  Object.assign(browser, { location: { pathname: "/login" } });
+  browser.dispatchEvent(new Event("auth-changed"));
+  value = render();
+  assert.equal(value.instanceFeatures.experimentalFeaturesEnabled, false, "logout restores the defaults");
+  assert.equal(value.instanceFeaturesLoaded, false);
+  assert.equal(pending.length, 0, "logout does not issue an unauthenticated feature query");
 });

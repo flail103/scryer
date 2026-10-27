@@ -47,6 +47,7 @@ pub(super) fn restore_announcement(
         tmdb_id: id("tmdb_id"),
         imdb_id: id("imdb_id"),
         categories: vec![],
+        ..Default::default()
     };
     extra.insert("external_announcement".into(), announcement);
     attributes

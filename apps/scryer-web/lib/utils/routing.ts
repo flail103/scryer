@@ -197,11 +197,13 @@ const SYSTEM_SETTINGS_SECTION_PATH: Partial<Record<SettingsSection, string>> = {
 export const INDEXER_TAB_PATH: Record<IndexerSettingsTab, string> = {
   indexers: "",
   search: "search",
+  clients: "clients",
   seedingProfiles: "seeding-profiles",
 };
 
 const INDEXER_TAB_BY_SEGMENT: Record<string, IndexerSettingsTab> = {
   search: "search",
+  clients: "clients",
   "seeding-profiles": "seedingProfiles",
   seedingprofiles: "seedingProfiles",
 };
@@ -229,10 +231,11 @@ export function indexerSettingsTabFromPath(pathname: string): IndexerSettingsTab
 
 /// Which panes the Indexers page offers on this instance.
 ///
-/// The panes of the Indexers page. Indexer search is in beta and always
-/// present; the page header says so.
-export function indexerSettingsTabs(): IndexerSettingsTab[] {
-  return ["indexers", "search", "seedingProfiles"];
+/// Indexer search stays available; client management requires the instance opt-in.
+export function indexerSettingsTabs(experimentalFeaturesEnabled = false): IndexerSettingsTab[] {
+  return experimentalFeaturesEnabled
+    ? ["indexers", "search", "clients", "seedingProfiles"]
+    : ["indexers", "search", "seedingProfiles"];
 }
 
 export const CONTENT_SECTION_PATH: Record<ContentSettingsSection, string> = {

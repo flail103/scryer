@@ -3197,6 +3197,7 @@ mod structured_dispatch_query_tests {
 
     fn outcome(indexer_id: &str, outcome: IndexerSearchOutcome) -> IndexerQueryOutcome {
         IndexerQueryOutcome {
+            page: None,
             indexer_id: indexer_id.to_string(),
             outcome,
         }
