@@ -92,7 +92,7 @@ import {
 } from "@/lib/utils/dashboard";
 import { selectPosterVariantUrl } from "@/lib/utils/poster-images";
 import type { DashboardPanelState, DashboardPanelStates } from "@/lib/utils/dashboard-refresh";
-import type { DashboardTier } from "@/lib/utils/dashboard-layout";
+import type { DashboardBreakpoint, DashboardTier } from "@/lib/utils/dashboard-layout";
 import { buildOverviewDetailPath, buildViewPath } from "@/lib/utils/routing";
 import { episodeTitleOrTba } from "@/lib/utils/episode-title";
 
@@ -400,10 +400,24 @@ const STATS_COLUMNS: Record<DashboardTier, string> = {
 };
 
 /**
+ * The full-width panel at SM (701 to 1240px) keeps the old dashboard's extra
+ * step: two tiles across, then all three from a 1081px viewport.
+ */
+const SM_FULL_WIDTH_STATS_COLUMNS = "grid-cols-2 min-[1081px]:grid-cols-[1.25fr_1fr_1fr]";
+
+/**
  * The three stat tiles as one panel. How many sit side by side follows the
  * panel's size tier rather than the viewport, so a narrowed panel stacks them.
  */
-export function StatsPanel({ overview, tier }: { overview: DashboardOverview | null; tier: DashboardTier }) {
+export function StatsPanel({
+  overview,
+  tier,
+  breakpoint,
+}: {
+  overview: DashboardOverview | null;
+  tier: DashboardTier;
+  breakpoint: DashboardBreakpoint;
+}) {
   const t = useTranslate();
   const activity = overview?.activity;
   const grabbedDelta = activity
@@ -414,7 +428,12 @@ export function StatsPanel({ overview, tier }: { overview: DashboardOverview | n
     : 0;
 
   return (
-    <div className={cn("grid h-full auto-rows-fr gap-3", STATS_COLUMNS[tier])}>
+    <div
+      className={cn(
+        "grid h-full auto-rows-fr gap-3",
+        breakpoint === "SM" && tier === "regular" ? SM_FULL_WIDTH_STATS_COLUMNS : STATS_COLUMNS[tier],
+      )}
+    >
       <StatTile
         label={t("dashboard.statLibrary")}
         metrics={[

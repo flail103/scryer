@@ -143,7 +143,7 @@ export type UiSettings = {
   dashboardLayouts: UiDashboardLayout[];
 };
 
-/** Dashboard grid breakpoints, keyed on the dashboard container's own width. */
+/** Dashboard grid breakpoints, keyed on the viewport width as the old media queries were. */
 export type UiDashboardBreakpoint = "XS" | "SM" | "MD" | "LG";
 
 /** One panel's place on the dashboard grid, in grid units. */

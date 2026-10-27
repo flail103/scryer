@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   DASHBOARD_BREAKPOINTS,
   DASHBOARD_COLUMNS,
-  DASHBOARD_GRID_BREAKPOINTS,
   DASHBOARD_MAX_COLUMNS,
   DASHBOARD_MAX_ITEMS,
   DASHBOARD_PANEL_IDS,
@@ -173,7 +172,7 @@ test("tiers follow size: smaller is compact, wider and taller is expanded", () =
   assert.equal(dashboardPanelTier("stats", "LG", { w: 4, h: 2 }), "compact");
 });
 
-test("breakpoints are measured on the dashboard container at 701, 1241 and 1501", () => {
+test("breakpoints follow the viewport at the old 701, 1241 and 1501 media queries", () => {
   assert.equal(dashboardBreakpointForWidth(0), "XS");
   assert.equal(dashboardBreakpointForWidth(700), "XS");
   assert.equal(dashboardBreakpointForWidth(701), "SM");
@@ -181,11 +180,9 @@ test("breakpoints are measured on the dashboard container at 701, 1241 and 1501"
   assert.equal(dashboardBreakpointForWidth(1241), "MD");
   assert.equal(dashboardBreakpointForWidth(1500), "MD");
   assert.equal(dashboardBreakpointForWidth(1501), "LG");
-  // react-grid-layout picks the largest breakpoint the width strictly exceeds.
-  for (const breakpoint of DASHBOARD_BREAKPOINTS) {
-    if (breakpoint === "XS") continue;
-    assert.equal(dashboardBreakpointForWidth(DASHBOARD_GRID_BREAKPOINTS[breakpoint] + 1), breakpoint);
-  }
+  // Laptop widths the container-measured version moved down a tier.
+  assert.equal(dashboardBreakpointForWidth(1300), "MD");
+  assert.equal(dashboardBreakpointForWidth(1550), "LG");
 });
 
 test("a saved layout replaces the default for its breakpoint only", () => {

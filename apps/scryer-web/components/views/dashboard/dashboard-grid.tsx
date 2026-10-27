@@ -4,13 +4,12 @@ import "./dashboard-grid.css";
 import * as React from "react";
 import { GripVertical, Plus, RotateCcw, X } from "lucide-react";
 import {
-  Responsive,
+  ReactGridLayout,
   noCompactor,
   useContainerWidth,
   verticalCompactor,
   type Layout,
   type LayoutItem,
-  type ResponsiveLayouts,
 } from "react-grid-layout";
 import { useClient } from "urql";
 
@@ -42,8 +41,8 @@ import type { UiSettings } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   DASHBOARD_BREAKPOINTS,
+  DASHBOARD_BREAKPOINT_MIN_WIDTH,
   DASHBOARD_COLUMNS,
-  DASHBOARD_GRID_BREAKPOINTS,
   DASHBOARD_MARGIN,
   DASHBOARD_PANELS,
   DASHBOARD_PANEL_IDS,
@@ -91,9 +90,36 @@ const NO_DRAG_CLASS = "scry-dashboard-no-drag";
 /** react-grid-layout's id for the placeholder of an item dragged in from outside. */
 const DROPPING_ITEM_ID = "__dropping-elem__";
 
-const GRID_BREAKPOINTS: Record<DashboardBreakpoint, number> = { ...DASHBOARD_GRID_BREAKPOINTS };
-const GRID_COLUMNS: Record<DashboardBreakpoint, number> = { ...DASHBOARD_COLUMNS };
 const CONTAINER_PADDING: readonly [number, number] = [0, 0];
+
+const BREAKPOINT_QUERIES = DASHBOARD_BREAKPOINTS.filter(
+  (breakpoint) => DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint] > 0,
+).map((breakpoint) => `(min-width: ${DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint]}px)`);
+
+function subscribeToViewport(onChange: () => void): () => void {
+  const lists = BREAKPOINT_QUERIES.map((query) => window.matchMedia(query));
+  for (const list of lists) {
+    list.addEventListener("change", onChange);
+  }
+  return () => {
+    for (const list of lists) {
+      list.removeEventListener("change", onChange);
+    }
+  };
+}
+
+/**
+ * The breakpoint is chosen from the viewport, as the fixed dashboard's media
+ * queries chose it, while the grid sizes its columns from its own measured
+ * width. The media query listeners fire only when a boundary is crossed.
+ */
+function useDashboardBreakpoint(): DashboardBreakpoint {
+  return React.useSyncExternalStore(
+    subscribeToViewport,
+    () => dashboardBreakpointForWidth(window.innerWidth),
+    () => "LG",
+  );
+}
 
 type DashboardGridProps = {
   data: DashboardPanelData;
@@ -134,17 +160,20 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   const [confirmReset, setConfirmReset] = React.useState(false);
 
   const layouts = editing && draft ? draft : saved;
-  const breakpoint = dashboardBreakpointForWidth(width);
+  const breakpoint = useDashboardBreakpoint();
   const items = layouts[breakpoint];
   const placed = React.useMemo(() => new Set(items.map((entry) => entry.panelId)), [items]);
 
-  const gridLayouts = React.useMemo<ResponsiveLayouts<DashboardBreakpoint>>(() => {
-    const result: ResponsiveLayouts<DashboardBreakpoint> = {};
-    for (const entry of DASHBOARD_BREAKPOINTS) {
-      result[entry] = toGridLayout(layouts[entry], entry);
-    }
-    return result;
-  }, [layouts]);
+  const gridLayout = React.useMemo(() => toGridLayout(items, breakpoint), [items, breakpoint]);
+  const gridConfig = React.useMemo(
+    () => ({
+      cols: DASHBOARD_COLUMNS[breakpoint],
+      rowHeight: DASHBOARD_ROW_HEIGHT,
+      margin: DASHBOARD_MARGIN,
+      containerPadding: CONTAINER_PADDING,
+    }),
+    [breakpoint],
+  );
 
   const updateDraft = React.useCallback(
     (change: (current: DashboardLayoutItem[]) => DashboardLayoutItem[]) => {
@@ -321,21 +350,16 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
           ) : null}
           {/*
             One grid per breakpoint. Each breakpoint shows its own panels in its
-            own order, and when the set or order of children changes in the
-            same render as the breakpoint, react-grid-layout writes the old
-            breakpoint's positions into the new one. Remounting on a crossing
-            starts the grid from that breakpoint's layout every time.
+            own order and column count; remounting on a crossing starts the
+            grid from that breakpoint's layout every time, so no positions
+            carry over from the breakpoint just left.
           */}
-          <Responsive
+          <ReactGridLayout
             key={breakpoint}
             className={cn("scry-dashboard-grid", editing && "scry-dashboard-grid-editing")}
             width={width}
-            breakpoints={GRID_BREAKPOINTS}
-            cols={GRID_COLUMNS}
-            layouts={gridLayouts}
-            rowHeight={DASHBOARD_ROW_HEIGHT}
-            margin={DASHBOARD_MARGIN}
-            containerPadding={CONTAINER_PADDING}
+            layout={gridLayout}
+            gridConfig={gridConfig}
             compactor={stacked ? verticalCompactor : FREE_PLACEMENT_COMPACTOR}
             dragConfig={{
               enabled: editing,
@@ -387,7 +411,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
                 </div>
               );
             })}
-          </Responsive>
+          </ReactGridLayout>
         </>
       )}
 

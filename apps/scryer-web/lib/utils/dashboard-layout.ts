@@ -35,26 +35,17 @@ export type DashboardLayouts = Record<DashboardBreakpoint, DashboardLayoutItem[]
 export const DASHBOARD_BREAKPOINTS: readonly DashboardBreakpoint[] = ["XS", "SM", "MD", "LG"];
 
 /**
- * Smallest dashboard container width, in CSS pixels, at which each breakpoint
- * applies. These are the old viewport breakpoints (701, 1241, 1501) applied to
- * the dashboard's own width, so the sidebar is accounted for.
+ * Smallest viewport width, in CSS pixels, at which each breakpoint applies.
+ * These are the media queries the fixed dashboard used (`min-[701px]`,
+ * `min-[1241px]`, `min-[1501px]`), read from the window exactly as they were,
+ * so every viewport gets the arrangement it had before. The grid still sizes
+ * its columns from the dashboard's own measured width.
  */
 export const DASHBOARD_BREAKPOINT_MIN_WIDTH: Readonly<Record<DashboardBreakpoint, number>> = {
   XS: 0,
   SM: 701,
   MD: 1241,
   LG: 1501,
-};
-
-/**
- * The same breakpoints as react-grid-layout expects them: it picks the largest
- * breakpoint whose value the width strictly exceeds.
- */
-export const DASHBOARD_GRID_BREAKPOINTS: Readonly<Record<DashboardBreakpoint, number>> = {
-  XS: 0,
-  SM: DASHBOARD_BREAKPOINT_MIN_WIDTH.SM - 1,
-  MD: DASHBOARD_BREAKPOINT_MIN_WIDTH.MD - 1,
-  LG: DASHBOARD_BREAKPOINT_MIN_WIDTH.LG - 1,
 };
 
 /**
@@ -206,7 +197,7 @@ const item = (panelId: DashboardPanelId, x: number, y: number, w: number, h: num
 
 /**
  * The default arrangement, transcribed from the fixed Tailwind grids it
- * replaces (breakpoints are now on the dashboard container, not the window):
+ * replaces (the same viewport breakpoints, so each width keeps its tier):
  *
  * - Stat tiles: one full-width panel at every breakpoint. Its tiles were
  *   `grid-cols-1` below 701, `grid-cols-2` from 701 and three across from
@@ -275,6 +266,7 @@ export function isWellFormedPanelId(value: string): boolean {
   return value.length <= PANEL_ID_MAX_LENGTH && PANEL_ID_PATTERN.test(value);
 }
 
+/** The breakpoint for a viewport width, as the old `min-[…px]` queries chose it. */
 export function dashboardBreakpointForWidth(width: number): DashboardBreakpoint {
   let matching: DashboardBreakpoint = "XS";
   for (const breakpoint of DASHBOARD_BREAKPOINTS) {

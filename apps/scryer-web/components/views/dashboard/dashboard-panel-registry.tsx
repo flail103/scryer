@@ -34,9 +34,9 @@ type DashboardPanelRenderArgs = {
 export const DASHBOARD_PANEL_RENDERERS: Readonly<
   Record<DashboardPanelId, (args: DashboardPanelRenderArgs) => React.ReactNode>
 > = {
-  stats: ({ data, tier }) => (
+  stats: ({ data, tier, breakpoint }) => (
     <DashboardPanelLoad state={data.panels.overview}>
-      <StatsPanel overview={data.overview} tier={tier} />
+      <StatsPanel overview={data.overview} tier={tier} breakpoint={breakpoint} />
     </DashboardPanelLoad>
   ),
   requests: ({ data, tier }) => (
