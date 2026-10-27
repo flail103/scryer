@@ -9,8 +9,14 @@
  * unlayered `*` rule only sets the font family and does not collide.
  */
 
+/*
+ * Edit mode only moves and resizes panels, so nothing in the grid selects as
+ * text. That also covers the first pixels of a drag, before the library has
+ * recognised it as one.
+ */
 .scry-dashboard-grid.scry-dashboard-grid-editing {
   min-height: 240px;
+  user-select: none;
 }
 
 .scry-dashboard-grid .scry-dashboard-item {
@@ -83,15 +89,106 @@
   border-radius: 0.75rem;
 }
 
-/* Resize handles sit above the move overlay and stay visible on touch. */
+/*
+ * Resize handles sit above the move overlay and stay visible on touch. The
+ * side handles run the full length of their edge, so a press anywhere along
+ * it resizes instead of landing on the move overlay beside a small target.
+ */
 .scry-dashboard-grid .react-grid-item > .react-resizable-handle {
   z-index: 2;
   opacity: 1;
+  touch-action: none;
 }
 
-.scry-dashboard-grid .react-grid-item > .react-resizable-handle::after {
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e {
+  top: 0.75rem;
+  right: -4px;
+  bottom: 0.75rem;
+  width: 12px;
+  height: auto;
+  margin-top: 0;
+  transform: none;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: -4px;
+  width: auto;
+  height: 12px;
+  margin-left: 0;
+  transform: none;
+}
+
+/* The corner wins where it meets the edge strips. */
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-se {
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-se::after {
   border-right-color: var(--scry-accent);
   border-bottom-color: var(--scry-accent);
+}
+
+/* Edge strips show a bar along the edge on hover instead of a corner mark. */
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-e::after,
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-s::after {
+  border: 0;
+  border-radius: 9999px;
+  background: var(--scry-accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-e::after {
+  top: 0;
+  right: 4px;
+  bottom: 0;
+  width: 3px;
+  height: auto;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-s::after {
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  width: auto;
+  height: 3px;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-e:hover::after,
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle-s:hover::after,
+.scry-dashboard-grid .react-grid-item.resizing > .react-resizable-handle-e::after,
+.scry-dashboard-grid .react-grid-item.resizing > .react-resizable-handle-s::after {
+  opacity: 0.7;
+}
+
+/* A running move or resize keeps its cursor and selects no text anywhere. */
+body.scry-dashboard-gesture,
+body.scry-dashboard-gesture * {
+  user-select: none !important;
+}
+
+body.scry-dashboard-gesture-move,
+body.scry-dashboard-gesture-move * {
+  cursor: grabbing !important;
+}
+
+body.scry-dashboard-gesture-e,
+body.scry-dashboard-gesture-e * {
+  cursor: ew-resize !important;
+}
+
+body.scry-dashboard-gesture-s,
+body.scry-dashboard-gesture-s * {
+  cursor: ns-resize !important;
+}
+
+body.scry-dashboard-gesture-se,
+body.scry-dashboard-gesture-se * {
+  cursor: se-resize !important;
 }
 
 .scry-dashboard-tray-grip {

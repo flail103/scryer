@@ -87,6 +87,20 @@ const FREE_PLACEMENT_COMPACTOR = { ...noCompactor, preventCollision: true };
 
 const DRAG_HANDLE_CLASS = "scry-dashboard-drag-handle";
 const NO_DRAG_CLASS = "scry-dashboard-no-drag";
+const GESTURE_CLASS = "scry-dashboard-gesture";
+const RESIZE_AXES = ["s", "e", "se"] as const;
+type ResizeAxis = (typeof RESIZE_AXES)[number];
+/** A move or resize in progress, named for the cursor it pins. */
+type GridGesture = ResizeAxis | "move";
+
+/** Which handle a resize started from, read off the handle's class. */
+function resizeAxisFromEvent(event: Event): ResizeAxis {
+  const handle =
+    event.target instanceof Element ? event.target.closest(".react-resizable-handle") : null;
+  return (
+    RESIZE_AXES.find((axis) => handle?.classList.contains(`react-resizable-handle-${axis}`)) ?? "se"
+  );
+}
 /** react-grid-layout's id for the placeholder of an item dragged in from outside. */
 const DROPPING_ITEM_ID = "__dropping-elem__";
 
@@ -158,6 +172,33 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   const [dragPanelId, setDragPanelId] = React.useState<DashboardPanelId | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [confirmReset, setConfirmReset] = React.useState(false);
+  const [gesture, setGesture] = React.useState<GridGesture | null>(null);
+
+  // While a move or resize runs, the pointer leaves the panel or its handle as
+  // the panel snaps to the grid and passes over other panels' text. Pin the
+  // gesture's cursor and turn text selection off page-wide until release, so
+  // the drag never turns into a text selection.
+  React.useEffect(() => {
+    if (!gesture) {
+      return;
+    }
+    const classes = [GESTURE_CLASS, `${GESTURE_CLASS}-${gesture}`];
+    document.body.classList.add(...classes);
+    return () => document.body.classList.remove(...classes);
+  }, [gesture]);
+
+  const handleResizeStart = React.useCallback(
+    (_layout: Layout, _old: unknown, _next: unknown, _placeholder: unknown, event: Event) => {
+      window.getSelection()?.removeAllRanges();
+      setGesture(resizeAxisFromEvent(event));
+    },
+    [],
+  );
+  const handleDragStart = React.useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setGesture("move");
+  }, []);
+  const handleGestureStop = React.useCallback(() => setGesture(null), []);
 
   const layouts = editing && draft ? draft : saved;
   const breakpoint = useDashboardBreakpoint();
@@ -367,13 +408,17 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
               cancel: `.${NO_DRAG_CLASS}`,
               allowMobileScroll: true,
             }}
-            resizeConfig={{ enabled: editing && !stacked, handles: ["s", "e", "se"] }}
+            resizeConfig={{ enabled: editing && !stacked, handles: [...RESIZE_AXES] }}
             dropConfig={{
               enabled: editing,
               defaultItem: dropItemSize,
               onDragOver: handleDropDragOver,
               touchEnabled: true,
             }}
+            onResizeStart={handleResizeStart}
+            onResizeStop={handleGestureStop}
+            onDragStart={handleDragStart}
+            onDragStop={handleGestureStop}
             onLayoutChange={handleLayoutChange}
             onDrop={handleDrop}
           >
