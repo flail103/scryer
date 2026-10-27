@@ -281,13 +281,22 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     return () => document.body.classList.remove(...classes);
   }, [gesture]);
 
+  // react-grid-layout keeps a resizing panel's live size in a ref and redraws
+  // the panel only when its child element changes, so on its own the panel
+  // freezes between grid snaps while the outline moves on. Each resize step
+  // hands just that panel a fresh element, so it follows the pointer; the
+  // other panels keep their memoised elements and do not redraw.
+  const [resizingPanelId, setResizingPanelId] = React.useState<string | null>(null);
+  const [resizeFrame, setResizeFrame] = React.useState(0);
   const handleResizeStart = React.useCallback(
-    (_layout: Layout, _old: unknown, _next: unknown, _placeholder: unknown, event: Event) => {
+    (_layout: Layout, oldItem: LayoutItem | null, _next: unknown, _placeholder: unknown, event: Event) => {
       window.getSelection()?.removeAllRanges();
       setGesture(resizeAxisFromEvent(event));
+      setResizingPanelId(oldItem?.i ?? null);
     },
     [],
   );
+  const handleResize = React.useCallback(() => setResizeFrame((frame) => frame + 1), []);
   // The area a moved panel can land in. Other panels never move during a
   // drag, since collisions are refused, so it is worked out once at the start.
   const [moveTargets, setMoveTargets] = React.useState<GridRect[] | null>(null);
@@ -310,6 +319,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   const handleGestureStop = React.useCallback(() => {
     setGesture(null);
     setMoveTargets(null);
+    setResizingPanelId(null);
   }, []);
   const items = layouts[breakpoint];
   const placed = React.useMemo(() => new Set(items.map((entry) => entry.panelId)), [items]);
@@ -459,6 +469,45 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   }, [client, finish, reportFailure, setGlobalStatus, setUiSettings, t]);
 
 
+  const panelElements = React.useMemo(
+    () =>
+      items.map((entry) => {
+        if (!isDashboardPanelId(entry.panelId)) {
+          return null;
+        }
+        const panelId = entry.panelId;
+        const tier = dashboardPanelTier(panelId, breakpoint, entry);
+        const title = t(DASHBOARD_PANELS[panelId].titleKey);
+        return (
+          <div key={panelId} data-panel-id={panelId} data-tier={tier} className="scry-dashboard-item">
+            {DASHBOARD_PANEL_RENDERERS[panelId]({ data, tier, breakpoint })}
+            {editing ? (
+              <div
+                className={DRAG_HANDLE_CLASS}
+                role="group"
+                aria-label={t("dashboard.layout.movePanel", { name: title })}
+              >
+                <div className="scry-dashboard-drag-bar">
+                  <GripVertical className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="scry-dashboard-drag-title" aria-hidden="true">{title}</span>
+                  <IconButton
+                    appearance="boxed"
+                    tone="delete"
+                    className={cn(NO_DRAG_CLASS, "h-7 w-7")}
+                    label={t("dashboard.layout.removePanel", { name: title })}
+                    onClick={() => updateDraft((current) => removeDashboardPanel(current, panelId))}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </IconButton>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        );
+      }).filter((element): element is React.ReactElement<Record<string, unknown>> => element !== null),
+    [breakpoint, data, editing, items, t, updateDraft],
+  );
+
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-3">
       {editing ? (
@@ -540,46 +589,18 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
               touchEnabled: true,
             }}
             onResizeStart={handleResizeStart}
+            onResize={handleResize}
             onResizeStop={handleGestureStop}
             onDragStart={handleDragStart}
             onDragStop={handleGestureStop}
             onLayoutChange={handleLayoutChange}
             onDrop={handleDrop}
           >
-            {items.map((entry) => {
-              if (!isDashboardPanelId(entry.panelId)) {
-                return null;
-              }
-              const panelId = entry.panelId;
-              const tier = dashboardPanelTier(panelId, breakpoint, entry);
-              const title = t(DASHBOARD_PANELS[panelId].titleKey);
-              return (
-                <div key={panelId} data-panel-id={panelId} data-tier={tier} className="scry-dashboard-item">
-                  {DASHBOARD_PANEL_RENDERERS[panelId]({ data, tier, breakpoint })}
-                  {editing ? (
-                    <div
-                      className={DRAG_HANDLE_CLASS}
-                      role="group"
-                      aria-label={t("dashboard.layout.movePanel", { name: title })}
-                    >
-                      <div className="scry-dashboard-drag-bar">
-                        <GripVertical className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        <span className="scry-dashboard-drag-title" aria-hidden="true">{title}</span>
-                        <IconButton
-                          appearance="boxed"
-                          tone="delete"
-                          className={cn(NO_DRAG_CLASS, "h-7 w-7")}
-                          label={t("dashboard.layout.removePanel", { name: title })}
-                          onClick={() => updateDraft((current) => removeDashboardPanel(current, panelId))}
-                        >
-                          <X className="h-3.5 w-3.5" aria-hidden="true" />
-                        </IconButton>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+            {panelElements.map((element) =>
+              element.key === resizingPanelId
+                ? React.cloneElement(element, { "data-resize-frame": resizeFrame })
+                : element,
+            )}
           </ReactGridLayout>
           </div>
         </>
