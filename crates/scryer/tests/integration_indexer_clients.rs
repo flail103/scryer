@@ -74,7 +74,7 @@ async fn seed_experimental_setting(ctx: &TestContext) {
 }
 
 #[tokio::test]
-async fn client_management_graphql_requires_interactive_full_permissions_and_mfa() {
+async fn client_management_graphql_requires_session_full_permissions_and_enrolled_mfa() {
     let ctx = TestContext::new().await;
     seed_experimental_setting(&ctx).await;
     let store = Arc::new(IndexerClientStore::new(ctx.db.datastore()));
@@ -159,10 +159,12 @@ async fn client_management_graphql_requires_interactive_full_permissions_and_mfa
         error_field(&response, "reason"),
         "INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED"
     );
-    let response = schema
-        .execute(request(CREATE, &actor, true, false, Some(i64::MAX)))
-        .await;
-    assert_eq!(error_field(&response, "code"), "TOTP_ENROLLMENT_REQUIRED");
+    // A signed-in admin without MFA set up is not asked to enroll or step up.
+    data(
+        schema
+            .execute(request(CREATE, &actor, true, false, None))
+            .await,
+    );
 
     let now = chrono::Utc::now();
     TotpStore::new(ctx.db.datastore(), ctx.db.encryption_key_state())
