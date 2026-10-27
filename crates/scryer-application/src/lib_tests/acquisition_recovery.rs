@@ -13907,6 +13907,86 @@ async fn a_season_scoped_interactive_walk_never_spends_a_bare_title_query() {
     );
 }
 
+/// Releasing the title walk lock at the end of an operator's season search
+/// must not wake the convergence poller. A woken cycle runs a full,
+/// gap-exempt walk with no season filter, and it would land on this title
+/// right after the operator asked for one season of it.
+#[tokio::test]
+async fn a_season_scoped_interactive_walk_leaves_no_poller_wake_behind() {
+    use futures_util::FutureExt;
+
+    let (app, title, indexer_client) = seed_recent_failed_season_pack_fixture().await;
+    let wake = app.runtime.acquisition.acquisition_wake.clone();
+    let _ = wake.notified().now_or_never();
+
+    crate::acquisition::workflow::run_interactive_title_acquisition_walk(
+        &app,
+        &title.id,
+        Some(7),
+        None,
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .expect("season-scoped interactive walk");
+
+    assert!(
+        !indexer_client.searches.lock().await.is_empty(),
+        "the season-scoped walk still queries its season"
+    );
+    assert!(
+        wake.notified().now_or_never().is_none(),
+        "a season-scoped walk must not wake the convergence poller"
+    );
+}
+
+/// An operator's search for one episode goes through the best-release queue,
+/// not the title walk, and it must leave the convergence poller asleep too.
+#[tokio::test]
+async fn an_episode_scoped_automatic_search_leaves_no_poller_wake_behind() {
+    use futures_util::FutureExt;
+
+    let (app, title, _indexer_client) = seed_recent_failed_season_pack_fixture().await;
+    let season = app
+        .services
+        .catalog
+        .shows
+        .list_collections_for_title(&title.id)
+        .await
+        .expect("list seasons")
+        .into_iter()
+        .next()
+        .expect("the fixture season");
+    let episode = app
+        .services
+        .catalog
+        .shows
+        .list_episodes_for_collection(&season.id)
+        .await
+        .expect("list episodes")
+        .into_iter()
+        .next()
+        .expect("a fixture episode");
+    let wake = app.runtime.acquisition.acquisition_wake.clone();
+    let _ = wake.notified().now_or_never();
+
+    app.queue_best_release(
+        &test_admin_user(),
+        &title.id,
+        SubmissionScope::Episode {
+            episode_id: episode.id.clone(),
+        },
+        SubmissionConflictPolicy::Abort,
+    )
+    .await
+    .expect("episode-scoped best-release search");
+
+    assert!(
+        wake.notified().now_or_never().is_none(),
+        "an episode-scoped search must not wake the convergence poller"
+    );
+}
+
 /// The search client picks the pacing lane from the learning context: only a
 /// context that consents to corpus reuse is a background pass. An operator's
 /// walk must never carry that consent, so its indexer requests are paced as
