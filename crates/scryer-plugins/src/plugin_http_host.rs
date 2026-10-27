@@ -1215,6 +1215,19 @@ impl DirectPluginRedirects<'_> {
     }
 }
 
+/// Credential-bearing request headers dropped when a redirect changes origin.
+const CROSS_ORIGIN_REDIRECT_STRIPPED_HEADERS: &[&str] = &[
+    "authorization",
+    "cookie",
+    "cookie2",
+    "proxy-authorization",
+    "www-authenticate",
+    "x-plex-token",
+    "x-api-key",
+    "x-emby-token",
+    "x-mediabrowser-token",
+];
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the shared dispatch boundary carries request, proxy, redirect and accounting context explicitly"
@@ -1287,17 +1300,9 @@ fn execute_request_with_extra_headers(
         client = redirects.client_for(next.as_str())?;
         if response.url().origin() != next.origin() {
             let keep_header = |name: &str| {
-                ![
-                    "authorization",
-                    "cookie",
-                    "cookie2",
-                    "proxy-authorization",
-                    "www-authenticate",
-                    "x-plex-token",
-                    "x-api-key",
-                ]
-                .iter()
-                .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
+                !CROSS_ORIGIN_REDIRECT_STRIPPED_HEADERS
+                    .iter()
+                    .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
             };
             request.headers.retain(|name, _| keep_header(name));
             extra_headers.retain(|(name, _)| keep_header(name));
@@ -2097,6 +2102,11 @@ mod tests {
                                 ("Authorization".into(), "Bearer fixture".into()),
                                 ("Cookie".into(), "session=fixture".into()),
                                 ("X-Plex-Token".into(), "fixture-token".into()),
+                                ("X-Emby-Token".into(), "fixture-emby-token".into()),
+                                (
+                                    "X-MediaBrowser-Token".into(),
+                                    "fixture-mediabrowser-token".into(),
+                                ),
                                 ("Accept".into(), "application/rss+xml".into()),
                             ]),
                         },
@@ -2126,9 +2136,21 @@ mod tests {
         assert_eq!(origin_requests.len(), 2);
         assert!(origin_requests[1].headers.contains_key("authorization"));
         assert!(origin_requests[1].headers.contains_key("cookie"));
+        assert!(origin_requests[1].headers.contains_key("x-emby-token"));
+        assert!(
+            origin_requests[1]
+                .headers
+                .contains_key("x-mediabrowser-token")
+        );
         let feed_requests = feed.received_requests().await.unwrap();
         assert_eq!(feed_requests.len(), 1);
-        for header in ["authorization", "cookie", "x-plex-token"] {
+        for header in [
+            "authorization",
+            "cookie",
+            "x-plex-token",
+            "x-emby-token",
+            "x-mediabrowser-token",
+        ] {
             assert!(!feed_requests[0].headers.contains_key(header), "{header}");
         }
         assert_eq!(feed_requests[0].headers["accept"], "application/rss+xml");
