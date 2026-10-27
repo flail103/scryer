@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub mod download_identity;
 pub mod import_space;
 pub mod lists;
+pub mod publish_time;
 pub mod title_naming;
 pub mod title_normalization;
 pub use lists::*;
@@ -8821,11 +8822,18 @@ mod tests {
         let permissions = AppPermission::ALL;
         let rebuilt = AppPermissionMask::from_permissions(permissions.iter().copied());
         assert_eq!(AppPermissionMask::ALL, rebuilt);
-        assert_eq!(AppPermissionMask::ALL.bits().count_ones() as usize, permissions.len());
+        assert_eq!(
+            AppPermissionMask::ALL.bits().count_ones() as usize,
+            permissions.len()
+        );
         for permission in permissions {
-            assert!(AppPermissionMask::ALL.contains(AppPermissionMask::from_permission(*permission)));
-            let missing_one = AppPermissionMask::from_bits_retain(AppPermissionMask::ALL.bits()
-                & !AppPermissionMask::from_permission(*permission).bits());
+            assert!(
+                AppPermissionMask::ALL.contains(AppPermissionMask::from_permission(*permission))
+            );
+            let missing_one = AppPermissionMask::from_bits_retain(
+                AppPermissionMask::ALL.bits()
+                    & !AppPermissionMask::from_permission(*permission).bits(),
+            );
             assert!(!missing_one.contains(AppPermissionMask::ALL));
         }
     }

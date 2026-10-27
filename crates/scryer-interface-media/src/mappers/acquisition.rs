@@ -110,7 +110,10 @@ pub fn from_search_result(result: IndexerSearchResult) -> IndexerSearchResultPay
             .source_kind
             .map(DownloadSourceKindValue::from_application),
         size_bytes: result.size_bytes.map(Long::from),
-        published_at: parse_optional_datetime(result.published_at, "indexer search published_at"),
+        published_at: result
+            .published_at
+            .as_deref()
+            .and_then(scryer_domain::publish_time::parse_publish_time),
         thumbs_up: result.thumbs_up,
         thumbs_down: result.thumbs_down,
         grabs: result.indexer_grabs.map(|grabs| grabs as i32),

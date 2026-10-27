@@ -329,10 +329,9 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
         writer.write_event(Event::End(BytesEnd::new("guid")))?;
         element(&mut writer, "link", item.retrieval_url.as_ref())?;
         if let Some(date) = &item.result.published_at {
-            let date = chrono::DateTime::parse_from_rfc3339(date)
-                .or_else(|_| chrono::DateTime::parse_from_rfc2822(date))
+            let date = scryer_domain::publish_time::parse_publish_time(date)
                 .map(|date| date.to_rfc2822())
-                .unwrap_or_else(|_| date.clone());
+                .unwrap_or_else(|| date.clone());
             if checked_text(&date).is_ok() {
                 element(&mut writer, "pubDate", &date)?;
             } else {
@@ -464,10 +463,9 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
         json(&mut output, &item.retrieval_url.as_ref())?;
         if let Some(date) = &item.result.published_at {
             output.write_all(b",\"pubDate\":")?;
-            let date = chrono::DateTime::parse_from_rfc3339(date)
-                .or_else(|_| chrono::DateTime::parse_from_rfc2822(date))
+            let date = scryer_domain::publish_time::parse_publish_time(date)
                 .map(|date| date.to_rfc2822())
-                .unwrap_or_else(|_| date.clone());
+                .unwrap_or_else(|| date.clone());
             json(&mut output, &date)?;
         }
         output.write_all(b",\"enclosure\":")?;

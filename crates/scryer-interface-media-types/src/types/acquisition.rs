@@ -1749,8 +1749,9 @@ pub struct InteractiveReleaseSearchIndexerPayload {
     /// Current indexer lifecycle state.
     pub status: InteractiveReleaseSearchIndexerStatusValue,
     /// The indexer's result count. A title search counts its own batch, before
-    /// cross-indexer dedup; a query search counts what it contributed to the
-    /// listing, after exact duplicates are removed.
+    /// cross-indexer dedup. A `query` search counts every result the indexer
+    /// has returned to the search so far, across all of its pages, whether or
+    /// not those results have reached the page being shown.
     pub result_count: i32,
     /// Wall time of this indexer's own call in milliseconds, or null before it answered.
     pub elapsed_ms: Option<i32>,
