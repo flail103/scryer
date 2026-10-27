@@ -4631,6 +4631,55 @@ pub struct UiCatalogViewUpdate {
     pub columns: Option<Vec<UiTableColumnSetting>>,
 }
 
+/// Responsive breakpoint a dashboard layout was arranged for; each keeps its own layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UiDashboardBreakpoint {
+    Xs,
+    Sm,
+    Md,
+    Lg,
+}
+
+impl UiDashboardBreakpoint {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Xs => "xs",
+            Self::Sm => "sm",
+            Self::Md => "md",
+            Self::Lg => "lg",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "xs" => Some(Self::Xs),
+            "sm" => Some(Self::Sm),
+            "md" => Some(Self::Md),
+            "lg" => Some(Self::Lg),
+            _ => None,
+        }
+    }
+}
+
+/// One panel's place on a dashboard grid. The panel id is opaque to the server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiDashboardLayoutItem {
+    pub panel_id: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// The dashboard layout a user saved for one breakpoint. An empty item list is
+/// a saved layout with every panel removed, not a missing one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiDashboardLayout {
+    pub breakpoint: UiDashboardBreakpoint,
+    pub columns: i32,
+    pub items: Vec<UiDashboardLayoutItem>,
+}
+
 /// Curated appearance saved on the user profile.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UiPalette {
@@ -4697,6 +4746,8 @@ pub struct UiSettings {
     pub language: Option<String>,
     pub table_columns: Vec<UiTableColumnSetting>,
     pub catalog_views: Vec<UiCatalogViewSetting>,
+    /// Saved dashboard layouts, one per breakpoint that has one.
+    pub dashboard_layouts: Vec<UiDashboardLayout>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -4743,6 +4794,7 @@ impl UiSettings {
             language: None,
             table_columns: Vec::new(),
             catalog_views: Vec::new(),
+            dashboard_layouts: Vec::new(),
             created_at: None,
             updated_at: None,
         }

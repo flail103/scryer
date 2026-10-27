@@ -500,6 +500,48 @@ pub struct UiSettingsPayload {
     pub table_columns: Vec<UiTableColumnSettingPayload>,
     /// Persisted catalog view modes, per device class and facet.
     pub catalog_views: Vec<UiCatalogViewSettingPayload>,
+    /// Saved dashboard layouts, one per breakpoint that has one; a breakpoint without an entry uses the default layout.
+    pub dashboard_layouts: Vec<UiDashboardLayout>,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
+/// Responsive breakpoint a dashboard layout was arranged for; each keeps its own layout.
+pub enum UiDashboardBreakpoint {
+    /// Extra-small screens.
+    Xs,
+    /// Small screens.
+    Sm,
+    /// Medium screens.
+    Md,
+    /// Large screens.
+    Lg,
+}
+
+#[derive(SimpleObject, Clone)]
+/// One panel's place on a saved dashboard grid.
+pub struct UiDashboardLayoutItem {
+    /// Identifier of the panel, defined by the web client.
+    pub panel_id: String,
+    /// Zero-based column the panel starts at.
+    pub x: i32,
+    /// Zero-based row the panel starts at.
+    pub y: i32,
+    /// Width in grid columns.
+    pub w: i32,
+    /// Height in grid rows.
+    pub h: i32,
+}
+
+#[derive(SimpleObject, Clone)]
+/// The dashboard layout saved for one breakpoint. An empty item list means every panel was removed.
+pub struct UiDashboardLayout {
+    /// Breakpoint the layout was arranged for.
+    pub breakpoint: UiDashboardBreakpoint,
+    /// Number of grid columns the layout was arranged on.
+    pub columns: i32,
+    /// Panels placed on the grid.
+    pub items: Vec<UiDashboardLayoutItem>,
 }
 
 #[derive(SimpleObject, Clone)]
@@ -587,6 +629,32 @@ pub struct SetMyCatalogViewInput {
     pub view_mode: Option<UiCatalogViewModeValue>,
     /// Optional complete column list for this device class and facet; null preserves the saved columns.
     pub columns: Option<Vec<UiCatalogColumnInput>>,
+}
+
+#[derive(InputObject, Clone)]
+/// One panel's place in a dashboard layout saved with setMyDashboardLayout.
+pub struct UiDashboardLayoutItemInput {
+    /// Identifier of the panel: 1 to 64 lowercase letters, digits or hyphens.
+    pub panel_id: String,
+    /// Zero-based column the panel starts at.
+    pub x: i32,
+    /// Zero-based row the panel starts at.
+    pub y: i32,
+    /// Width in grid columns, at least 1; x plus w may not exceed the layout's columns.
+    pub w: i32,
+    /// Height in grid rows, at least 1.
+    pub h: i32,
+}
+
+#[derive(InputObject, Clone)]
+/// The caller's complete dashboard layout for one breakpoint.
+pub struct SetMyDashboardLayoutInput {
+    /// Breakpoint the layout was arranged for.
+    pub breakpoint: UiDashboardBreakpoint,
+    /// Number of grid columns, from 1 to 24.
+    pub columns: i32,
+    /// Every panel on the grid, at most 64; an empty list saves a layout with no panels.
+    pub items: Vec<UiDashboardLayoutItemInput>,
 }
 
 #[derive(SimpleObject, Clone)]

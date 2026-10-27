@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    AppError, AppResult, AppUseCase, UiCatalogViewUpdate, UiSettings, UiSettingsFacet,
-    UiSettingsUpdate, UiTableColumnSetting, UiTableViewMode,
+    AppError, AppResult, AppUseCase, UiCatalogViewUpdate, UiDashboardBreakpoint, UiDashboardLayout,
+    UiSettings, UiSettingsFacet, UiSettingsUpdate, UiTableColumnSetting, UiTableViewMode,
 };
 use scryer_domain::User;
 
@@ -45,6 +45,13 @@ const POSTER_TABLE_FIXED_COLUMNS: &[&str] = &["poster", "name"];
 
 /// Longest interface language code accepted, e.g. `zh-HK` or `pt-BR`.
 const MAX_LANGUAGE_CODE_LEN: usize = 16;
+
+/// Widest dashboard grid a layout may declare.
+const MAX_DASHBOARD_COLUMNS: i32 = 24;
+/// Most panels one dashboard layout may place.
+const MAX_DASHBOARD_ITEMS: usize = 64;
+/// Longest dashboard panel id accepted.
+const MAX_DASHBOARD_PANEL_ID_LEN: usize = 64;
 
 impl AppUseCase {
     pub async fn get_my_ui_settings(&self, actor: &User) -> AppResult<UiSettings> {
@@ -98,6 +105,102 @@ impl AppUseCase {
             .await?;
         Ok(without_unknown_table_columns(settings))
     }
+
+    /// Replaces the caller's dashboard layout for one breakpoint. Panel ids are
+    /// opaque here: the web owns the panel registry.
+    pub async fn set_my_dashboard_layout(
+        &self,
+        actor: &User,
+        layout: UiDashboardLayout,
+    ) -> AppResult<UiSettings> {
+        validate_dashboard_layout(&layout)?;
+        let settings = self
+            .services
+            .identity
+            .ui_settings
+            .set_dashboard_layout(&actor.id, layout)
+            .await?;
+        Ok(without_unknown_table_columns(settings))
+    }
+
+    /// Forgets the caller's dashboard layout for one breakpoint, or for every
+    /// breakpoint when `breakpoint` is `None`, so the web falls back to its default.
+    pub async fn reset_my_dashboard_layout(
+        &self,
+        actor: &User,
+        breakpoint: Option<UiDashboardBreakpoint>,
+    ) -> AppResult<UiSettings> {
+        let settings = self
+            .services
+            .identity
+            .ui_settings
+            .reset_dashboard_layouts(&actor.id, breakpoint)
+            .await?
+            .unwrap_or_else(|| UiSettings::defaults_for_user(actor.id.clone()));
+        Ok(without_unknown_table_columns(settings))
+    }
+}
+
+fn validate_dashboard_layout(layout: &UiDashboardLayout) -> AppResult<()> {
+    use crate::error_reasons::settings;
+
+    if !(1..=MAX_DASHBOARD_COLUMNS).contains(&layout.columns) {
+        return Err(AppError::validation_refused(
+            settings::DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE,
+            format!("dashboard layout columns must be between 1 and {MAX_DASHBOARD_COLUMNS}"),
+        ));
+    }
+    if layout.items.len() > MAX_DASHBOARD_ITEMS {
+        return Err(AppError::validation_refused(
+            settings::DASHBOARD_LAYOUT_TOO_MANY_ITEMS,
+            format!("a dashboard layout may hold at most {MAX_DASHBOARD_ITEMS} panels"),
+        ));
+    }
+    let mut seen = HashSet::new();
+    for item in &layout.items {
+        let panel_id = item.panel_id.as_str();
+        if panel_id.is_empty()
+            || panel_id.len() > MAX_DASHBOARD_PANEL_ID_LEN
+            || !panel_id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(AppError::validation_refused(
+                settings::DASHBOARD_PANEL_ID_INVALID,
+                format!(
+                    "dashboard panel ids must be 1 to {MAX_DASHBOARD_PANEL_ID_LEN} lowercase letters, digits or hyphens"
+                ),
+            ));
+        }
+        if !seen.insert(panel_id) {
+            return Err(AppError::validation_refused(
+                settings::DASHBOARD_PANEL_ID_DUPLICATED,
+                format!("dashboard panel {panel_id:?} appears more than once"),
+            ));
+        }
+        if item.x < 0 || item.y < 0 {
+            return Err(AppError::validation_refused(
+                settings::DASHBOARD_ITEM_POSITION_OUT_OF_RANGE,
+                format!("dashboard panel {panel_id:?} must not start at a negative position"),
+            ));
+        }
+        if item.w < 1 || item.h < 1 {
+            return Err(AppError::validation_refused(
+                settings::DASHBOARD_ITEM_SIZE_OUT_OF_RANGE,
+                format!("dashboard panel {panel_id:?} must be at least one cell wide and tall"),
+            ));
+        }
+        if i64::from(item.x) + i64::from(item.w) > i64::from(layout.columns) {
+            return Err(AppError::validation_refused(
+                settings::DASHBOARD_ITEM_EXCEEDS_COLUMNS,
+                format!(
+                    "dashboard panel {panel_id:?} extends past column {}",
+                    layout.columns
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_ui_settings_update(mut input: UiSettingsUpdate) -> AppResult<UiSettingsUpdate> {

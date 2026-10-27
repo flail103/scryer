@@ -19,10 +19,11 @@ use scryer_application::{
 };
 
 use super::{
-    catalog_view_update_from_input, from_api_key, from_oauth_client_registration,
-    from_plugin_auto_update_settings, from_recycle_bin_settings, from_title_tag_definition,
-    from_title_tag_rewrite_counts, from_ui_settings, from_verification_settings,
-    into_oauth_client_kind, to_verification_depth, ui_settings_update_from_input,
+    catalog_view_update_from_input, dashboard_layout_from_input, from_api_key,
+    from_oauth_client_registration, from_plugin_auto_update_settings, from_recycle_bin_settings,
+    from_title_tag_definition, from_title_tag_rewrite_counts, from_ui_settings,
+    from_verification_settings, into_oauth_client_kind, to_app_ui_dashboard_breakpoint,
+    to_verification_depth, ui_settings_update_from_input,
 };
 use scryer_interface_core::{
     AuthlessDefaultSession, LoginAttemptPrincipal, LoginErrorClassification,
@@ -814,6 +815,41 @@ impl SettingsMutations {
         let actor = actor_from_ctx(ctx)?;
         let settings = app
             .set_my_catalog_view(&actor, catalog_view_update_from_input(input))
+            .await
+            .map_err(to_gql_error)?;
+        Ok(from_ui_settings(settings))
+    }
+
+    /// Replaces the authenticated actor's dashboard layout for one breakpoint, leaving the other breakpoints unchanged.
+    async fn set_my_dashboard_layout(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(
+            desc = "Complete layout for one breakpoint; an empty item list saves a layout with no panels."
+        )]
+        input: SetMyDashboardLayoutInput,
+    ) -> GqlResult<UiSettingsPayload> {
+        let app = app_from_ctx(ctx)?;
+        let actor = actor_from_ctx(ctx)?;
+        let settings = app
+            .set_my_dashboard_layout(&actor, dashboard_layout_from_input(input))
+            .await
+            .map_err(to_gql_error)?;
+        Ok(from_ui_settings(settings))
+    }
+
+    /// Forgets the authenticated actor's saved dashboard layout so the default layout applies again.
+    async fn reset_my_dashboard_layout(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(desc = "Breakpoint to reset; null resets every breakpoint.")] breakpoint: Option<
+            UiDashboardBreakpoint,
+        >,
+    ) -> GqlResult<UiSettingsPayload> {
+        let app = app_from_ctx(ctx)?;
+        let actor = actor_from_ctx(ctx)?;
+        let settings = app
+            .reset_my_dashboard_layout(&actor, breakpoint.map(to_app_ui_dashboard_breakpoint))
             .await
             .map_err(to_gql_error)?;
         Ok(from_ui_settings(settings))

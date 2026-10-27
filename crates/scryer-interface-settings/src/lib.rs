@@ -605,6 +605,67 @@ pub(crate) fn from_ui_settings(settings: scryer_application::UiSettings) -> UiSe
                 view_mode: from_ui_catalog_view_mode(view.view_mode),
             })
             .collect(),
+        dashboard_layouts: settings
+            .dashboard_layouts
+            .into_iter()
+            .map(|layout| UiDashboardLayout {
+                breakpoint: from_ui_dashboard_breakpoint(layout.breakpoint),
+                columns: layout.columns,
+                items: layout
+                    .items
+                    .into_iter()
+                    .map(|item| UiDashboardLayoutItem {
+                        panel_id: item.panel_id,
+                        x: item.x,
+                        y: item.y,
+                        w: item.w,
+                        h: item.h,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn from_ui_dashboard_breakpoint(
+    breakpoint: scryer_application::UiDashboardBreakpoint,
+) -> UiDashboardBreakpoint {
+    match breakpoint {
+        scryer_application::UiDashboardBreakpoint::Xs => UiDashboardBreakpoint::Xs,
+        scryer_application::UiDashboardBreakpoint::Sm => UiDashboardBreakpoint::Sm,
+        scryer_application::UiDashboardBreakpoint::Md => UiDashboardBreakpoint::Md,
+        scryer_application::UiDashboardBreakpoint::Lg => UiDashboardBreakpoint::Lg,
+    }
+}
+
+pub(crate) fn to_app_ui_dashboard_breakpoint(
+    breakpoint: UiDashboardBreakpoint,
+) -> scryer_application::UiDashboardBreakpoint {
+    match breakpoint {
+        UiDashboardBreakpoint::Xs => scryer_application::UiDashboardBreakpoint::Xs,
+        UiDashboardBreakpoint::Sm => scryer_application::UiDashboardBreakpoint::Sm,
+        UiDashboardBreakpoint::Md => scryer_application::UiDashboardBreakpoint::Md,
+        UiDashboardBreakpoint::Lg => scryer_application::UiDashboardBreakpoint::Lg,
+    }
+}
+
+pub(crate) fn dashboard_layout_from_input(
+    input: SetMyDashboardLayoutInput,
+) -> scryer_application::UiDashboardLayout {
+    scryer_application::UiDashboardLayout {
+        breakpoint: to_app_ui_dashboard_breakpoint(input.breakpoint),
+        columns: input.columns,
+        items: input
+            .items
+            .into_iter()
+            .map(|item| scryer_application::UiDashboardLayoutItem {
+                panel_id: item.panel_id,
+                x: item.x,
+                y: item.y,
+                w: item.w,
+                h: item.h,
+            })
+            .collect(),
     }
 }
 

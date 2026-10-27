@@ -19248,6 +19248,24 @@ type MutationRoot {
 		input: SetMyCatalogViewInput!
 	): UiSettingsPayload!
 	"""
+	Replaces the authenticated actor's dashboard layout for one breakpoint, leaving the other breakpoints unchanged.
+	"""
+	setMyDashboardLayout(
+		"""
+		Complete layout for one breakpoint; an empty item list saves a layout with no panels.
+		"""
+		input: SetMyDashboardLayoutInput!
+	): UiSettingsPayload!
+	"""
+	Forgets the authenticated actor's saved dashboard layout so the default layout applies again.
+	"""
+	resetMyDashboardLayout(
+		"""
+		Breakpoint to reset; null resets every breakpoint.
+		"""
+		breakpoint: UiDashboardBreakpoint
+	): UiSettingsPayload!
+	"""
 	Saves subtitle preferences after checking the catalog-settings permission.
 	"""
 	updateSubtitleSettings(
@@ -28853,6 +28871,24 @@ input SetMyCatalogViewInput {
 }
 
 """
+The caller's complete dashboard layout for one breakpoint.
+"""
+input SetMyDashboardLayoutInput {
+	"""
+	Breakpoint the layout was arranged for.
+	"""
+	breakpoint: UiDashboardBreakpoint!
+	"""
+	Number of grid columns, from 1 to 24.
+	"""
+	columns: Int!
+	"""
+	Every panel on the grid, at most 64; an empty list saves a layout with no panels.
+	"""
+	items: [UiDashboardLayoutItemInput!]!
+}
+
+"""
 Complete caller presentation-preferences update.
 """
 input SetMyUiSettingsInput {
@@ -32232,6 +32268,98 @@ type UiCatalogViewSettingPayload {
 }
 
 """
+Responsive breakpoint a dashboard layout was arranged for; each keeps its own layout.
+"""
+enum UiDashboardBreakpoint {
+	"""
+	Extra-small screens.
+	"""
+	XS
+	"""
+	Small screens.
+	"""
+	SM
+	"""
+	Medium screens.
+	"""
+	MD
+	"""
+	Large screens.
+	"""
+	LG
+}
+
+"""
+The dashboard layout saved for one breakpoint. An empty item list means every panel was removed.
+"""
+type UiDashboardLayout {
+	"""
+	Breakpoint the layout was arranged for.
+	"""
+	breakpoint: UiDashboardBreakpoint!
+	"""
+	Number of grid columns the layout was arranged on.
+	"""
+	columns: Int!
+	"""
+	Panels placed on the grid.
+	"""
+	items: [UiDashboardLayoutItem!]!
+}
+
+"""
+One panel's place on a saved dashboard grid.
+"""
+type UiDashboardLayoutItem {
+	"""
+	Identifier of the panel, defined by the web client.
+	"""
+	panelId: String!
+	"""
+	Zero-based column the panel starts at.
+	"""
+	x: Int!
+	"""
+	Zero-based row the panel starts at.
+	"""
+	y: Int!
+	"""
+	Width in grid columns.
+	"""
+	w: Int!
+	"""
+	Height in grid rows.
+	"""
+	h: Int!
+}
+
+"""
+One panel's place in a dashboard layout saved with setMyDashboardLayout.
+"""
+input UiDashboardLayoutItemInput {
+	"""
+	Identifier of the panel: 1 to 64 lowercase letters, digits or hyphens.
+	"""
+	panelId: String!
+	"""
+	Zero-based column the panel starts at.
+	"""
+	x: Int!
+	"""
+	Zero-based row the panel starts at.
+	"""
+	y: Int!
+	"""
+	Width in grid columns, at least 1; x plus w may not exceed the layout's columns.
+	"""
+	w: Int!
+	"""
+	Height in grid rows, at least 1.
+	"""
+	h: Int!
+}
+
+"""
 Date and time display format preference.
 """
 enum UiDateTimeFormatValue {
@@ -32439,6 +32567,10 @@ type UiSettingsPayload {
 	Persisted catalog view modes, per device class and facet.
 	"""
 	catalogViews: [UiCatalogViewSettingPayload!]!
+	"""
+	Saved dashboard layouts, one per breakpoint that has one; a breakpoint without an entry uses the default layout.
+	"""
+	dashboardLayouts: [UiDashboardLayout!]!
 }
 
 """
