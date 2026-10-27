@@ -1367,9 +1367,22 @@ export function SettingsIndexersSection({
           nextConfigValues[field.key] =
             field.defaultValue ?? (field.fieldType === "BOOL" ? "false" : "");
         }
+        const presetName = (nextProvider?.configFields ?? [])
+          .map((field) =>
+            selectedIndexerPresetName(
+              nextProvider?.configFields ?? [],
+              field.key,
+              nextConfigValues[field.key] ?? "",
+            ),
+          )
+          .find((name): name is string => name !== null);
         return {
           ...prev,
           providerType: nextProviderType,
+          name:
+            hasCustomizedName || !nextProvider
+              ? prev.name
+              : (presetName ?? nextProvider.name),
           downloadClientId:
             nextMappingCompatibility?.supportsMapping === false
               ? null
@@ -1385,6 +1398,7 @@ export function SettingsIndexersSection({
       });
     },
     [
+      hasCustomizedName,
       indexerDownloadClientMappingCatalogResource.catalog,
       providerTypes,
       setIndexerDraft,
