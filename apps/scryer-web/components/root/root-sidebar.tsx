@@ -1307,7 +1307,14 @@ function RootSidebarContent({
                     isWantedTop ||
                     (isSystemTop && hasVisibleSystemSubnav) ||
                     (isActivityTop && hasVisibleActivitySubnav);
-                  const shouldShowChildren = hasExpandableChildren && view === item.id;
+                  // Promoted shortcuts (Recycle Bin, Backups) are settings
+                  // sections with their own top-level entry, so opening one
+                  // leaves the Settings subnav closed.
+                  const shouldShowChildren =
+                    hasExpandableChildren &&
+                    (isSettingsTop
+                      ? isActiveSettingsSection
+                      : view === item.id);
                   if (
                     !isMediaSection &&
                     !isSettingsTop &&
