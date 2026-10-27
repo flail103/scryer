@@ -3,6 +3,7 @@ import { graphQlErrorExtension, userFacingGraphQlErrorMessage } from "../graphql
 export const INDEXER_CLIENT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED: "indexerClients.error.session",
   INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED: "indexerClients.error.permissions",
+  INDEXER_CLIENTS_ENABLE_REQUIRES_KEY: "indexerClients.error.enableRequiresKey",
   INDEXER_CLIENTS_KEY_INVALID: "indexerClients.error.key",
   INDEXER_CLIENTS_UNAVAILABLE: "indexerClients.error.unavailable",
   INDEXER_CLIENTS_NOT_FOUND: "indexerClients.error.missing",

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useClient } from "urql";
 import { Ban, CheckCircle2, Clipboard, Edit, KeyRound, Lock, Plus, RefreshCw, ShieldAlert } from "lucide-react";
@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { IndexerCategoryPicker } from "@/components/views/media-content/indexer-category-picker";
+import { SortableHead } from "@/components/views/lists/sortable-head";
 import { FilteredPluginList } from "@/components/views/settings/filtered-plugin-list";
 import { SETTINGS_REFERENCE_SLOT_ID } from "@/components/containers/settings/settings-container";
 import { useTranslate } from "@/lib/context/translate-context";
@@ -51,6 +52,7 @@ import { indexerClientOutcomeMessage } from "@/lib/utils/indexer-client-outcome"
 import { withMfaStepUp } from "@/lib/utils/with-mfa-step-up";
 import { getRuntimeBasePath } from "@/lib/runtime-config";
 import { indexerClientEndpointUrl } from "@/lib/utils/indexer-client-endpoint";
+import { sortIndexerClients, type IndexerClientSort, type IndexerClientSortKey } from "@/lib/utils/indexer-client-sort";
 
 const PROTOCOLS: readonly IndexerClientProtocol[] = ["NEWZNAB", "TORZNAB"];
 const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
@@ -115,6 +117,20 @@ export function SettingsIndexerClientsContainer() {
   const [clients, setClients] = useState<IndexerClientRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [sources, setSources] = useState<IndexerRecord[]>([]);
+  const [sort, setSort] = useState<IndexerClientSort>({ key: "name", descending: false });
+  const sortedClients = useMemo(() => (clients ? sortIndexerClients(clients, sort) : null), [clients, sort]);
+  const sortBy = (key: IndexerClientSortKey) =>
+    setSort((current) => ({ key, descending: current.key === key ? !current.descending : false }));
+  const sortHead = (key: IndexerClientSortKey, label: string, className: string) => (
+    <SortableHead
+      id={selectorId("settings-indexer-clients-sort", key)}
+      label={label}
+      active={sort.key === key}
+      descending={sort.descending}
+      onSort={() => sortBy(key)}
+      className={className}
+    />
+  );
   const [draft, setDraft] = useState(emptyDraft);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<IndexerClientRecord | null>(null);
@@ -325,17 +341,17 @@ export function SettingsIndexerClientsContainer() {
         <Table id="settings-indexer-clients-table" overflow="clip" layout="fixed" density="dense">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[22%]">{t("label.name")}</TableHead>
-              <TableHead className="w-[14%]">{t("indexerClients.protocols")}</TableHead>
-              <TableHead className="w-[12%] text-center">{t("indexerClients.grants")}</TableHead>
-              <TableHead className="w-[8%] text-center">{t("label.enabled")}</TableHead>
-              <TableHead className="w-[10%]">{t("indexerClients.key")}</TableHead>
-              <TableHead>{t("indexerClients.lastUsed")}</TableHead>
+              {sortHead("name", t("label.name"), "w-[22%]")}
+              {sortHead("protocols", t("indexerClients.protocols"), "w-[14%]")}
+              {sortHead("grants", t("indexerClients.grants"), "w-[13%] text-center")}
+              {sortHead("enabled", t("label.enabled"), "w-[9%] text-center")}
+              {sortHead("key", t("indexerClients.key"), "w-[11%]")}
+              {sortHead("lastUsed", t("indexerClients.lastUsed"), "")}
               <TableActionsHead className="w-32">{t("label.actions")}</TableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {clients.map((client) => (
+            {(sortedClients ?? []).map((client) => (
               <Fragment key={client.id}>
               <TableRow
                 id={selectorId("settings-indexer-client-row", client.id)}
@@ -352,7 +368,8 @@ export function SettingsIndexerClientsContainer() {
                     id={selectorId("settings-indexer-client-enabled", client.id)}
                     size="large"
                     checked={client.enabled}
-                    disabled={busy}
+                    disabled={busy || !client.keyActive}
+                    title={client.keyActive ? undefined : t("indexerClients.enableRequiresKey")}
                     aria-label={`${t("label.enabled")}: ${client.name}`}
                     onCheckedChange={(checked) => toggleEnabled(client, checked === true)}
                   />
@@ -461,12 +478,12 @@ export function SettingsIndexerClientsContainer() {
         >
           <CardHeader className="flex items-center justify-between gap-3">
             <CardTitle className="text-base">{t(editing ? "indexerClients.edit" : "indexerClients.create")}</CardTitle>
-            <label className="flex shrink-0 items-center gap-3">
+            <label className="flex shrink-0 items-center gap-3" title={editing && !editing.keyActive ? t("indexerClients.enableRequiresKey") : undefined}>
               <Checkbox
                 id="indexer-client-enabled"
                 size="large"
                 checked={draft.enabled}
-                disabled={busy}
+                disabled={busy || (editing !== null && !editing.keyActive)}
                 onCheckedChange={(checked) => setDraft({ ...draft, enabled: checked === true })}
               />
               <span className="text-sm font-medium">{t("label.enabled")}</span>
@@ -504,52 +521,91 @@ export function SettingsIndexerClientsContainer() {
                 ))}
               </div>
             </fieldset>
-            <fieldset className="space-y-3">
+            <fieldset className="space-y-2">
               <legend className="mb-1 text-sm font-medium">{t("indexerClients.grants")}</legend>
-              {sources.map((source) => {
-                const grant = draft.grants.find((value) => value.indexerId === source.id);
-                return (
-                  <div key={source.id} className="space-y-3 rounded-[12px] border border-[var(--scry-line2)] bg-[var(--scry-card2)] p-3">
-                    <CheckboxField
-                      id={`indexer-client-grant-${source.id}`}
-                      label={<>
-                        {source.name}
-                        {source.baseUrl ? <span className="ml-2 font-normal text-[var(--scry-muted3)]">{source.baseUrl}</span> : null}
-                      </>}
-                      checked={!!grant}
-                      disabled={busy}
-                      onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : undefined)}
-                    />
-                    {grant ? (
-                      <div className="space-y-3 pl-7">
-                        <CheckboxField
-                          id={`indexer-client-all-categories-${source.id}`}
-                          label={t("indexerClients.allCategories")}
-                          checked={grant.categories === null}
-                          disabled={busy}
-                          onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : [])}
+              <div className="rounded border border-border">
+                <Table id="indexer-client-grants" overflow="clip" layout="fixed" density="dense">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 text-center">
+                        <Checkbox
+                          id="indexer-client-grant-all"
+                          aria-label={t("indexerClients.grantAll")}
+                          checked={sources.length > 0 && draft.grants.length === sources.length
+                            ? true
+                            : draft.grants.length > 0 ? "indeterminate" : false}
+                          disabled={busy || sources.length === 0}
+                          onCheckedChange={(checked) => setDraft((current) => ({
+                            ...current,
+                            grants: checked === true
+                              ? sources.map((source) =>
+                                current.grants.find((grant) => grant.indexerId === source.id)
+                                  ?? { indexerId: source.id, categories: null })
+                              : [],
+                          }))}
                         />
-                        {grant.categories !== null ? (
-                          <IndexerCategoryPicker
-                            scope="RAW"
-                            value={grant.categories}
-                            disabled={busy}
-                            capsCategories={source.capsCategories}
-                            triggerId={`client-categories-${source.id}`}
-                            panelId={`client-categories-panel-${source.id}`}
-                            categoryIdPrefix={`client-category-${source.id}`}
-                            categoriesLabel={t("indexerClients.categories")}
-                            onChange={(categories) => setGrant(source.id, categories)}
-                          />
-                        ) : null}
-                        {grant.categories?.length === 0 ? (
-                          <p className="text-[var(--scry-warning-text)]">{t("indexerClients.noCategories")}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+                      </TableHead>
+                      <TableHead className="w-[24%]">{t("indexerClients.grantIndexer")}</TableHead>
+                      <TableHead className="w-[28%]">{t("settings.baseUrl")}</TableHead>
+                      <TableHead className="w-28 text-center">{t("indexerClients.grantAllCategories")}</TableHead>
+                      <TableHead>{t("indexerClients.categories")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sources.map((source) => {
+                      const grant = draft.grants.find((value) => value.indexerId === source.id);
+                      return (
+                        <TableRow key={source.id} id={selectorId("indexer-client-grant-row", source.id)}>
+                          <TableCell className="text-center">
+                            <Checkbox
+                              id={`indexer-client-grant-${source.id}`}
+                              aria-label={source.name}
+                              checked={!!grant}
+                              disabled={busy}
+                              onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : undefined)}
+                            />
+                          </TableCell>
+                          <TableCell className="truncate font-medium text-[var(--scry-ink2)]">{source.name}</TableCell>
+                          <TableCell className="truncate text-[var(--scry-muted3)]" title={source.baseUrl ?? undefined}>
+                            {source.baseUrl}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {grant ? (
+                              <Checkbox
+                                id={`indexer-client-all-categories-${source.id}`}
+                                aria-label={`${t("indexerClients.allCategories")}: ${source.name}`}
+                                checked={grant.categories === null}
+                                disabled={busy}
+                                onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : [])}
+                              />
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="py-1">
+                            {grant && grant.categories !== null ? (
+                              <div className="space-y-1">
+                                <IndexerCategoryPicker
+                                  scope="RAW"
+                                  value={grant.categories}
+                                  disabled={busy}
+                                  capsCategories={source.capsCategories}
+                                  triggerId={`client-categories-${source.id}`}
+                                  panelId={`client-categories-panel-${source.id}`}
+                                  categoryIdPrefix={`client-category-${source.id}`}
+                                  categoriesLabel={t("indexerClients.categories")}
+                                  onChange={(categories) => setGrant(source.id, categories)}
+                                />
+                                {grant.categories.length === 0 ? (
+                                  <p className="text-xs text-[var(--scry-warning-text)]">{t("indexerClients.noCategories")}</p>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             </fieldset>
             <div className="flex flex-wrap gap-2">
               <Button id="indexer-client-save" type="submit" disabled={busy || !draft.name.trim()}>
