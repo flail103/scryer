@@ -68,31 +68,50 @@ import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-
 import { dashboardDropRegions, type GridRect } from "@/lib/utils/dashboard-drop-targets";
 
 /**
- * Behind the grid during a resize: every cell, so the edge being dragged can
- * be seen snapping to them. One masked layer draws the whole grid, so it costs
- * the same however many rows there are.
+ * Behind the grid during a resize: a crosshair at every grid corner, so the
+ * edge being dragged can be seen snapping to them. One repeating SVG pattern
+ * draws them all, so it costs the same however many rows there are.
+ *
+ * A corner sits in the middle of the gap between cells. The layer starts half
+ * a gap before the grid, so the outer edges get corners too.
  */
+const GRID_CROSSHAIR_ARM = 4;
+
 function DashboardGridCells({ width, columns }: { width: number; columns: number }) {
+  const patternId = `scry-grid-corners-${React.useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [marginX, marginY] = DASHBOARD_MARGIN;
   const columnWidth = (width - marginX * (columns - 1)) / columns;
   const stepX = columnWidth + marginX;
   const stepY = DASHBOARD_ROW_HEIGHT + marginY;
-  const mask = [
-    `linear-gradient(to right, #000 ${columnWidth}px, transparent ${columnWidth}px)`,
-    `linear-gradient(to bottom, #000 ${DASHBOARD_ROW_HEIGHT}px, transparent ${DASHBOARD_ROW_HEIGHT}px)`,
-  ].join(", ");
+  const cx = stepX / 2;
+  const cy = stepY / 2;
   return (
-    <div
+    <svg
       className="scry-dashboard-grid-cells"
       aria-hidden="true"
       style={{
-        bottom: -3 * stepY,
-        maskImage: mask,
-        WebkitMaskImage: mask,
-        maskSize: `${stepX}px ${stepY}px`,
-        WebkitMaskSize: `${stepX}px ${stepY}px`,
+        left: -marginX / 2,
+        top: -marginY / 2,
+        width: width + marginX,
+        height: `calc(100% + ${marginY / 2 + 3 * stepY}px)`,
       }}
-    />
+    >
+      <defs>
+        <pattern
+          id={patternId}
+          x={-cx}
+          y={-cy}
+          width={stepX}
+          height={stepY}
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            d={`M${cx - GRID_CROSSHAIR_ARM} ${cy}H${cx + GRID_CROSSHAIR_ARM}M${cx} ${cy - GRID_CROSSHAIR_ARM}V${cy + GRID_CROSSHAIR_ARM}`}
+          />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${patternId})`} />
+    </svg>
   );
 }
 
