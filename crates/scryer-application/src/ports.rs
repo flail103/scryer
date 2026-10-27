@@ -4798,6 +4798,17 @@ pub trait IndexerCapsSnapshotRefresher: Send + Sync {
     ) -> AppResult<Option<IndexerCapsSnapshot>> {
         self.fetch_for_config(config, proxy).await
     }
+
+    async fn fetch_for_config_with_intent(
+        &self,
+        config: &IndexerConfig,
+        proxy: Option<&scryer_domain::ProxyConfig>,
+        accounting: Option<&IndexerAccountingContext>,
+        _intent: crate::SchedulerIntent,
+    ) -> AppResult<Option<IndexerCapsSnapshot>> {
+        self.fetch_for_config_with_accounting(config, proxy, accounting)
+            .await
+    }
 }
 
 /// One coverage-ledger row: the raw `(scope_key, indexer_id)`
@@ -10257,12 +10268,19 @@ pub trait IndexerClient: Send + Sync {
     /// An operator's raw text search. The multi-indexer client dispatches it
     /// to each eligible indexer; a single-indexer adapter answers it itself,
     /// and this default asks [`Self::search`] for the bare query, which
-    /// cannot carry the page size.
+    /// cannot carry the page size or a source cursor. Adapters must explicitly
+    /// implement page reads rather than silently replaying the first page.
     async fn search_raw_text(
         &self,
         request: crate::RawTextSearchRequest,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> AppResult<IndexerSearchResponse> {
+        if request.page.is_some() || request.nab.is_some() || request.recent_paging {
+            return Err(AppError::validation_refused(
+                crate::error_reasons::catalog::RAW_SEARCH_PAGING_UNSUPPORTED,
+                "This indexer adapter does not support raw page reads",
+            ));
+        }
         self.search(
             request.query,
             std::collections::HashMap::new(),
@@ -11716,7 +11734,7 @@ pub trait DownloadClient: Send + Sync {
     /// the URL with.
     async fn fetch_release_artifact(
         &self,
-        _request: &DownloadClientAddRequest,
+        _request: &IndexerArtifactResolutionRequest,
     ) -> AppResult<ResolvedDownloadArtifact> {
         Err(AppError::validation_refused(
             crate::error_reasons::ports::ARTIFACT_DOWNLOAD_UNSUPPORTED,

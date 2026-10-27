@@ -45,6 +45,7 @@ import type {
 import type { Release } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatUiDateTime } from "@/lib/utils/date-format";
+import { indexerCapsDiagnostic } from "@/lib/utils/indexer-caps-diagnostic";
 import {
   indexerSearchResultDownloadId,
   indexerSearchResultExpandId,
@@ -103,6 +104,9 @@ export type SettingsIndexerSearchSectionProps = {
   onRemoveSavedSearch: (index: number) => void;
   onSearch: () => void;
   onCancelSearch: () => void;
+  onNextPage?: () => void;
+  hasNextPage?: boolean;
+  deadlineReached?: boolean;
   searching: boolean;
   hasSearched: boolean;
   indexers: InteractiveSearchIndexerProgress[];
@@ -661,7 +665,7 @@ function HealthLine({
               key={entry.indexerId}
               id={selectorId("indexer-search-health", entry.name)}
               type="button"
-              title={indexerChipTitle(entry, t, dateTimeFormat)}
+              title={[indexerChipTitle(entry, t, dateTimeFormat), indexerCapsDiagnostic(entry, t)].filter(Boolean).join(" · ") || undefined}
               aria-pressed={active}
               onClick={() => onToggleFacet(facetKey)}
               className={cn(
@@ -1084,7 +1088,28 @@ export function SettingsIndexerSearchSection(
             >
               {t("indexerSearch.results.matched", { count: matchedCount })}
             </span>
+            {props.deadlineReached ? (
+              <span
+                id="indexer-search-page-pending"
+                role="status"
+                className="text-[13px] text-[var(--scry-warning-text)]"
+              >
+                {t("indexerSearch.page.pending")}
+              </span>
+            ) : null}
             <div className="min-w-2 flex-1" />
+            {props.onNextPage ? (
+              <Button
+                id="indexer-search-next-page"
+                variant="outline"
+                size="sm"
+                className="h-[34px]"
+                disabled={searching || !props.hasNextPage}
+                onClick={props.onNextPage}
+              >
+                {t("indexerSearch.page.next")}
+              </Button>
+            ) : null}
             <Select
               value={sort}
               onValueChange={(value) =>
@@ -1109,6 +1134,14 @@ export function SettingsIndexerSearchSection(
                 ))}
               </SelectContent>
             </Select>
+            {hasSearched ? (
+              <p
+                id="indexer-search-page-scope"
+                className="basis-full text-[12px] text-[var(--scry-text3)]"
+              >
+                {t("indexerSearch.page.localSort")}
+              </p>
+            ) : null}
           </div>
 
           <div className="w-full min-w-0 max-w-full overflow-x-auto">

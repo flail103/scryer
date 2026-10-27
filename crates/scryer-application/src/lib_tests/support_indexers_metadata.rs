@@ -328,6 +328,7 @@ impl IndexerClient for TrackingIndexerClient {
             routed_indexer_ids
                 .iter()
                 .map(|indexer_id| crate::IndexerQueryOutcome {
+                    page: None,
                     indexer_id: indexer_id.clone(),
                     outcome: crate::IndexerSearchOutcome::Partial {
                         empty: self.empty_results,
@@ -342,6 +343,7 @@ impl IndexerClient for TrackingIndexerClient {
                 .flat_map(|plan| plan.entries)
                 .filter(|(_, entry)| entry.enabled)
                 .map(|(indexer_id, _)| crate::IndexerQueryOutcome {
+                    page: None,
                     indexer_id,
                     outcome: crate::IndexerSearchOutcome::Complete {
                         empty: self.empty_results,
@@ -658,6 +660,7 @@ impl IndexerClient for FixedReleaseIndexerClient {
             .fired_indexer_ids
             .iter()
             .map(|id| crate::IndexerQueryOutcome {
+                page: None,
                 indexer_id: id.clone(),
                 outcome: crate::IndexerSearchOutcome::Complete {
                     empty: self.empty_response,

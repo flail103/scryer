@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { buildSchema, Kind, parse, validate, type DocumentNode } from "graphql";
 
+import * as indexerClients from "./indexer-clients.ts";
 import * as mutations from "./mutations.ts";
 import * as queries from "./queries.ts";
 
@@ -44,7 +45,7 @@ function collectDocuments(
   return documents;
 }
 
-const documents = collectDocuments({ queries, mutations });
+const documents = collectDocuments({ queries, mutations, indexerClients });
 
 test("collects the hand-written operations", () => {
   assert.ok(

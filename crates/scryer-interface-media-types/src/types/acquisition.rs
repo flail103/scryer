@@ -773,8 +773,13 @@ pub struct SearchReleasesInput {
     pub episode: Option<String>,
     /// Optional limit. A title search lists at most this many results
     /// (default 50, max 200); a `query` search asks each indexer for this many
-    /// (default 100, 1 to 500) and lists everything returned.
+    /// (default 100, 1 to 500); `aggregatePageSize` sets how many merged results
+    /// each page lists.
     pub limit: Option<i32>,
+    /// Results per page for a `query` search, after merging every indexer's
+    /// results (default 100, 1 to 100). Later pages use the `first` argument
+    /// of `continueInteractiveReleaseSearch`.
+    pub aggregate_page_size: Option<i32>,
     /// Raw operator query sent as typed to each indexer, without a catalog title.
     pub query: Option<String>,
     /// Optional indexer configuration identities to restrict the search to.
@@ -1713,6 +1718,25 @@ pub enum InteractiveReleaseSearchSkipReasonValue {
     NoTextSearch,
 }
 
+/// How Scryer obtained the capabilities it used to search an indexer.
+/// Capability provenance never changes the indexer's search outcome.
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
+pub enum IndexerCapsSourceValue {
+    /// A cached capability snapshot that is still current.
+    Fresh,
+    /// Capabilities supplied by the managing indexer.
+    ManagedMetadata,
+    /// Capabilities fetched again for this search.
+    Refreshed,
+    /// An expired snapshot, used because refreshing it did not succeed.
+    Stale,
+    /// No snapshot was available, so the requested search was attempted as asked.
+    Permissive,
+    /// Capabilities the provider plugin declares for itself.
+    ProviderDeclarations,
+}
+
 #[derive(SimpleObject, Clone)]
 /// Per-indexer progress and result count for an interactive release search.
 pub struct InteractiveReleaseSearchIndexerPayload {
@@ -1732,6 +1756,15 @@ pub struct InteractiveReleaseSearchIndexerPayload {
     pub elapsed_ms: Option<i32>,
     /// Failure reason, or null when the indexer did not fail.
     pub failure_reason: Option<String>,
+    /// How the capabilities used for this indexer were obtained, or null
+    /// before they were resolved.
+    pub caps_source: Option<IndexerCapsSourceValue>,
+    /// Stable reason code for why capability discovery fell back to stale or
+    /// permissive data, or null when it did not.
+    pub caps_reason: Option<String>,
+    /// Seconds the provider asked Scryer to wait before discovering
+    /// capabilities again, when it said so.
+    pub caps_retry_after_seconds: Option<i32>,
     /// True when the indexer asked Scryer to slow down rather than failing.
     /// Searching resumes on its own, so this reads as a cooldown, not an error.
     pub rate_limited: bool,
@@ -1756,6 +1789,17 @@ pub struct InteractiveReleaseSearchPayload {
     pub started_at: DateTime<Utc>,
     /// UTC completion time, or null while running.
     pub completed_at: Option<DateTime<Utc>>,
+    /// Opaque cursor for the following page of a query search, or null when
+    /// there is no following page. Pass it to `continueInteractiveReleaseSearch`.
+    pub next_cursor: Option<String>,
+    /// True when a query search page was returned at its time bound while some
+    /// indexers were still searching.
+    pub deadline_reached: bool,
+    /// Human-readable reason a query search could not complete, or null when it
+    /// did not fail. Shown only when the client does not know the code.
+    pub failure_reason: Option<String>,
+    /// Stable failure condition separate from the human-readable reason.
+    pub failure_reason_code: Option<String>,
 }
 
 #[derive(SimpleObject, Clone)]

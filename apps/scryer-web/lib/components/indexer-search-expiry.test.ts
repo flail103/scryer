@@ -5,6 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 import * as expiry from "../utils/indexer-search-expiry.ts";
 import * as search from "../utils/indexer-search.ts";
+import * as rawSearchErrors from "../utils/raw-search-error.ts";
 import type { InteractiveSearchProgress } from "../graphql/release-search.ts";
 import type { SettingsIndexerSearchSectionProps } from "../../components/views/settings/settings-indexer-search-section.tsx";
 
@@ -61,6 +62,7 @@ test("expiry clears results and dialog, blocks late snapshots, and permits a new
       return new Promise(() => {});
     } },
     "@/lib/utils/indexer-search": search,
+    "@/lib/utils/raw-search-error": rawSearchErrors,
     "@/lib/utils/indexer-search-expiry": expiry,
     "@/lib/utils/indexer-search-download": { downloadIndexerSearchArtifacts: async () => { downloads++; } },
     "@/components/common/grab-dialog": { GrabDialog: "grab-dialog" },

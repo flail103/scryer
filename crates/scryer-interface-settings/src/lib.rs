@@ -1,3 +1,4 @@
+mod indexer_clients;
 mod mutation;
 
 use async_graphql::{Context, ID, Object, Result as GqlResult};
@@ -16,6 +17,7 @@ use scryer_interface_media::mappers::{
 };
 use scryer_interface_media::types::*;
 
+pub use indexer_clients::{IndexerClientMutations, IndexerClientQueries};
 pub use mutation::SettingsMutations;
 
 #[derive(Default)]

@@ -3,6 +3,7 @@ use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 pub mod config;
+pub mod artifact_reference;
 
 const ENCRYPTED_PREFIX: &str = "enc:v1:";
 

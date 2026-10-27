@@ -62,7 +62,7 @@ export type MaintenanceRulesSection = "rules" | "candidates" | "history";
 /// in their own settings section because a profile is only ever reached
 /// through the indexer that applies it. Proxies used to be a pane too; they
 /// are a settings section of their own now that download clients assign them.
-export type IndexerSettingsTab = "indexers" | "search" | "seedingProfiles";
+export type IndexerSettingsTab = "indexers" | "search" | "clients" | "seedingProfiles";
 export type ContentSettingsSection =
   | "overview"
   | "import"

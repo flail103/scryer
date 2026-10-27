@@ -47,6 +47,7 @@ pub struct WasmIndexerClient {
     indexer_id: String,
     indexer_name: String,
     indexer_base_url: String,
+    host_caps: Option<scryer_plugin_sdk::PluginSearchCaps>,
     indexer_error_recorder: Arc<dyn IndexerErrorRecorder>,
     /// Counts outbound indexer requests. Defaults to the null tracker so the
     /// constructor and every existing call site keep their signatures.
@@ -204,6 +205,7 @@ impl WasmIndexerClient {
         proxy_config: Option<ProxyConfig>,
         indexer_error_recorder: Arc<dyn IndexerErrorRecorder>,
         settings: &BTreeMap<String, String>,
+        now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Self, AppError> {
         let inputs = build_runtime_inputs(&descriptor, &indexer_name, &config, proxy_config);
         let indexer_base_url = resolve_connection_url(&descriptor, Some(&inputs.config_entries))
@@ -285,8 +287,23 @@ impl WasmIndexerClient {
             "WASI Preview 2 indexer component registered"
         );
 
+        let host_caps = if config.is_direct_nab() || config.is_prowlarr_nab_proxy() {
+            let snapshot = scryer_application::cached_indexer_caps(&config, now)
+                .snapshot
+                .unwrap_or_default();
+            Some(
+                serde_json::from_value(
+                    serde_json::to_value(snapshot)
+                        .map_err(|error| AppError::Repository(error.to_string()))?,
+                )
+                .map_err(|error| AppError::Repository(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         Ok(Self {
             descriptor,
+            host_caps,
             accounting: scryer_application::IndexerAccountingContext::for_config(&config),
             indexer_base_url,
             indexer_id: config.id,
@@ -798,7 +815,7 @@ impl WasmIndexerClient {
             .invoke_component(
                 PluginIndexerCommand::Action(PluginActionRequest {
                     action: action.to_string(),
-                    payload: serde_json::json!({ "query": query }),
+                    payload: serde_json::json!({ "query": query, "host_caps": self.host_caps }),
                 }),
                 "indexer_action",
                 operation,
@@ -840,6 +857,9 @@ impl WasmIndexerClient {
         operation: IndexerErrorOperation,
         cancel_token: CancellationToken,
     ) -> AppResult<PluginSearchCallResponse> {
+        refuse_recent_paging_with_rss_catch_up(request)?;
+        let mut request = request.clone();
+        request.host_caps = self.host_caps.clone();
         let attested = matches!(
             &self.descriptor.provider,
             ProviderDescriptor::Indexer(descriptor)
@@ -854,7 +874,7 @@ impl WasmIndexerClient {
             .begin_indexer_error_capture(self.indexer_error_capture(operation));
         let result = match self
             .invoke_component(
-                PluginIndexerCommand::Search(request.clone()),
+                PluginIndexerCommand::Search(request),
                 "indexer_search",
                 operation,
                 Some(&cancel_token),
@@ -1618,6 +1638,19 @@ fn build_search_context(
     }
 }
 
+/// Recent paging walks a feed by provider cursor, while an RSS catch-up
+/// marker stops a walk at a previously seen item. The two stop rules conflict,
+/// so the host never hands a plugin both on one request.
+fn refuse_recent_paging_with_rss_catch_up(request: &PluginSearchRequest) -> AppResult<()> {
+    if request.recent_paging && request.rss_catch_up.is_some() {
+        return Err(AppError::validation_refused(
+            scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP,
+            "A plugin search cannot combine recent paging with an RSS catch-up marker",
+        ));
+    }
+    Ok(())
+}
+
 /// Results an indexer search asks the plugin for when the host sets no limit.
 const DEFAULT_SEARCH_RESULT_LIMIT: usize = 1000;
 
@@ -1666,6 +1699,7 @@ fn plugin_search_request_from_strategy(
                 last_seen_identity: marker.last_seen_identity,
             }),
         page_cursor: None,
+        ..Default::default()
     }
 }
 
@@ -1827,6 +1861,7 @@ fn response_attributes(
         tmdb_id: response_id("tmdb_id", "response_tmdbid"),
         imdb_id: response_id("imdb_id", "response_imdbid"),
         categories: response_attribute_categories(extra),
+        ..Default::default()
     }
 }
 
@@ -1957,6 +1992,25 @@ fn insert_value<T: serde::Serialize>(
     insert_json(extra, key, value);
 }
 
+fn provider_stops_continuation(completion: IndexerSearchCompletion) -> bool {
+    matches!(
+        completion,
+        IndexerSearchCompletion::Partial {
+            reason: Some(
+                HostIncompleteReason::PageCeilingReached | HostIncompleteReason::SaturatedPartition
+            ),
+            ..
+        }
+    )
+}
+
+fn preserve_raw_provider_stop(mut response: PluginSearchCallResponse) -> PluginSearchCallResponse {
+    if provider_stops_continuation(response.completion) {
+        response.response.next_cursor = None;
+    }
+    response
+}
+
 fn host_search_response(
     client: &WasmIndexerClient,
     response: PluginSearchCallResponse,
@@ -1985,7 +2039,7 @@ fn host_search_response(
         .into_iter()
         .map(|result| {
             let extra = merge_result_extra(&result);
-            let response_attributes = response_attributes(&extra);
+            let mut response_attributes = response_attributes(&extra);
             let password_hint = plugin_password_hint(&result, &extra);
             let source_kind = explicit_source_kind(&result, &extra).or_else(|| {
                 DownloadSourceKind::infer_from_indexer_result(
@@ -1996,6 +2050,7 @@ fn host_search_response(
                 )
             });
 
+            response_attributes.original = result.attributes;
             IndexerSearchResult {
                 indexer_id: None,
                 source: source.clone(),
@@ -2070,7 +2125,7 @@ async fn forward_component_strategy_event(
 
 /// Longest page cursor the host carries between pages. A cursor is a short
 /// provider position; anything longer is treated as malformed.
-const MAX_PAGE_CURSOR_BYTES: usize = 4096;
+const MAX_PAGE_CURSOR_BYTES: usize = scryer_application::INDEXER_PAGE_CURSOR_MAX_BYTES;
 
 /// Pages one read follows when the caller set no page budget. A provider
 /// whose cursors never run out cannot hold a search open past it.
@@ -2199,14 +2254,7 @@ impl PagedRead {
                 ..
             } => self.unattested = true,
             // The provider refused to go further; there is nothing to resume.
-            IndexerSearchCompletion::Partial {
-                reason:
-                    Some(
-                        HostIncompleteReason::PageCeilingReached
-                        | HostIncompleteReason::SaturatedPartition,
-                    ),
-                ..
-            } => {
+            completion if provider_stops_continuation(completion) => {
                 return PagedStep::Done(self.finish(page_completion, None));
             }
             // A page that ended partial is read again from its cursor.
@@ -2668,7 +2716,11 @@ impl IndexerClient for WasmIndexerClient {
                 .map(|mut strategy| PluginSearchStrategyRequest {
                     strategy_id: std::mem::take(&mut strategy.strategy_id),
                     labels: std::mem::take(&mut strategy.labels),
-                    request: plugin_search_request_from_strategy(strategy, mode),
+                    request: {
+                        let mut request = plugin_search_request_from_strategy(strategy, mode);
+                        request.host_caps = self.host_caps.clone();
+                        request
+                    },
                 })
                 .collect(),
         };
@@ -2730,6 +2782,7 @@ impl IndexerClient for WasmIndexerClient {
             context: Some(context),
             rss_catch_up: None,
             page_cursor: None,
+            ..Default::default()
         };
         self.search_with_request(request, mode, operation, cancel_token, None, None)
             .await
@@ -2770,6 +2823,21 @@ impl IndexerClient for WasmIndexerClient {
         if cancel_token.is_cancelled() {
             return Err(AppError::canceled("plugin indexer search canceled"));
         }
+        let single_page = request.page.is_some();
+        let exact_nab = request.nab.is_some() || request.recent_paging;
+        let accepts_nab = self
+            .descriptor
+            .indexer()
+            .is_some_and(|descriptor| descriptor.capabilities.raw_nab_search);
+        if (exact_nab && !accepts_nab)
+            || (single_page
+                && (!self.paged_search() || (!exact_nab && request.query.trim().is_empty())))
+        {
+            return Err(AppError::validation_refused(
+                scryer_application::error_reasons::catalog::RAW_SEARCH_PAGING_UNSUPPORTED,
+                "This indexer adapter does not support this raw page read",
+            ));
+        }
         let mode = SearchMode::Interactive;
         let context = build_search_context(
             &request.query,
@@ -2783,11 +2851,30 @@ impl IndexerClient for WasmIndexerClient {
         );
         let request = PluginSearchRequest {
             query: request.query,
+            nab: request.nab,
+            recent_paging: request.recent_paging,
             categories: request.categories,
             limit: request.limit.unwrap_or(100) as usize,
             context: Some(context),
+            page_cursor: request.page.and_then(|page| page.cursor),
             ..PluginSearchRequest::default()
         };
+        if single_page || exact_nab {
+            // A budget of exactly one provider invocation: the coordinator
+            // owns continuation and no-progress detection. Do not run the
+            // accumulating reader, whose soft result limit changes completion.
+            let response = self
+                .call_search_request(
+                    &request,
+                    IndexerErrorOperation::InteractiveSearch,
+                    cancel_token,
+                )
+                .await?;
+            return Ok(host_search_response(
+                self,
+                preserve_raw_provider_stop(response),
+            ));
+        }
         self.search_with_request(
             request,
             mode,
@@ -3259,6 +3346,37 @@ mod tests {
     }
 
     #[test]
+    fn raw_pages_preserve_native_provider_stops_without_inventing_a_walk_depth_limit() {
+        for reason in [
+            HostIncompleteReason::PageCeilingReached,
+            HostIncompleteReason::SaturatedPartition,
+            HostIncompleteReason::Unattested,
+            HostIncompleteReason::RateLimited,
+        ] {
+            let mut response = page(&["A"], Some("p31"));
+            let completion = IndexerSearchCompletion::Partial {
+                reason: Some(reason),
+                retry_after: None,
+            };
+            response.completion = completion;
+            let response = preserve_raw_provider_stop(response);
+            assert_eq!(response.completion, completion);
+            assert_eq!(titles(&response), vec!["A"]);
+            assert_eq!(
+                response.response.next_cursor.as_deref(),
+                (!provider_stops_continuation(completion)).then_some("p31")
+            );
+        }
+        assert_eq!(
+            preserve_raw_provider_stop(page(&["A"], Some("p31")))
+                .response
+                .next_cursor
+                .as_deref(),
+            Some("p31")
+        );
+    }
+
+    #[test]
     fn a_paged_read_stops_at_its_page_budget_with_the_resume_cursor() {
         let mut read = paged_read(1000, Some("p4"), Some(2));
         assert_eq!(next(read.absorb(page(&["A"], Some("p5")))), "p5");
@@ -3505,6 +3623,64 @@ mod tests {
         assert_eq!(
             wire["rss_catch_up"]["last_seen_published_at"],
             "2026-09-20T10:00:00Z"
+        );
+    }
+
+    fn synthetic_rss_marker() -> scryer_plugin_sdk::PluginRssCatchUp {
+        scryer_plugin_sdk::PluginRssCatchUp {
+            last_seen_published_at: "2026-09-20T10:00:00Z".to_string(),
+            last_seen_identity: Some("marker-guid".to_string()),
+        }
+    }
+
+    #[test]
+    fn recent_paging_with_an_rss_marker_is_refused_and_each_alone_is_not() {
+        let both = PluginSearchRequest {
+            recent_paging: true,
+            rss_catch_up: Some(synthetic_rss_marker()),
+            ..PluginSearchRequest::default()
+        };
+        assert_eq!(
+            refuse_recent_paging_with_rss_catch_up(&both)
+                .expect_err("the combination is refused")
+                .validation_reason(),
+            Some(scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP)
+        );
+        for alone in [
+            PluginSearchRequest {
+                recent_paging: true,
+                ..PluginSearchRequest::default()
+            },
+            PluginSearchRequest {
+                rss_catch_up: Some(synthetic_rss_marker()),
+                ..PluginSearchRequest::default()
+            },
+            PluginSearchRequest::default(),
+        ] {
+            refuse_recent_paging_with_rss_catch_up(&alone).expect("a single flag is allowed");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_host_refuses_recent_paging_with_an_rss_marker_before_the_plugin_runs() {
+        let client = builtin_newznab_client(IndexerMemoryPolicy::default());
+        let request = PluginSearchRequest {
+            recent_paging: true,
+            rss_catch_up: Some(synthetic_rss_marker()),
+            ..PluginSearchRequest::default()
+        };
+        let error = client
+            .call_search_request(
+                &request,
+                IndexerErrorOperation::InteractiveSearch,
+                CancellationToken::new(),
+            )
+            .await
+            .err()
+            .expect("the combination never reaches the plugin");
+        assert_eq!(
+            error.validation_reason(),
+            Some(scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP)
         );
     }
 
@@ -4601,6 +4777,128 @@ mod tests {
         assert!(!plain.contains("memory cap"), "{plain}");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_search_page_reads_once_and_resumes_without_gaps() {
+        use scryer_application::{RawTextSearchPage, RawTextSearchRequest};
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::query_param};
+
+        for (kind, asset) in [
+            ("newznab", crate::builtins::NEWZNAB),
+            ("torznab", crate::builtins::TORZNAB),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(query_param("t", "caps"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(
+                    r#"<caps><limits default="100" max="100"/><searching><search available="yes" supportedParams="q"/></searching></caps>"#,
+                    "application/xml",
+                ))
+                .mount(&server)
+                .await;
+            Mock::given(query_param("t", "search"))
+                .respond_with(|request: &wiremock::Request| {
+                    let offset = request.url.query_pairs()
+                        .find(|(key, _)| key == "offset")
+                        .map_or(0, |(_, value)| value.parse::<usize>().unwrap());
+                    let items = (offset..offset + 100).map(|item| format!(
+                        "<item><title>Example.Result.{item}</title><guid>release-{item}</guid><enclosure url=\"https://indexer.invalid/{item}\" length=\"1000\" type=\"application/x-nzb\"/></item>"
+                    )).collect::<String>();
+                    ResponseTemplate::new(200).set_body_raw(format!(
+                        "<rss xmlns:newznab=\"http://www.newznab.com/DTD/2010/feeds/attributes/\"><channel><newznab:response offset=\"{offset}\" total=\"1000\"/>{items}</channel></rss>"
+                    ), "application/xml")
+                })
+                .mount(&server)
+                .await;
+            let wasm = crate::builtins::decode_builtin_wasm(asset).expect("bundled wasm");
+            let descriptor: PluginDescriptor = serde_json::from_str(asset.descriptor_json).unwrap();
+            let mut config = sample_indexer_config(kind, None);
+            config.base_url = server.uri();
+            config.config_json = Some(
+                serde_json::json!({"base_url": server.uri(), "api_key": "fixture-key"}).to_string(),
+            );
+            let client = WasmIndexerClient::new_component_with_plugin_settings(
+                wasm,
+                descriptor,
+                "Raw page fixture".into(),
+                config,
+                None,
+                Arc::new(scryer_application::NullIndexerErrorRecorder),
+                &BTreeMap::new(),
+                chrono::Utc::now(),
+            )
+            .expect("bundled client");
+            let mut cursor = None;
+            let mut seen = std::collections::HashSet::new();
+            // A large limit must not accumulate pages. Nab adapters bound a
+            // smaller page to the requested size and advance only that far;
+            // increasing the size again must not skip its remaining items.
+            for (index, (limit, expected_count, offset, next_offset)) in
+                [(250, 100, 0, 100), (1, 1, 100, 101), (250, 100, 101, 201)]
+                    .into_iter()
+                    .enumerate()
+            {
+                let response = tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    client.search_raw_text(
+                        RawTextSearchRequest {
+                            query: "Example".into(),
+                            limit: Some(limit),
+                            page: Some(RawTextSearchPage {
+                                cursor: cursor.take(),
+                            }),
+                            ..Default::default()
+                        },
+                        CancellationToken::new(),
+                    ),
+                )
+                .await
+                .expect("fixture search deadline")
+                .expect("raw page");
+                assert_eq!(response.results.len(), expected_count, "{kind}");
+                for result in response.results {
+                    assert!(seen.insert(result.title), "{kind}: duplicate result");
+                }
+                assert_eq!(
+                    response.completion,
+                    IndexerSearchCompletion::Partial {
+                        reason: None,
+                        retry_after: None,
+                    },
+                    "{kind}: an open listing must not become a result-limit ceiling"
+                );
+                assert_eq!(
+                    response.next_cursor,
+                    Some(format!("offset:{next_offset}")),
+                    "{kind}"
+                );
+                cursor = response.next_cursor;
+                let requests = server.received_requests().await.unwrap();
+                let reads = requests
+                    .iter()
+                    .filter(|request| {
+                        request
+                            .url
+                            .query_pairs()
+                            .any(|(key, value)| key == "t" && value == "search")
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(reads.len(), index + 1, "{kind}: one provider read per call");
+                let actual_offset = reads[index]
+                    .url
+                    .query_pairs()
+                    .find(|(key, _)| key == "offset")
+                    .map_or(0, |(_, value)| value.parse::<usize>().unwrap());
+                assert_eq!(actual_offset, offset, "{kind}");
+            }
+            let expected = (0..201)
+                .map(|item| format!("Example.Result.{item}"))
+                .collect();
+            assert_eq!(
+                seen, expected,
+                "{kind}: no skipped results across page sizes"
+            );
+        }
+    }
+
     /// The bundled Newznab component, configured against a closed local port.
     /// The probes below are actions the component answers without HTTP.
     fn builtin_newznab_client(policy: IndexerMemoryPolicy) -> WasmIndexerClient {
@@ -4618,6 +4916,7 @@ mod tests {
             None,
             Arc::new(scryer_application::NullIndexerErrorRecorder),
             &BTreeMap::new(),
+            chrono::Utc::now(),
         )
         .expect("bundled Newznab client");
         Arc::get_mut(&mut client.component)
