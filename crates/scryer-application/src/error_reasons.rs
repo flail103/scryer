@@ -3336,6 +3336,22 @@ pub mod download_client_config {
 pub mod settings {
     /// Catalog view columns must match the saved device class and facet.
     pub const CATALOG_VIEW_COLUMNS_INVALID: &str = "SETTINGS_CATALOG_VIEW_COLUMNS_INVALID";
+    /// A dashboard layout's column count is outside the supported range.
+    pub const DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE: &str =
+        "SETTINGS_DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE";
+    /// A dashboard layout has more panels than one layout may hold.
+    pub const DASHBOARD_LAYOUT_TOO_MANY_ITEMS: &str = "SETTINGS_DASHBOARD_LAYOUT_TOO_MANY_ITEMS";
+    /// A dashboard panel id is empty, too long, or uses characters other than lowercase letters, digits and hyphens.
+    pub const DASHBOARD_PANEL_ID_INVALID: &str = "SETTINGS_DASHBOARD_PANEL_ID_INVALID";
+    /// A dashboard layout places the same panel more than once.
+    pub const DASHBOARD_PANEL_ID_DUPLICATED: &str = "SETTINGS_DASHBOARD_PANEL_ID_DUPLICATED";
+    /// A dashboard panel starts at a negative row or column.
+    pub const DASHBOARD_ITEM_POSITION_OUT_OF_RANGE: &str =
+        "SETTINGS_DASHBOARD_ITEM_POSITION_OUT_OF_RANGE";
+    /// A dashboard panel is less than one cell wide or tall.
+    pub const DASHBOARD_ITEM_SIZE_OUT_OF_RANGE: &str = "SETTINGS_DASHBOARD_ITEM_SIZE_OUT_OF_RANGE";
+    /// A dashboard panel extends past the layout's last column.
+    pub const DASHBOARD_ITEM_EXCEEDS_COLUMNS: &str = "SETTINGS_DASHBOARD_ITEM_EXCEEDS_COLUMNS";
     /// Language must be a language code of at most the selected value letters, digits or hyphens.
     pub const LANGUAGE_OUT_OF_RANGE: &str = "SETTINGS_LANGUAGE_OUT_OF_RANGE";
     /// The requested value must be a #RRGGBB hex color.
@@ -3574,6 +3590,13 @@ pub mod settings {
         DELAY_PROFILE_CATALOG_INVALID,
         TRUSTED_PROXY_POLICY_INVALID,
         CATALOG_VIEW_COLUMNS_INVALID,
+        DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE,
+        DASHBOARD_LAYOUT_TOO_MANY_ITEMS,
+        DASHBOARD_PANEL_ID_INVALID,
+        DASHBOARD_PANEL_ID_DUPLICATED,
+        DASHBOARD_ITEM_POSITION_OUT_OF_RANGE,
+        DASHBOARD_ITEM_SIZE_OUT_OF_RANGE,
+        DASHBOARD_ITEM_EXCEEDS_COLUMNS,
         LANGUAGE_OUT_OF_RANGE,
         MUST_RRGGBB_HEX_COLOR,
         UI_TABLE_COLUMN_SETTING_COLUMN_DUPLICATED,

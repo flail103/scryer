@@ -3471,6 +3471,20 @@ pub trait UserUiSettingsRepository: Send + Sync {
         user_id: &str,
         update: UiCatalogViewUpdate,
     ) -> AppResult<UiSettings>;
+    /// Replaces the user's dashboard layout for the layout's breakpoint.
+    async fn set_dashboard_layout(
+        &self,
+        user_id: &str,
+        layout: UiDashboardLayout,
+    ) -> AppResult<UiSettings>;
+    /// Deletes the user's dashboard layout for one breakpoint, or for every
+    /// breakpoint when `breakpoint` is `None`. Returns `None` when the user has
+    /// no saved settings.
+    async fn reset_dashboard_layouts(
+        &self,
+        user_id: &str,
+        breakpoint: Option<UiDashboardBreakpoint>,
+    ) -> AppResult<Option<UiSettings>>;
 }
 
 #[async_trait]

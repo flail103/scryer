@@ -853,8 +853,16 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
             "missing mutation {name}"
         );
     }
+    // Dashboard layouts add `setMyDashboardLayout` and
+    // `resetMyDashboardLayout`: 281->283.
+    for name in ["setMyDashboardLayout", "resetMyDashboardLayout"] {
+        assert!(
+            mutation_field_names.contains(&name),
+            "missing mutation {name}"
+        );
+    }
     assert_eq!(
-        mutation_field_count, 281,
+        mutation_field_count, 283,
         "mutation fields: {mutation_field_names:?}"
     );
     // Cross-library transfer (T082, FR-055/FR-056) surfaces destination-title
@@ -1230,14 +1238,26 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     ] {
         assert!(public_type_names.contains(&name), "missing type {name}");
     }
+    // Dashboard layouts add the breakpoint enum, the layout and item objects,
+    // and their two inputs: public types 982->987, OBJECT 531->533,
+    // INPUT_OBJECT 240->242, ENUM 199->200.
+    for name in [
+        "UiDashboardBreakpoint",
+        "UiDashboardLayout",
+        "UiDashboardLayoutItem",
+        "UiDashboardLayoutItemInput",
+        "SetMyDashboardLayoutInput",
+    ] {
+        assert!(public_type_names.contains(&name), "missing type {name}");
+    }
     assert_eq!(
         public_types.len(),
-        982,
+        987,
         "public types: {public_type_names:?}"
     );
-    assert_eq!(kind_count("OBJECT"), 531);
-    assert_eq!(kind_count("INPUT_OBJECT"), 240);
-    assert_eq!(kind_count("ENUM"), 199);
+    assert_eq!(kind_count("OBJECT"), 533);
+    assert_eq!(kind_count("INPUT_OBJECT"), 242);
+    assert_eq!(kind_count("ENUM"), 200);
     assert_eq!(kind_count("SCALAR"), 10);
     assert_eq!(kind_count("UNION"), 2);
     assert!(mutation_field_names.contains(&"mediaFileDiscEpisodeTargets"));
