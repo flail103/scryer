@@ -273,3 +273,76 @@ async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated
             && !client_type.contains("apiKey")
     );
 }
+
+#[tokio::test]
+async fn revoking_a_key_disables_the_client_until_a_rotated_key_is_enabled() {
+    let ctx = TestContext::new().await;
+    let store = Arc::new(IndexerClientStore::new(ctx.db.datastore()));
+    let app = ctx
+        .app
+        .with_test_overrides(|builder| builder.with_indexer_client_repository(store));
+    let schema = scryer_interface::build_schema(app, ctx.auth_runtime.clone());
+    let mut actor = User::new_admin("client-operator");
+    actor.authorization.app = AppPermissionMask::ALL;
+    actor.authorization.loaded = true;
+    ctx.users.create(actor.clone()).await.unwrap();
+    let until = Some(i64::MAX);
+    let execute = |query: &'static str, variables: Value| {
+        let schema = schema.clone();
+        let actor = actor.clone();
+        async move {
+            schema
+                .execute(
+                    request(query, &actor, true, false, until)
+                        .variables(Variables::from_json(variables)),
+                )
+                .await
+        }
+    };
+    let created = data(
+        schema
+            .execute(request(CREATE, &actor, true, false, until))
+            .await,
+    );
+    let id = created["createIndexerClient"]["client"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let revoked = data(
+        execute(
+            "mutation($id: ID!) { revokeIndexerClientKey(id: $id, expectedRevision: 1) { enabled keyActive } }",
+            json!({"id": id}),
+        )
+        .await,
+    );
+    assert_eq!(revoked["revokeIndexerClientKey"]["enabled"], false);
+    assert_eq!(revoked["revokeIndexerClientKey"]["keyActive"], false);
+
+    const ENABLE: &str = "mutation($id: ID!, $rev: Long!) { updateIndexerClient(id: $id, expectedRevision: $rev, input: {
+        name: \"Tool fixture\", enabled: true, protocols: [NEWZNAB], grants: [] }) { enabled } }";
+    let refused = execute(ENABLE, json!({"id": id, "rev": 2})).await;
+    assert_eq!(
+        error_field(&refused, "reason"),
+        "INDEXER_CLIENTS_ENABLE_REQUIRES_KEY"
+    );
+
+    let rotated = data(
+        execute(
+            "mutation($id: ID!) { rotateIndexerClientKey(id: $id, expectedRevision: 2) { client { enabled keyActive } } }",
+            json!({"id": id}),
+        )
+        .await,
+    );
+    assert_eq!(
+        rotated["rotateIndexerClientKey"]["client"]["enabled"],
+        false
+    );
+    assert_eq!(
+        rotated["rotateIndexerClientKey"]["client"]["keyActive"],
+        true
+    );
+
+    let enabled = data(execute(ENABLE, json!({"id": id, "rev": 3})).await);
+    assert_eq!(enabled["updateIndexerClient"]["enabled"], true);
+}

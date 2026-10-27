@@ -143,6 +143,12 @@ impl AppUseCase {
         let mut record = self
             .indexer_client_for_update(id, expected_revision)
             .await?;
+        if configuration.enabled && record.secret_hash.is_none() {
+            return Err(AppError::validation_refused(
+                reasons::ENABLE_REQUIRES_KEY,
+                "Rotate in a new key before enabling this client; its key was revoked",
+            ));
+        }
         record.configuration = configuration;
         self.save_indexer_client_update(record, expected_revision)
             .await
@@ -197,6 +203,9 @@ impl AppUseCase {
             .await?;
         record.lookup_id = None;
         record.secret_hash = None;
+        // A client with no key cannot be used, so it is switched off with the
+        // key. Rotating a key in later does not switch it back on.
+        record.configuration.enabled = false;
         record.key_generation = increment(record.key_generation)?;
         self.save_indexer_client_update(record, expected_revision)
             .await

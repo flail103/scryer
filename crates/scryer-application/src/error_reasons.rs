@@ -5,6 +5,8 @@ pub mod indexer_clients {
     pub const INTERACTIVE_SESSION_REQUIRED: &str = "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED";
     /// The acting user does not hold every application permission.
     pub const ALL_PERMISSIONS_REQUIRED: &str = "INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED";
+    /// A client whose key was revoked cannot be enabled until a key is rotated in.
+    pub const ENABLE_REQUIRES_KEY: &str = "INDEXER_CLIENTS_ENABLE_REQUIRES_KEY";
     /// The submitted client key is malformed or does not verify.
     pub const KEY_INVALID: &str = "INDEXER_CLIENTS_KEY_INVALID";
     /// The client repository is unavailable in this runtime.
@@ -36,6 +38,7 @@ pub mod indexer_clients {
     pub const ALL: &[&str] = &[
         INTERACTIVE_SESSION_REQUIRED,
         ALL_PERMISSIONS_REQUIRED,
+        ENABLE_REQUIRES_KEY,
         KEY_INVALID,
         UNAVAILABLE,
         NOT_FOUND,
