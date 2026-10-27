@@ -40,6 +40,17 @@ fn result(attributes: Vec<PluginReleaseAttribute>) -> IndexerSearchResult {
     }
 }
 
+/// The pinned page generation time every test page carries.
+fn generated_at() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-10-27T18:30:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+fn size_attribute() -> (Option<String>, String, String) {
+    (Some(TORZNAB_NAMESPACE.into()), "size".into(), "123".into())
+}
+
 fn attribute(namespace: Option<&str>, name: &str, value: &str) -> PluginReleaseAttribute {
     PluginReleaseAttribute {
         origin: PluginReleaseAttributeOrigin::Attribute,
@@ -55,7 +66,11 @@ fn xml(result: &IndexerSearchResult, total: Option<usize>) -> String {
     write_xml_feed(
         &mut output,
         NabProtocol::Torznab,
-        &NabFeedPage { offset: 100, total },
+        &NabFeedPage {
+            offset: 100,
+            total,
+            generated_at: generated_at(),
+        },
         [NabFeedItem {
             result,
             external_guid: "opaque-source-release",
@@ -135,6 +150,8 @@ fn json_wire_metadata_serializes_as_xml_without_losing_lexical_or_repeated_value
             (None, "custom".into(), "001.00".into()),
             (None, "custom".into(), "second & <third> \"quoted\"".into()),
             (None, "password".into(), "release&password".into()),
+            // The source carries no size, so the typed size fills the gap.
+            size_attribute(),
         ]
     );
     assert!(output.contains("<category>Software &amp; tools</category>"));
@@ -158,7 +175,12 @@ fn namespace_rebinding_is_preserved_per_attribute() {
             .iter()
             .map(|value| value.0.as_deref())
             .collect::<Vec<_>>(),
-        vec![Some("urn:outer"), Some("urn:inner")]
+        // The typed size follows the source attributes in its own namespace.
+        vec![
+            Some("urn:outer"),
+            Some("urn:inner"),
+            Some(TORZNAB_NAMESPACE)
+        ]
     );
     assert!(output.contains("offset=\"100\" total=\"101\""));
 }
@@ -186,7 +208,7 @@ fn only_download_fields_are_rewritten_and_password_metadata_survives() {
         None,
     );
     let values = parsed_attributes(&output);
-    assert_eq!(values.len(), 6);
+    assert_eq!(values.len(), 7);
     assert_eq!(
         values[0].2,
         "https://scryer.example/torznab/api?t=get&id=reference"
@@ -202,6 +224,7 @@ fn only_download_fields_are_rewritten_and_password_metadata_survives() {
     );
     assert_eq!(values[4].2, "keep");
     assert_eq!(values[5].2, "012345");
+    assert_eq!(values[6], size_attribute());
 }
 
 #[test]
@@ -220,7 +243,7 @@ fn invalid_names_and_xml_control_characters_are_skipped_without_truncating_the_f
     ] {
         let result = result(attributes);
         let output = xml(&result, None);
-        assert!(parsed_attributes(&output).is_empty());
+        assert_eq!(parsed_attributes(&output), vec![size_attribute()]);
         assert!(output.ends_with("</channel></rss>"));
         assert!(!output.contains("injected"));
     }
@@ -246,7 +269,8 @@ fn output_failure_is_propagated_without_consuming_the_rest_of_the_page() {
             NabProtocol::Newznab,
             &NabFeedPage {
                 offset: 0,
-                total: None
+                total: None,
+                generated_at: generated_at(),
             },
             items
         )
@@ -262,6 +286,7 @@ fn lazy_owned_links_preserve_output_and_stop_after_a_reference_failure() {
     let page = NabFeedPage {
         offset: 0,
         total: None,
+        generated_at: generated_at(),
     };
     for json in [false, true] {
         let mut visited = 0;
@@ -315,6 +340,7 @@ fn json_output_keeps_repeated_attributes_categories_and_unknown_total() {
         &NabFeedPage {
             offset: 100,
             total: None,
+            generated_at: generated_at(),
         },
         [NabFeedItem {
             result: &result,
@@ -367,13 +393,14 @@ fn non_nab_adapters_emit_normalized_claims_without_inventing_extended_attributes
             .map(|(_, name, value)| (name.as_str(), value.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("imdbid", "tt0012345"),
-            ("size", "123"),
-            ("grabs", "4"),
-            ("password", "release<&password"),
             ("category", "4000"),
             ("category", "6000"),
-            ("category", "100123")
+            ("category", "100123"),
+            ("imdb", "0012345"),
+            ("imdbid", "0012345"),
+            ("grabs", "4"),
+            ("size", "123"),
+            ("password", "release<&password"),
         ]
     );
     assert!(output.contains("<category>Software &amp; tools</category>"));
@@ -385,6 +412,7 @@ fn non_nab_adapters_emit_normalized_claims_without_inventing_extended_attributes
         &NabFeedPage {
             offset: 0,
             total: Some(1),
+            generated_at: generated_at(),
         },
         [NabFeedItem {
             result: &result,
@@ -395,9 +423,9 @@ fn non_nab_adapters_emit_normalized_claims_without_inventing_extended_attributes
     .unwrap();
     let decoded: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let item = &decoded["channel"]["item"][0];
-    assert_eq!(item["torznab:attr"].as_array().unwrap().len(), 7);
+    assert_eq!(item["torznab:attr"].as_array().unwrap().len(), 8);
     assert_eq!(
-        item["torznab:attr"][3]["@attributes"]["value"],
+        item["torznab:attr"][7]["@attributes"]["value"],
         "release<&password"
     );
     assert_eq!(item["category"][0], "Software & tools");
@@ -426,6 +454,7 @@ fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
         &NabFeedPage {
             offset: 0,
             total: None,
+            generated_at: generated_at(),
         },
         [&bad, &good].into_iter().map(|result| NabFeedItem {
             result,
@@ -438,7 +467,9 @@ fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
     assert_eq!(xml.matches("<item>").count(), 1);
     assert_eq!(xml.matches("<enclosure ").count(), 1);
     assert!(xml.ends_with("</channel></rss>"));
-    assert!(parsed_attributes(&xml).is_empty());
+    let mut size = size_attribute();
+    size.0 = Some(NEWZNAB_NAMESPACE.into());
+    assert_eq!(parsed_attributes(&xml), vec![size]);
     let mut output = Vec::new();
     write_json_feed(
         &mut output,
@@ -446,6 +477,7 @@ fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
         &NabFeedPage {
             offset: 0,
             total: None,
+            generated_at: generated_at(),
         },
         [NabFeedItem {
             result: &good,
@@ -495,7 +527,8 @@ fn rewrites_are_decided_by_field_name_not_by_url_content() {
     let output = xml(&result(attributes), None);
     let values = parsed_attributes(&output);
     let retrieval = "https://scryer.example/torznab/api?t=get&id=reference";
-    assert_eq!(values.len(), 3 + download_family.len());
+    assert_eq!(values.len(), 3 + download_family.len() + 1);
+    assert_eq!(values.last(), Some(&size_attribute()));
     assert_eq!(values[0].0.as_deref(), Some(NEWZNAB_NAMESPACE));
     assert_eq!(values[0].2, comments);
     assert_eq!(values[1].2, "https://source.example/key/secret/details");
@@ -514,4 +547,171 @@ fn rewrites_are_decided_by_field_name_not_by_url_content() {
             "<enclosure url=\"https://scryer.example/torznab/api?t=get&amp;id=reference\""
         )
     );
+}
+
+fn json_item(result: &IndexerSearchResult) -> serde_json::Value {
+    let mut output = Vec::new();
+    write_json_feed(
+        &mut output,
+        NabProtocol::Torznab,
+        &NabFeedPage {
+            offset: 0,
+            total: None,
+            generated_at: generated_at(),
+        },
+        [NabFeedItem {
+            result,
+            external_guid: "public-id",
+            retrieval_url: "https://scryer.example/get",
+        }],
+    )
+    .unwrap();
+    let decoded: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    decoded["channel"]["item"][0].clone()
+}
+
+fn json_attributes(item: &serde_json::Value, key: &str) -> Vec<(String, String)> {
+    item[key]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    let attributes = &value["@attributes"];
+                    (
+                        attributes["name"].as_str().unwrap().to_string(),
+                        attributes["value"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn typed_torrent() -> IndexerSearchResult {
+    let mut result = result(Vec::new());
+    result.title = "Synthetic Tracker Release 2026".into();
+    result.response_attributes.categories = vec!["5000".into()];
+    result.indexer_languages = Some(vec!["English".into()]);
+    result.indexer_subtitles = Some(vec!["French".into()]);
+    result.indexer_grabs = Some(7);
+    result.extra = serde_json::from_value(serde_json::json!({
+        "seeders": 12,
+        "leechers": 3,
+        "info_hash": "0123456789abcdef0123456789abcdef01234567",
+        "info_hash_v1": "0123456789abcdef0123456789abcdef01234567",
+        "magnet_url": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+        "download_volume_factor": 0.0,
+        "upload_volume_factor": 1.0,
+        "downloadvolumefactor": 0.0,
+        "uploadvolumefactor": 1.0,
+        "minimum_seed_ratio": 1.5,
+        "minimum_seed_time_minutes": 2880,
+        "indexer_flags": ["freeleech"],
+        "files": "4",
+        "year": "2026",
+        "poster": "https://images.example/poster.jpg",
+        "external_ids": {"imdb_id": "tt0133093", "tvdb_id": "4242"}
+    }))
+    .unwrap();
+    result
+}
+
+#[test]
+fn typed_only_torrent_synthesizes_prowlarr_attributes_in_order() {
+    let result = typed_torrent();
+    let output = xml(&result, None);
+    let expected = [
+        ("category", "5000"),
+        ("tag", "freeleech"),
+        ("language", "English"),
+        ("subs", "French"),
+        ("tvdbid", "4242"),
+        ("imdb", "0133093"),
+        ("imdbid", "0133093"),
+        ("seeders", "12"),
+        ("files", "4"),
+        ("grabs", "7"),
+        ("peers", "15"),
+        ("leechers", "3"),
+        ("year", "2026"),
+        ("infohash", "0123456789abcdef0123456789abcdef01234567"),
+        ("minimumratio", "1.5"),
+        ("minimumseedtime", "172800"),
+        ("downloadvolumefactor", "0"),
+        ("uploadvolumefactor", "1"),
+        ("coverurl", "https://images.example/poster.jpg"),
+        ("size", "123"),
+    ]
+    .map(|(name, value)| (name.to_string(), value.to_string()));
+    let attributes = parsed_attributes(&output);
+    assert!(
+        attributes
+            .iter()
+            .all(|(namespace, _, _)| namespace.as_deref() == Some(TORZNAB_NAMESPACE))
+    );
+    assert_eq!(
+        attributes
+            .into_iter()
+            .map(|(_, name, value)| (name, value))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(
+        !output.contains("magnet:"),
+        "the item link is the only download"
+    );
+    assert_eq!(
+        json_attributes(&json_item(&result), "torznab:attr"),
+        expected
+    );
+}
+
+#[test]
+fn source_attributes_win_and_typed_facts_fill_only_the_gaps() {
+    let mut result = typed_torrent();
+    result.response_attributes.original = vec![
+        attribute(Some("torznab"), "seeders", "99"),
+        attribute(Some("torznab"), "IMDB", "1234567"),
+        attribute(Some("torznab"), "category", "5040"),
+    ];
+    let output = xml(&result, None);
+    let names = parsed_attributes(&output)
+        .into_iter()
+        .map(|(_, name, value)| (name, value))
+        .collect::<Vec<_>>();
+    let count = |name: &str| {
+        names
+            .iter()
+            .filter(|(actual, _)| actual.eq_ignore_ascii_case(name))
+            .count()
+    };
+    assert_eq!(count("seeders"), 1);
+    assert_eq!(count("imdb"), 1);
+    assert_eq!(count("imdbid"), 0, "imdb and imdbid are one identity");
+    assert_eq!(count("category"), 1);
+    assert_eq!(names[0], ("seeders".into(), "99".into()));
+    assert_eq!(names[1], ("IMDB".into(), "1234567".into()));
+    for gap in ["peers", "leechers", "infohash", "minimumseedtime", "tvdbid"] {
+        assert_eq!(count(gap), 1, "missing synthesized {gap}");
+    }
+    let item = json_item(&result);
+    assert_eq!(json_attributes(&item, "torznab:attr"), names);
+}
+
+#[test]
+fn missing_or_unparseable_publish_time_uses_the_page_generation_time() {
+    let expected = generated_at().to_rfc2822();
+    for published_at in [None, Some("not a date".to_string())] {
+        let mut result = result(Vec::new());
+        result.published_at = published_at;
+        let output = xml(&result, None);
+        assert!(
+            output.contains(&format!("<pubDate>{expected}</pubDate>")),
+            "{output}"
+        );
+        assert_eq!(json_item(&result)["pubDate"], expected.as_str());
+    }
+    let dated = result(Vec::new());
+    assert!(xml(&dated, None).contains("<pubDate>Thu, 1 Oct 2026 00:00:00 +0000</pubDate>"));
 }

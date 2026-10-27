@@ -1,8 +1,13 @@
 //! Streaming Nab representations of format-independent search results.
+//!
+//! Each item carries the source feed's original attributes verbatim, then a
+//! synthesized attribute for every typed fact the indexer reported whose name
+//! the original attributes did not already carry, then always a `pubDate`.
 
 use std::borrow::Cow;
 use std::io::{self, Write};
 
+use chrono::{DateTime, Utc};
 use quick_xml::Writer;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use scryer_application::IndexerSearchResult;
@@ -45,6 +50,9 @@ pub struct NabFeedPage {
     pub offset: usize,
     /// None means unknown, not a fabricated upper bound or upstream sum.
     pub total: Option<usize>,
+    /// When the page was generated; the `pubDate` of an item whose release
+    /// has no parseable publish time.
+    pub generated_at: DateTime<Utc>,
 }
 
 fn invalid() -> io::Error {
@@ -208,59 +216,126 @@ fn write_attribute(
     Ok(())
 }
 
-// Older and non-Nab adapters may expose only normalized source assertions.
-// Preserve those when no original collection exists, without interpreting
-// arbitrary plugin extras or overriding a losslessly parsed source feed.
-fn normalized_attributes(
-    result: &IndexerSearchResult,
-) -> impl Iterator<Item = (&'static str, Cow<'_, str>)> {
-    let attributes = &result.response_attributes;
-    [
-        ("tvdbid", attributes.tvdb_id.as_deref().map(Cow::Borrowed)),
-        ("tmdbid", attributes.tmdb_id.as_deref().map(Cow::Borrowed)),
-        ("imdbid", attributes.imdb_id.as_deref().map(Cow::Borrowed)),
-        (
-            "size",
-            result
-                .size_bytes
-                .filter(|value| *value >= 0)
-                .map(|value| Cow::Owned(value.to_string())),
+/// Typed facts the indexer reported, as Nab attribute names and values in
+/// Prowlarr's serializer order, followed by `size` and `password`. The writers
+/// emit one only when the item's written source attributes do not already
+/// carry that name: the source feed's own value always wins, and this fills
+/// the gaps for indexers that return typed fields rather than a Nab feed.
+/// Magnet links are never synthesized; the item link is the Scryer retrieval
+/// link.
+fn synthesized_attributes(result: &IndexerSearchResult) -> Vec<(&'static str, String)> {
+    let facts = result.release_facts();
+    let ids = facts.external_ids;
+    let mut attributes = Vec::new();
+    let mut push = |name: &'static str, value: Option<String>| {
+        if let Some(value) = value.filter(|value| !value.is_empty()) {
+            attributes.push((name, value));
+        }
+    };
+    for category in result
+        .response_attributes
+        .categories
+        .iter()
+        .filter(|value| numeric_category(value))
+    {
+        push("category", Some(category.clone()));
+    }
+    for flag in facts.indexer_flags {
+        push("tag", Some(flag));
+    }
+    for language in facts.languages {
+        push("language", Some(language));
+    }
+    for subtitle in facts.subtitles {
+        push("subs", Some(subtitle));
+    }
+    push("genre", facts.genre);
+    push("rageid", ids.tvrage);
+    push("tvdbid", ids.tvdb);
+    push("imdb", ids.imdb.clone());
+    push("imdbid", ids.imdb);
+    push("tmdbid", ids.tmdb);
+    push("traktid", ids.trakt);
+    push("tvmazeid", ids.tvmaze);
+    push("doubanid", ids.douban);
+    let count = |value: Option<i64>| value.map(|value| value.to_string());
+    push("seeders", count(facts.seeders));
+    push("files", count(facts.files));
+    push(
+        "grabs",
+        count(result.indexer_grabs.filter(|value| *value >= 0)),
+    );
+    push("peers", count(facts.peers));
+    push("leechers", count(facts.leechers));
+    push("year", facts.year.map(|value| value.to_string()));
+    push("infohash", facts.info_hash);
+    let decimal = |value: Option<f64>| value.map(|value| value.to_string());
+    push("minimumratio", decimal(facts.minimum_seed_ratio));
+    // Torznab carries the minimum seed time in seconds.
+    push(
+        "minimumseedtime",
+        count(
+            facts
+                .minimum_seed_time_minutes
+                .and_then(|minutes| minutes.checked_mul(60)),
         ),
-        (
-            "grabs",
-            result
-                .indexer_grabs
-                .filter(|value| *value >= 0)
-                .map(|value| Cow::Owned(value.to_string())),
-        ),
-        (
-            "password",
-            result.password_hint.as_deref().map(Cow::Borrowed),
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(name, value)| value.map(|value| (name, value)))
-    .chain(
-        attributes
-            .categories
-            .iter()
-            .filter(|value| numeric_category(value))
-            .map(|value| ("category", Cow::Borrowed(value.as_str()))),
-    )
-    .filter(move |_| attributes.original.is_empty())
+    );
+    push(
+        "downloadvolumefactor",
+        decimal(facts.download_volume_factor),
+    );
+    push("uploadvolumefactor", decimal(facts.upload_volume_factor));
+    push("coverurl", facts.poster_url);
+    push("size", count(result.size_bytes.filter(|value| *value >= 0)));
+    push("password", result.password_hint.clone());
+    attributes
+}
+
+/// Whether a written source attribute already carries `name`. Names compare
+/// case-insensitively, and `imdb` and `imdbid` are one identity: clients read
+/// either, so a source value under one name suppresses both.
+/// The scan repeats the writers' own checks rather than collecting the written
+/// names, so a source with thousands of attributes costs no extra memory.
+fn carried(item: &NabFeedItem<'_, impl AsRef<str>>, name: &str) -> bool {
+    let imdb =
+        |value: &str| value.eq_ignore_ascii_case("imdb") || value.eq_ignore_ascii_case("imdbid");
+    item.result
+        .response_attributes
+        .original
+        .iter()
+        .any(|attribute| {
+            (attribute.name.eq_ignore_ascii_case(name) || (imdb(name) && imdb(&attribute.name)))
+                && public_attribute_value(attribute, item)
+                    .is_some_and(|value| writable_attribute(attribute, value))
+        })
 }
 
 fn numeric_category(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn normalized_category_names(result: &IndexerSearchResult) -> impl Iterator<Item = &str> {
-    result
+/// Non-numeric category names are written as plain `category` elements, again
+/// only when no written source attribute already carries `category`.
+fn category_names<'a>(item: &NabFeedItem<'a, impl AsRef<str>>) -> impl Iterator<Item = &'a str> {
+    let carried = carried(item, "category");
+    item.result
         .response_attributes
         .categories
         .iter()
-        .filter(|value| result.response_attributes.original.is_empty() && !numeric_category(value))
+        .filter(move |value| !carried && !numeric_category(value))
         .map(String::as_str)
+}
+
+/// RFC 2822 publish time. A release with no parseable date carries the page's
+/// generation time, as Prowlarr does: Sonarr rejects a whole feed when one item
+/// lacks a usable `pubDate`.
+fn publish_date(result: &IndexerSearchResult, page: &NabFeedPage) -> String {
+    result
+        .published_at
+        .as_deref()
+        .and_then(scryer_domain::publish_time::parse_publish_time)
+        .unwrap_or(page.generated_at)
+        .to_rfc2822()
 }
 
 /// Writes one aggregate page in its existing order. Does not clone results,
@@ -328,16 +403,7 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
         )?)))?;
         writer.write_event(Event::End(BytesEnd::new("guid")))?;
         element(&mut writer, "link", item.retrieval_url.as_ref())?;
-        if let Some(date) = &item.result.published_at {
-            let date = scryer_domain::publish_time::parse_publish_time(date)
-                .map(|date| date.to_rfc2822())
-                .unwrap_or_else(|| date.clone());
-            if checked_text(&date).is_ok() {
-                element(&mut writer, "pubDate", &date)?;
-            } else {
-                dropped_attributes += 1;
-            }
-        }
+        element(&mut writer, "pubDate", &publish_date(item.result, page))?;
         let mut enclosure = BytesStart::new("enclosure");
         let size = item
             .result
@@ -358,18 +424,21 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
                 }
             }
         }
-        for (name, value) in normalized_attributes(item.result) {
+        let qualified = format!("{}:attr", protocol.prefix());
+        for (name, value) in synthesized_attributes(item.result) {
+            if carried(&item, name) {
+                continue;
+            }
             if checked_text(&value).is_err() {
                 dropped_attributes += 1;
                 continue;
             }
-            let qualified = format!("{}:attr", protocol.prefix());
             let mut attribute = BytesStart::new(&qualified);
             attribute.push_attribute(("name", name));
             attribute.push_attribute(("value", checked_text(&value)?));
             writer.write_event(Event::Empty(attribute))?;
         }
-        for category in normalized_category_names(item.result) {
+        for category in category_names(&item) {
             if checked_text(category).is_ok() {
                 element(&mut writer, "category", category)?;
             } else {
@@ -461,13 +530,8 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
         json(&mut output, &item.external_guid.as_ref())?;
         output.write_all(b",\"link\":")?;
         json(&mut output, &item.retrieval_url.as_ref())?;
-        if let Some(date) = &item.result.published_at {
-            output.write_all(b",\"pubDate\":")?;
-            let date = scryer_domain::publish_time::parse_publish_time(date)
-                .map(|date| date.to_rfc2822())
-                .unwrap_or_else(|| date.clone());
-            json(&mut output, &date)?;
-        }
+        output.write_all(b",\"pubDate\":")?;
+        json(&mut output, &publish_date(item.result, page))?;
         output.write_all(b",\"enclosure\":")?;
         json(
             &mut output,
@@ -521,15 +585,25 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
                 }
             }
         }
-        for (name, value) in normalized_attributes(item.result) {
+        for (name, value) in synthesized_attributes(item.result) {
+            if carried(&item, name) {
+                continue;
+            }
+            if checked_text(&value).is_err() {
+                dropped_attributes += 1;
+                continue;
+            }
             groups
                 .entry(format!("{}:attr", protocol.prefix()))
                 .or_default()
                 .push(Attributes {
-                    attributes: Attribute { name, value },
+                    attributes: Attribute {
+                        name,
+                        value: Cow::Owned(value),
+                    },
                 });
         }
-        for category in normalized_category_names(item.result) {
+        for category in category_names(&item) {
             elements
                 .entry("category".into())
                 .or_default()

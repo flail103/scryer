@@ -358,6 +358,7 @@ async fn real_json_upstream_search_emits_xml_and_uses_host_caps() {
         &NabFeedPage {
             offset: 0,
             total: None,
+            generated_at: chrono::DateTime::UNIX_EPOCH,
         },
         [NabFeedItem {
             result,
