@@ -5441,58 +5441,170 @@ mod tests {
 
     #[tokio::test]
     async fn nab_authless_exemption_still_requires_client_auth_and_is_exact() {
-        use scryer_application::{SettingsRepository, indexer_clients::*, testing::AppUseCaseTestExt};
+        use scryer_application::{
+            SettingsRepository, indexer_clients::*, testing::AppUseCaseTestExt,
+        };
         use scryer_infrastructure_acquisition::indexers::client_store::IndexerClientStore;
-        use scryer_infrastructure_crypto::{EncryptionKey, artifact_reference::ArtifactReferenceCipher};
+        use scryer_infrastructure_crypto::{
+            EncryptionKey, artifact_reference::ArtifactReferenceCipher,
+        };
 
         let context = common::TestContext::new().await;
-        context.settings_store.batch_ensure_setting_definitions(vec![
-            scryer_infrastructure_sql::types::SettingDefinitionSeed {
-                category: "ui".into(), scope: scryer_application::SETTINGS_SCOPE_SYSTEM.into(),
-                key_name: scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY.into(),
-                data_type: "boolean".into(), default_value_json: "true".into(),
-                is_sensitive: false, validation_json: None,
-            },
-        ]).await.unwrap();
-        context.settings_store.upsert_setting_json(scryer_application::SETTINGS_SCOPE_SYSTEM,
-            scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY, None, "true".into(),
-            "test".into(), None).await.unwrap();
+        context
+            .settings_store
+            .batch_ensure_setting_definitions(vec![
+                scryer_infrastructure_sql::types::SettingDefinitionSeed {
+                    category: "ui".into(),
+                    scope: scryer_application::SETTINGS_SCOPE_SYSTEM.into(),
+                    key_name: scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY.into(),
+                    data_type: "boolean".into(),
+                    default_value_json: "true".into(),
+                    is_sensitive: false,
+                    validation_json: None,
+                },
+            ])
+            .await
+            .unwrap();
+        context
+            .settings_store
+            .upsert_setting_json(
+                scryer_application::SETTINGS_SCOPE_SYSTEM,
+                scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
+                None,
+                "true".into(),
+                "test".into(),
+                None,
+            )
+            .await
+            .unwrap();
         let store = Arc::new(IndexerClientStore::new(context.db.datastore()));
         let key = issue_indexer_client_key("test-salt").unwrap();
         let now = chrono::Utc::now();
-        store.save(&IndexerClientRecord {
-            id: "public-client".into(), configuration: IndexerClientConfiguration {
-                name: "Public client fixture".into(), enabled: true,
-                protocols: vec![IndexerClientProtocol::Newznab, IndexerClientProtocol::Torznab], grants: vec![],
-            }, lookup_id: Some(key.lookup_id), secret_hash: Some(key.secret_hash),
-            key_generation: 1, revision: 1, last_used_at: None, last_outcome_code: None,
-            created_at: now, updated_at: now,
-        }, None).await.unwrap();
-        let app = context.app.with_test_overrides(|builder| builder.with_indexer_client_repository(store));
+        store
+            .save(
+                &IndexerClientRecord {
+                    id: "public-client".into(),
+                    configuration: IndexerClientConfiguration {
+                        name: "Public client fixture".into(),
+                        enabled: true,
+                        protocols: vec![
+                            IndexerClientProtocol::Newznab,
+                            IndexerClientProtocol::Torznab,
+                        ],
+                        grants: vec![],
+                    },
+                    lookup_id: Some(key.lookup_id),
+                    secret_hash: Some(key.secret_hash),
+                    key_generation: 1,
+                    revision: 1,
+                    last_used_at: None,
+                    last_outcome_code: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let app = context
+            .app
+            .with_test_overrides(|builder| builder.with_indexer_client_repository(store));
+        assert!(app.authenticate_api_key(&key.raw_key).await.is_err());
+        let graphql = Router::new()
+            .route("/graphql", post(graphql_handler))
+            .with_state(AuthState {
+                app: app.clone(),
+                schema: context.schema.clone(),
+                auth_runtime: AuthRuntimeStateHandle::new(auth_enabled_snapshot()),
+                rate_limiter: ScryerRateLimiter::from_env(Default::default()),
+                ws_origin_policy: WebSocketOriginPolicy::default(),
+                list_account_origin_policy: Default::default(),
+                authless_web_client_proof: AuthlessWebClientProofState::new(),
+            });
+        let mut request =
+            request_with_peer("/graphql", SocketAddr::from((Ipv4Addr::LOCALHOST, 3000)));
+        *request.method_mut() = Method::POST;
+        request.headers_mut().insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", key.raw_key)).unwrap(),
+        );
+        request.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        *request.body_mut() = Body::from(r#"{"query":"{ titles { id } }"}"#);
+        let response =
+            tokio::time::timeout(std::time::Duration::from_secs(60), graphql.oneshot(request))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let router = crate::nab_api::router(crate::nab_api::NabState {
-            app, cipher: Arc::new(ArtifactReferenceCipher::new(&EncryptionKey::from_bytes([42; 32]))),
-            base_path: String::new(), tls: false,
-        }).route("/newznab/api/extra", get(|| async { "must remain guarded" }))
-          .layer(axum::middleware::from_fn_with_state(AuthlessAccessGuardState {
-              auth_runtime: AuthRuntimeStateHandle::new(auth_disabled_snapshot()),
-              policy: protected_authless_policy(), allowlist: AuthlessAccessAllowlist::default(),
-          }, enforce_authless_access_guard));
-        for path in ["/newznab/api", "/torznab/api"] {
-            for ip in [Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::LOCALHOST] {
-                for authorized in [false, true] {
-                    let mut request = request_with_peer(&format!("{path}?t=caps"), SocketAddr::from((ip, 3000)));
-                    if authorized {
-                        request.headers_mut().insert("x-api-key", HeaderValue::from_str(&key.raw_key).unwrap());
+            app,
+            cipher: Arc::new(ArtifactReferenceCipher::new(&EncryptionKey::from_bytes(
+                [42; 32],
+            ))),
+            base_path: String::new(),
+            tls: false,
+        })
+        .route(
+            "/newznab/api/extra",
+            get(|| async { "must remain guarded" }),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            AuthlessAccessGuardState {
+                auth_runtime: AuthRuntimeStateHandle::new(auth_disabled_snapshot()),
+                policy: protected_authless_policy(),
+                allowlist: AuthlessAccessAllowlist::default(),
+            },
+            enforce_authless_access_guard,
+        ));
+        for prefix in ["", "/scryer"] {
+            let mounted = crate::base_path::mount_router(
+                router.clone(),
+                &crate::base_path::BasePath::from_raw(Some(prefix)),
+            );
+            for path in ["/newznab/api", "/torznab/api"] {
+                for ip in [Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::LOCALHOST] {
+                    for authorized in [false, true] {
+                        let mut request = request_with_peer(
+                            &format!("{prefix}{path}?t=caps"),
+                            SocketAddr::from((ip, 3000)),
+                        );
+                        if authorized {
+                            request
+                                .headers_mut()
+                                .insert("x-api-key", HeaderValue::from_str(&key.raw_key).unwrap());
+                        }
+                        let response = tokio::time::timeout(
+                            std::time::Duration::from_secs(60),
+                            mounted.clone().oneshot(request),
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap();
+                        assert_eq!(
+                            response.status(),
+                            if authorized {
+                                StatusCode::OK
+                            } else {
+                                StatusCode::UNAUTHORIZED
+                            }
+                        );
                     }
-                    let response = tokio::time::timeout(std::time::Duration::from_secs(60), router.clone().oneshot(request))
-                        .await.unwrap().unwrap();
-                    assert_eq!(response.status(), if authorized { StatusCode::OK } else { StatusCode::UNAUTHORIZED });
                 }
             }
         }
-        let response = tokio::time::timeout(std::time::Duration::from_secs(60), router.oneshot(
-            request_with_peer("/newznab/api/extra", SocketAddr::from((Ipv4Addr::new(8, 8, 8, 8), 3000)))))
-            .await.unwrap().unwrap();
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            router.oneshot(request_with_peer(
+                "/newznab/api/extra",
+                SocketAddr::from((Ipv4Addr::new(8, 8, 8, 8), 3000)),
+            )),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
@@ -6211,7 +6323,10 @@ mod tests {
     #[test]
     fn ticket_download_and_api_routes_consume_http_api_quota() {
         for path in ["/newznab/api", "/torznab/api"] {
-            assert_eq!(classify_http_rate_limit(&Method::GET, path), Some(HttpRateLimitClass::Api));
+            assert_eq!(
+                classify_http_rate_limit(&Method::GET, path),
+                Some(HttpRateLimitClass::Api)
+            );
         }
         assert!(!skip_http_rate_limit(
             &Method::GET,

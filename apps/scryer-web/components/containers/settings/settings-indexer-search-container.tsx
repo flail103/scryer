@@ -287,6 +287,7 @@ export function SettingsIndexerSearchContainer() {
       const scopedIndexerIds = retryIndexerIds ?? selectedIndexerIds;
       const parsedCategories = parseCategoryList(categories);
 
+      const reportedFailures = new Set<string>();
       try {
         await runIterativeReleaseSearch(
           client,
@@ -316,8 +317,11 @@ export function SettingsIndexerSearchContainer() {
               setNowMs(Date.now());
               setContinuation(snapshot.continuation ?? null);
               setDeadlineReached(snapshot.deadlineReached ?? false);
-              if (snapshot.failureCode) {
-                setGlobalStatus(t(RAW_SEARCH_REFUSAL_KEYS[snapshot.failureCode] ?? "status.apiError"), { level: "ERROR" });
+              if (snapshot.failureCode && !reportedFailures.has(snapshot.failureCode)) {
+                reportedFailures.add(snapshot.failureCode);
+                const key = Object.hasOwn(RAW_SEARCH_REFUSAL_KEYS, snapshot.failureCode)
+                  ? RAW_SEARCH_REFUSAL_KEYS[snapshot.failureCode] : undefined;
+                setGlobalStatus(key ? t(key) : (snapshot.failureMessage ?? t("status.apiError")), { level: "ERROR" });
               }
               const liveBase = isRetry ? releases.filter((release) => {
                 const owner = rowOwnersRef.current.get(indexerSearchRowKey(release));

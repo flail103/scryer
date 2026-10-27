@@ -9,7 +9,6 @@ const SOURCE_KEYS: Readonly<Record<string, string>> = {
 
 const REASON_KEYS: Readonly<Record<string, string>> = {
   INDEXER_CAPS_REFRESH_FAILED: "indexerSearch.caps.refreshFailed",
-  INDEXER_CAPS_REFRESH_BUSY: "indexerSearch.caps.refreshBusy",
   INDEXER_CAPS_REFRESH_DEFERRED: "indexerSearch.caps.refreshDeferred",
 };
 

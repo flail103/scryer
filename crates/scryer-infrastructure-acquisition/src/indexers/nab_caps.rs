@@ -97,12 +97,8 @@ fn limits(caps: &IndexerCapsSnapshot) -> io::Result<(i64, i64)> {
     let max = caps
         .limits_max
         .unwrap_or(scryer_application::RAW_SEARCH_PAGE_SIZE as i64);
-    if default <= 0 || max < default || max > i32::MAX as i64 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Invalid compatibility page limits",
-        ));
-    }
+    let default = default.clamp(1, i32::MAX as i64);
+    let max = max.clamp(1, i32::MAX as i64).max(default);
     Ok((default, max))
 }
 
@@ -271,5 +267,21 @@ mod tests {
             json["caps"]["categories"]["category"][0]["subcat"][0]["@attributes"]["id"],
             4010
         );
+    }
+    #[test]
+    fn malformed_limits_are_clamped_without_losing_caps() {
+        for (default, maximum, expected) in [
+            (0, -1, (1, 1)),
+            (100, 5, (100, 100)),
+            (i64::MAX, i64::MAX, (i32::MAX as i64, i32::MAX as i64)),
+        ] {
+            let caps = IndexerCapsSnapshot {
+                limits_default: Some(default),
+                limits_max: Some(maximum),
+                ..Default::default()
+            };
+            assert_eq!(limits(&caps).unwrap(), expected);
+            write_xml_caps(io::sink(), &caps).unwrap();
+        }
     }
 }

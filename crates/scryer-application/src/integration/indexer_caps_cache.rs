@@ -1,4 +1,4 @@
-use crate::{AppError, AppResult, RateLimitCooldownAction};
+use crate::{AppError, AppResult};
 use chrono::{DateTime, Utc};
 use scryer_domain::IndexerConfig;
 use std::collections::HashMap;
@@ -50,15 +50,30 @@ pub struct ResolvedIndexerCaps {
 
 impl ResolvedIndexerCaps {
     pub fn diagnostic(&self) -> IndexerCapsDiagnostic {
-        let reason = self.refresh_error.as_ref().map(|error| error.reason()
-            .unwrap_or(crate::error_reasons::indexer_caps::REFRESH_FAILED))
-            .or_else(|| matches!(self.source, IndexerCapsSource::Stale | IndexerCapsSource::Permissive)
-                .then_some(crate::error_reasons::indexer_caps::REFRESH_DEFERRED));
+        let reason = self
+            .refresh_error
+            .as_ref()
+            .map(|error| {
+                error
+                    .reason()
+                    .unwrap_or(crate::error_reasons::indexer_caps::REFRESH_FAILED)
+            })
+            .or_else(|| {
+                matches!(
+                    self.source,
+                    IndexerCapsSource::Stale | IndexerCapsSource::Permissive
+                )
+                .then_some(crate::error_reasons::indexer_caps::REFRESH_DEFERRED)
+            });
         let retry_after = match self.refresh_error.as_ref() {
             Some(AppError::TemporaryUnavailable { retry_after, .. }) => *retry_after,
             _ => None,
         };
-        IndexerCapsDiagnostic { source: self.source, reason, retry_after }
+        IndexerCapsDiagnostic {
+            source: self.source,
+            reason,
+            retry_after,
+        }
     }
 }
 
@@ -121,6 +136,7 @@ pub struct IndexerCapsRefreshContext<'a> {
     pub proxy: Option<&'a scryer_domain::ProxyConfig>,
     pub accounting: Option<&'a crate::IndexerAccountingContext>,
     pub intent: crate::SchedulerIntent,
+    pub now: DateTime<Utc>,
 }
 
 pub(crate) fn connection_identity(config: &IndexerConfig) -> serde_json::Value {
@@ -311,10 +327,11 @@ pub struct CapsRequestCache {
 
 enum CapsEntry {
     InFlight(Weak<SharedFetch>),
-    Failed { expires: tokio::time::Instant, result: AppResult<Option<String>> },
+    Failed {
+        expires: tokio::time::Instant,
+        result: AppResult<Option<String>>,
+    },
 }
-
-const CAPS_REFRESH_SLOTS: usize = 128;
 
 fn cache_key(config: &IndexerConfig) -> String {
     crate::helpers::blake3_identity_hex(
@@ -327,10 +344,13 @@ impl CapsRequestCache {
     fn retain_current_connections(&self, configs: &[IndexerConfig]) {
         let current: std::collections::HashSet<_> = configs.iter().map(cache_key).collect();
         let now = tokio::time::Instant::now();
-        self.entries.lock().expect("caps request map lock poisoned").retain(|key, entry| match entry {
-            CapsEntry::InFlight(flight) => flight.strong_count() > 0,
-            CapsEntry::Failed { expires, .. } => *expires > now && current.contains(key),
-        });
+        self.entries
+            .lock()
+            .expect("caps request map lock poisoned")
+            .retain(|key, entry| match entry {
+                CapsEntry::InFlight(flight) => flight.strong_count() > 0,
+                CapsEntry::Failed { expires, .. } => *expires > now && current.contains(key),
+            });
     }
 
     /// Persist a successful refresh before publishing the shared result. The
@@ -341,7 +361,7 @@ impl CapsRequestCache {
         config: &IndexerConfig,
         context: IndexerCapsRefreshContext<'_>,
     ) -> AppResult<Option<String>> {
-        if let Some(snapshot) = fresh_snapshot(config, Utc::now()) {
+        if let Some(snapshot) = fresh_snapshot(config, context.now) {
             return Ok(Some(snapshot));
         }
         // Failure metadata belongs to currently configured connections, not
@@ -356,7 +376,7 @@ impl CapsRequestCache {
                 .as_ref()
                 .filter(|current| connection_identity(current) == connection_identity(config));
             if let Some(snapshot) =
-                persisted.and_then(|current| fresh_snapshot(current, Utc::now()))
+                persisted.and_then(|current| fresh_snapshot(current, context.now))
             {
                 return Ok(Some(snapshot));
             }
@@ -374,14 +394,14 @@ impl CapsRequestCache {
             else {
                 return Ok(None);
             };
-            let raw = serialize_snapshot(&snapshot, Utc::now())?;
-            if let Some(persisted) = persisted
-                && !context
+            let raw = serialize_snapshot(&snapshot, context.now)?;
+            if let Some(persisted) = persisted {
+                // Losing the compare-and-save race does not invalidate the
+                // successful fetch for this caller's connection snapshot.
+                context
                     .configs
                     .save_caps_if_unchanged(persisted, &raw)
-                    .await?
-            {
-                return Ok(None);
+                    .await?;
             }
             Ok(Some(raw))
         })
@@ -395,7 +415,7 @@ impl CapsRequestCache {
         config: &IndexerConfig,
         context: IndexerCapsRefreshContext<'_>,
     ) -> ResolvedIndexerCaps {
-        let mut resolved = cached_indexer_caps(config, Utc::now());
+        let mut resolved = cached_indexer_caps(config, context.now);
         if matches!(
             resolved.source,
             IndexerCapsSource::Fresh
@@ -438,15 +458,6 @@ impl CapsRequestCache {
             } else {
                 // A flight can lose its last owner after the retention pass.
                 entries.remove(&key);
-                if entries.values().filter(|entry| matches!(entry, CapsEntry::InFlight(_))).count() >= CAPS_REFRESH_SLOTS {
-                    return Err(AppError::TemporaryUnavailable {
-                        reason: Some(crate::error_reasons::indexer_caps::REFRESH_BUSY.into()),
-                        message: "Indexer caps refresh capacity is occupied; try again later"
-                            .into(),
-                        retry_after: None,
-                        rate_limit_cooldown: RateLimitCooldownAction::None,
-                    });
-                }
                 let flight = Arc::new(tokio::sync::Mutex::new(None));
                 entries.insert(key.clone(), CapsEntry::InFlight(Arc::downgrade(&flight)));
                 flight
@@ -456,21 +467,20 @@ impl CapsRequestCache {
         if result.is_none() {
             let fetched = request.await;
             if !matches!(fetched, Ok(Some(_))) {
-                let mut entries = self
-                    .entries
-                    .lock()
-                    .expect("caps failure map lock poisoned");
+                let mut entries = self.entries.lock().expect("caps failure map lock poisoned");
                 let now = tokio::time::Instant::now();
                 entries.insert(
                     key,
-                    CapsEntry::Failed { expires: now + std::time::Duration::from_secs(3600), result: fetched.clone() },
+                    CapsEntry::Failed {
+                        expires: now + std::time::Duration::from_secs(3600),
+                        result: fetched.clone(),
+                    },
                 );
             }
             *result = Some(fetched);
         }
         result.as_ref().expect("caps fetch completed").clone()
     }
-
 }
 
 #[cfg(test)]
@@ -478,7 +488,7 @@ mod tests {
     use super::*;
     use std::task::Poll;
 
-    struct StoredConfig(Mutex<IndexerConfig>);
+    struct StoredConfig(Mutex<IndexerConfig>, bool);
 
     #[async_trait::async_trait]
     impl crate::IndexerConfigRepository for StoredConfig {
@@ -506,6 +516,9 @@ mod tests {
             expected: &IndexerConfig,
             snapshot: &str,
         ) -> AppResult<bool> {
+            if self.1 {
+                return Ok(false);
+            }
             let mut config = self.0.lock().unwrap();
             if connection_identity(&config) != connection_identity(expected)
                 || config.caps_snapshot_json != expected.caps_snapshot_json
@@ -535,7 +548,7 @@ mod tests {
     #[tokio::test]
     async fn refresh_persists_before_return_and_old_callers_reuse_the_durable_result() {
         let config = config();
-        let configs = StoredConfig(Mutex::new(config.clone()));
+        let configs = StoredConfig(Mutex::new(config.clone()), false);
         let refresher = Refresher::default();
         let cache = CapsRequestCache::default();
         let context = || IndexerCapsRefreshContext {
@@ -544,6 +557,7 @@ mod tests {
             proxy: None,
             accounting: None,
             intent: crate::SchedulerIntent::InteractiveSearch,
+            now: config.updated_at,
         };
         let first = cache.refresh(&config, context()).await.unwrap().unwrap();
         assert_eq!(
@@ -799,28 +813,6 @@ mod tests {
         assert_eq!(first.unwrap(), second.unwrap());
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn failed_connections_do_not_occupy_healthy_refresh_capacity() {
-        let cache = CapsRequestCache::default();
-        let mut source = config();
-        let mut configured = Vec::new();
-        for index in 0..CAPS_REFRESH_SLOTS {
-            source.id = format!("source-{index}");
-            configured.push(source.clone());
-            assert_eq!(cache.fetch(&source, async { Ok(None) }).await.unwrap(), None);
-        }
-        source.id = "healthy".into();
-        configured.push(source.clone());
-        cache.retain_current_connections(&configured);
-        assert_eq!(cache.fetch(&source, async { Ok(Some("healthy caps".into())) })
-            .await.unwrap().as_deref(), Some("healthy caps"));
-        tokio::time::advance(std::time::Duration::from_secs(3599)).await;
-        source.id = "source-0".into();
-        assert_eq!(cache.fetch(&source, async { panic!("oldest suppression was evicted") }).await.unwrap(), None);
-        tokio::time::advance(std::time::Duration::from_secs(1)).await;
-        assert_eq!(cache.fetch(&source, async { Ok(Some("recovered".into())) }).await.unwrap().as_deref(), Some("recovered"));
-    }
-
     #[tokio::test]
     async fn failure_metadata_does_not_retain_deleted_or_changed_connections() {
         let cache = CapsRequestCache::default();
@@ -895,5 +887,33 @@ mod tests {
                 .as_deref(),
             Some("recovered")
         );
+    }
+    #[tokio::test]
+    async fn lost_persistence_race_returns_fetched_caps_without_negative_caching() {
+        let config = config();
+        let configs = StoredConfig(Mutex::new(config.clone()), true);
+        let refresher = Refresher::default();
+        let cache = CapsRequestCache::default();
+        let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        for _ in 0..2 {
+            let raw = cache
+                .refresh(
+                    &config,
+                    IndexerCapsRefreshContext {
+                        configs: &configs,
+                        refresher: &refresher,
+                        proxy: None,
+                        accounting: None,
+                        intent: crate::SchedulerIntent::BackgroundRss,
+                        now,
+                    },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(value[FETCHED_AT], now.to_rfc3339());
+        }
+        assert_eq!(refresher.0.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }

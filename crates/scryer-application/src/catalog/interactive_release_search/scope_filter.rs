@@ -10,6 +10,7 @@ pub(crate) struct RawSearchResultScope {
     /// older adapter leaves it absent. Mixed/unknown sources cannot do so.
     pub allow_untyped_protocol: bool,
     pub categories: Option<Vec<String>>,
+    pub allow_uncategorized: bool,
 }
 
 /// Nab's standard thousand-wide parent families include their subcategories.
@@ -55,15 +56,16 @@ impl RawSearchResultScope {
         };
         protocol_allowed
             && self.categories.as_ref().is_none_or(|allowed| {
-                result
-                    .response_attributes
-                    .categories
-                    .iter()
-                    .any(|category| {
-                        allowed
-                            .iter()
-                            .any(|grant| category_contains(grant, category))
-                    })
+                (self.allow_uncategorized && result.response_attributes.categories.is_empty())
+                    || result
+                        .response_attributes
+                        .categories
+                        .iter()
+                        .any(|category| {
+                            allowed
+                                .iter()
+                                .any(|grant| category_contains(grant, category))
+                        })
             })
     }
 }

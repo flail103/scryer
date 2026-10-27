@@ -1955,6 +1955,7 @@ export const startInteractiveReleaseSearchMutation = `mutation StartInteractiveR
     continuation
     deadlineReached
     failureCode
+    failureMessage
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {
@@ -1984,6 +1985,7 @@ export const continueInteractiveReleaseSearchMutation = `mutation ContinueIntera
     continuation
     deadlineReached
     failureCode
+    failureMessage
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {

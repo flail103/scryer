@@ -12,8 +12,22 @@ use tokio_util::sync::CancellationToken;
 
 type ObservedRead = (String, RawTextSearchRequest, oneshot::Sender<()>);
 
-struct ControlledProvider(mpsc::Sender<ObservedRead>);
-struct ControlledSource(String, mpsc::Sender<ObservedRead>);
+#[derive(Default)]
+struct ReadJournal {
+    active: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+    total: std::sync::atomic::AtomicUsize,
+}
+struct ActiveRead(Arc<ReadJournal>);
+impl Drop for ActiveRead {
+    fn drop(&mut self) {
+        self.0
+            .active
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+struct ControlledProvider(mpsc::Sender<ObservedRead>, Arc<ReadJournal>);
+struct ControlledSource(String, mpsc::Sender<ObservedRead>, Arc<ReadJournal>);
 
 #[async_trait::async_trait]
 impl IndexerClient for ControlledSource {
@@ -22,6 +36,11 @@ impl IndexerClient for ControlledSource {
         request: RawTextSearchRequest,
         cancel: CancellationToken,
     ) -> AppResult<IndexerSearchResponse> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let active = self.2.active.fetch_add(1, SeqCst) + 1;
+        self.2.peak.fetch_max(active, SeqCst);
+        self.2.total.fetch_add(1, SeqCst);
+        let _active = ActiveRead(self.2.clone());
         let (release, wait) = oneshot::channel();
         self.1
             .send((self.0.clone(), request, release))
@@ -51,6 +70,7 @@ impl IndexerPluginProvider for ControlledProvider {
         Some(Arc::new(ControlledSource(
             config.id.clone(),
             self.0.clone(),
+            self.1.clone(),
         )))
     }
     fn available_provider_types(&self) -> Vec<String> {
@@ -75,7 +95,25 @@ async fn next_read(reads: &mut mpsc::Receiver<ObservedRead>) -> ObservedRead {
         .unwrap()
 }
 
-async fn controlled_fixture() -> (TestContext, Router, String, mpsc::Receiver<ObservedRead>) {
+async fn controlled_fixture() -> (
+    TestContext,
+    Router,
+    String,
+    mpsc::Receiver<ObservedRead>,
+    Arc<ReadJournal>,
+) {
+    controlled_fixture_with_cooldown(false).await
+}
+
+async fn controlled_fixture_with_cooldown(
+    backed_off: bool,
+) -> (
+    TestContext,
+    Router,
+    String,
+    mpsc::Receiver<ObservedRead>,
+    Arc<ReadJournal>,
+) {
     let (context, _, key, clients) = fixture().await;
     enable(&context, true).await;
     let configs = Arc::new(IndexerConfigStore::new(
@@ -90,6 +128,7 @@ async fn controlled_fixture() -> (TestContext, Router, String, mpsc::Receiver<Ob
             "id": id, "name": id, "provider_type": "newznab", "base_url": "https://fixture.invalid",
             "is_enabled": true, "enable_interactive_search": true, "enable_auto_search": false,
             "created_at": now, "updated_at": now,
+            "disabled_until": backed_off.then(|| now + chrono::Duration::hours(1)),
             "caps_snapshot_json": serde_json::json!({
                 "parser_version": scryer_domain::INDEXER_CAPS_PARSER_VERSION,
                 "cache_fetched_at": now.to_rfc3339(), "searching_present": true,
@@ -105,7 +144,8 @@ async fn controlled_fixture() -> (TestContext, Router, String, mpsc::Receiver<Ob
     client.revision += 1;
     assert!(clients.save(&client, Some(1)).await.unwrap());
     let (sender, reads) = mpsc::channel(25);
-    let provider = Arc::new(ControlledProvider(sender));
+    let journal = Arc::new(ReadJournal::default());
+    let provider = Arc::new(ControlledProvider(sender, journal.clone()));
     let multi = Arc::new(MultiIndexerSearchClient::new(
         configs,
         context.indexer_stats.clone(),
@@ -128,12 +168,12 @@ async fn controlled_fixture() -> (TestContext, Router, String, mpsc::Receiver<Ob
         base_path: String::new(),
         tls: false,
     });
-    (context, router, key, reads)
+    (context, router, key, reads, journal)
 }
 
 #[tokio::test]
 async fn twenty_five_sources_share_existing_admission_and_survive_http_disconnect() {
-    let (_context, router, key, mut reads) = controlled_fixture().await;
+    let (_context, router, key, mut reads, journal) = controlled_fixture().await;
     let first = tokio::spawn({
         let router = router.clone();
         let key = key.clone();
@@ -158,10 +198,6 @@ async fn twenty_five_sources_share_existing_admission_and_survive_http_disconnec
         assert!(request.page.is_some());
         held.push(release);
     }
-    assert!(
-        reads.try_recv().is_err(),
-        "the existing 24-slot lane bounds dispatch"
-    );
     first.abort();
     assert!(first.await.unwrap_err().is_cancelled());
     held.pop()
@@ -192,15 +228,13 @@ async fn twenty_five_sources_share_existing_admission_and_survive_http_disconnec
         .unwrap();
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains("<rss"));
-    assert!(
-        reads.try_recv().is_err(),
-        "continuation must not restart source requests"
-    );
+    assert_eq!(journal.total.load(std::sync::atomic::Ordering::SeqCst), 25);
+    assert_eq!(journal.peak.load(std::sync::atomic::Ordering::SeqCst), 24);
 }
 
 #[tokio::test]
 async fn admitted_and_queued_reads_survive_deadline_then_expired_http_walk_rebuilds() {
-    let (context, router, key, mut reads) = controlled_fixture().await;
+    let (context, router, key, mut reads, journal) = controlled_fixture().await;
     let request = Request::builder()
         .uri("/newznab/api?t=search&q=lifecycle")
         .header("host", "scryer.example")
@@ -224,7 +258,6 @@ async fn admitted_and_queued_reads_survive_deadline_then_expired_http_walk_rebui
         assert_eq!(request.limit, None);
         held.push(release);
     }
-    assert!(reads.try_recv().is_err());
     // Advance only after all admitted reads have reached their explicit gate.
     // Resume before awaiting database/serializer work, avoiding auto-advance
     // while an external worker is still servicing this HTTP response.
@@ -256,10 +289,6 @@ async fn admitted_and_queued_reads_survive_deadline_then_expired_http_walk_rebui
         Some(usage::SEARCH_PARTIAL)
     );
     assert!(held.iter().all(|release| !release.is_closed()));
-    assert!(
-        reads.try_recv().is_err(),
-        "deadline must not bypass admission"
-    );
 
     held.pop().unwrap().send(()).unwrap();
     let (id, _, release) = next_read(&mut reads).await;
@@ -272,10 +301,8 @@ async fn admitted_and_queued_reads_survive_deadline_then_expired_http_walk_rebui
     let uri = "/newznab/api?t=search&q=lifecycle&offset=1";
     let (status, _) = call(&router, uri, Some(("x-api-key", &key))).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        reads.try_recv().is_err(),
-        "continuation reuses all 25 reads"
-    );
+    assert_eq!(journal.total.load(std::sync::atomic::Ordering::SeqCst), 25);
+    assert_eq!(journal.peak.load(std::sync::atomic::Ordering::SeqCst), 24);
 
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(300)).await;
@@ -298,5 +325,43 @@ async fn admitted_and_queued_reads_survive_deadline_then_expired_http_walk_rebui
         .unwrap();
     assert_eq!(status, StatusCode::OK);
     assert_eq!(rebuilt_ids, first_ids);
-    assert!(reads.try_recv().is_err());
+    assert_eq!(journal.total.load(std::sync::atomic::Ordering::SeqCst), 50);
+    assert_eq!(journal.peak.load(std::sync::atomic::Ordering::SeqCst), 24);
+}
+
+#[tokio::test]
+async fn all_backed_off_sources_return_http_429_without_dispatch() {
+    let (_context, router, key, _reads, journal) = controlled_fixture_with_cooldown(true).await;
+    let response = tokio::time::timeout(
+        Duration::from_secs(60),
+        router.oneshot(
+            Request::builder()
+                .uri("/newznab/api?t=search&q=cooldown")
+                .header("host", "scryer.example")
+                .header("x-api-key", key)
+                .body(Body::empty())
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        response.headers()["retry-after"]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            > 0
+    );
+    let body = tokio::time::timeout(
+        Duration::from_secs(60),
+        to_bytes(response.into_body(), 4096),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(std::str::from_utf8(&body).unwrap().contains("code=\"500\""));
+    assert_eq!(journal.total.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

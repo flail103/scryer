@@ -112,16 +112,79 @@ fn public_attribute_value<'a>(
         matches!(url.scheme(), "http" | "https")
             && (!url.username().is_empty()
                 || url.password().is_some()
+                || [
+                    item.result.download_url.as_deref(),
+                    item.result.link.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter_map(|source| url::Url::parse(source).ok())
+                .any(|source| source.host_str() == url.host_str())
+                || url.path_segments().is_some_and(|segments| {
+                    segments.into_iter().any(|part| {
+                        let part = part.to_ascii_lowercase();
+                        matches!(
+                            part.as_str(),
+                            "r" | "i" | "key" | "auth" | "secret" | "token" | "passkey"
+                        ) || part.starts_with("apikey")
+                            || part.starts_with("api_key")
+                    })
+                })
                 || url.query_pairs().any(|(key, _)| {
                     matches!(
                         key.to_ascii_lowercase().as_str(),
-                        "apikey" | "api_key" | "passkey" | "token" | "authkey" | "password"
+                        "apikey"
+                            | "api_key"
+                            | "passkey"
+                            | "token"
+                            | "authkey"
+                            | "password"
+                            | "r"
+                            | "i"
+                            | "key"
+                            | "auth"
+                            | "secret"
                     )
                 }))
     }) {
         Some(item.retrieval_url.as_ref())
     } else {
         Some(&attribute.value)
+    }
+}
+
+// Validate before writing any bytes: malformed provider metadata must never
+// truncate a response whose successful headers have already been delivered.
+fn writable_attribute(attribute: &PluginReleaseAttribute, value: &str) -> bool {
+    if checked_text(&attribute.name).is_err()
+        || checked_text(value).is_err()
+        || (attribute.origin == PluginReleaseAttributeOrigin::Element
+            && !matches!(attribute.name.as_str(), "category" | "attr"))
+    {
+        return false;
+    }
+    match attribute.namespace.as_deref() {
+        Some(prefix) => {
+            if !valid_name(prefix) || prefix == "xmlns" {
+                return false;
+            }
+            let Some(uri) = attribute
+                .namespace_uri
+                .as_deref()
+                .or_else(|| standard_namespace(prefix))
+            else {
+                return false;
+            };
+            !uri.is_empty()
+                && checked_text(uri).is_ok()
+                && ((prefix == "xml") == (Some(uri) == standard_namespace("xml")))
+                && uri != "http://www.w3.org/2000/xmlns/"
+        }
+        None => attribute.namespace_uri.as_deref().is_none_or(|uri| {
+            checked_text(uri).is_ok()
+                && Some(uri) != standard_namespace("xml")
+                && uri != "http://www.w3.org/2000/xmlns/"
+        }),
     }
 }
 
@@ -281,8 +344,21 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
         response.push_attribute(("total", total.as_str()));
         writer.write_event(Event::Empty(response))?;
     }
+    let mut dropped_items = 0_u64;
+    let mut dropped_attributes = 0_u64;
     for item in items {
         let item = item?;
+        if [
+            &item.result.title,
+            item.external_guid.as_ref(),
+            item.retrieval_url.as_ref(),
+        ]
+        .into_iter()
+        .any(|value| checked_text(value).is_err())
+        {
+            dropped_items += 1;
+            continue;
+        }
         writer.write_event(Event::Start(BytesStart::new("item")))?;
         element(&mut writer, "title", &item.result.title)?;
         let mut guid = BytesStart::new("guid");
@@ -298,7 +374,11 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
                 .or_else(|_| chrono::DateTime::parse_from_rfc2822(date))
                 .map(|date| date.to_rfc2822())
                 .unwrap_or_else(|_| date.clone());
-            element(&mut writer, "pubDate", &date)?;
+            if checked_text(&date).is_ok() {
+                element(&mut writer, "pubDate", &date)?;
+            } else {
+                dropped_attributes += 1;
+            }
         }
         let mut enclosure = BytesStart::new("enclosure");
         let size = item
@@ -313,10 +393,18 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
         writer.write_event(Event::Empty(enclosure))?;
         for attribute in &item.result.response_attributes.original {
             if let Some(value) = public_attribute_value(attribute, &item) {
-                write_attribute(&mut writer, attribute, value)?;
+                if writable_attribute(attribute, value) {
+                    write_attribute(&mut writer, attribute, value)?;
+                } else {
+                    dropped_attributes += 1;
+                }
             }
         }
         for (name, value) in normalized_attributes(item.result) {
+            if checked_text(&value).is_err() {
+                dropped_attributes += 1;
+                continue;
+            }
             let qualified = format!("{}:attr", protocol.prefix());
             let mut attribute = BytesStart::new(&qualified);
             attribute.push_attribute(("name", name));
@@ -324,9 +412,20 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
             writer.write_event(Event::Empty(attribute))?;
         }
         for category in normalized_category_names(item.result) {
-            element(&mut writer, "category", category)?;
+            if checked_text(category).is_ok() {
+                element(&mut writer, "category", category)?;
+            } else {
+                dropped_attributes += 1;
+            }
         }
         writer.write_event(Event::End(BytesEnd::new("item")))?;
+    }
+    if dropped_items != 0 || dropped_attributes != 0 {
+        tracing::warn!(
+            dropped_items,
+            dropped_attributes,
+            "Skipped invalid Nab feed metadata"
+        );
     }
     writer.write_event(Event::End(BytesEnd::new("channel")))?;
     writer.write_event(Event::End(BytesEnd::new("rss")))
@@ -392,6 +491,7 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
         )?;
     }
     output.write_all(b",\"item\":[")?;
+    let mut dropped_attributes = 0usize;
     for (index, item) in items.into_iter().enumerate() {
         let item = item?;
         if index != 0 {
@@ -433,6 +533,10 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
             let Some(value) = public_attribute_value(attribute, &item) else {
                 continue;
             };
+            if !writable_attribute(attribute, value) {
+                dropped_attributes += 1;
+                continue;
+            }
             let local = match attribute.origin {
                 PluginReleaseAttributeOrigin::Attribute => "attr",
                 PluginReleaseAttributeOrigin::Element => attribute.name.as_str(),
@@ -453,8 +557,8 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
                 PluginReleaseAttributeOrigin::Element => {
                     // The parser currently preserves plain category elements.
                     // Do not allow plugin metadata to duplicate structural keys.
-                    if local != "category" {
-                        return Err(invalid());
+                    if !matches!(local, "category" | "attr") {
+                        continue;
                     }
                     elements.entry(key).or_default().push(value);
                 }
@@ -487,6 +591,9 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
             json(&mut output, &values)?;
         }
         output.write_all(b"}")?;
+    }
+    if dropped_attributes != 0 {
+        tracing::warn!(dropped_attributes, "Skipped invalid Nab feed metadata");
     }
     output.write_all(b"]}}")
 }

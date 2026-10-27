@@ -100,12 +100,7 @@ pub(super) fn parse(
         _ => return Err(invalid()),
     };
     let operation = match parameters.remove("t").as_deref().unwrap_or("search") {
-        "caps" => {
-            if !parameters.is_empty() {
-                return Err(invalid());
-            }
-            Operation::Caps
-        }
+        "caps" => Operation::Caps,
         "get" => {
             let id = parameters
                 .remove("id")
@@ -237,7 +232,6 @@ mod tests {
             "t=search&q=a&q=b",
             "t=search&offset=-1",
             "t=search&limit=no",
-            "t=caps&q=extra",
         ] {
             assert_eq!(
                 parse(&HeaderMap::new(), query, IndexerClientProtocol::Newznab)
@@ -252,7 +246,7 @@ mod tests {
     fn caps_and_narrow_retrieval_parse_without_manufacturing_an_actor_or_key() {
         let caps = parse(
             &HeaderMap::new(),
-            "t=caps&o=json",
+            "t=caps&o=json&q=ignored&extended=1",
             IndexerClientProtocol::Newznab,
         )
         .unwrap();

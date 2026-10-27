@@ -1403,6 +1403,7 @@ export const interactiveReleaseSearchQuery = `query InteractiveReleaseSearch($id
     continuation
     deadlineReached
     failureCode
+    failureMessage
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {

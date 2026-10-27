@@ -275,16 +275,20 @@ impl AppUseCase {
                         "A granted indexer no longer exists",
                     )
                 })?;
-            if self
+            let provider = self
                 .services
                 .integrations
                 .plugin_provider
                 .available()
-                .is_some_and(|provider| {
-                    provider
-                        .management_capabilities_for_provider(&source.provider_type)
-                        .supports_managed_children_sync
-                })
+                .ok_or_else(|| {
+                    AppError::validation_refused(
+                        reasons::UNAVAILABLE,
+                        "Indexer provider is unavailable",
+                    )
+                })?;
+            if provider
+                .management_capabilities_for_provider(&source.provider_type)
+                .supports_managed_children_sync
             {
                 return Err(AppError::validation_refused(
                     reasons::GRANT_INVALID,
@@ -294,7 +298,15 @@ impl AppUseCase {
             if let Some(categories) = &mut grant.categories {
                 for category in categories.iter_mut() {
                     *category = category.trim().to_string();
-                    if category.is_empty() || category.chars().any(char::is_control) {
+                    if category.is_empty()
+                        || category.chars().any(char::is_control)
+                        || ((source.is_direct_nab() || source.is_prowlarr_nab_proxy())
+                            && category
+                                .parse::<u32>()
+                                .ok()
+                                .filter(|value| *value > 0)
+                                .is_none())
+                    {
                         return Err(AppError::validation_refused(
                             reasons::GRANT_INVALID,
                             "Category restrictions must contain valid category values",
@@ -353,5 +365,100 @@ impl AppUseCase {
             return Err(invalid_key());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct Provider(bool);
+    impl crate::IndexerPluginProvider for Provider {
+        fn client_for_provider(
+            &self,
+            _: &scryer_domain::IndexerConfig,
+        ) -> Option<Arc<dyn crate::IndexerClient>> {
+            None
+        }
+        fn available_provider_types(&self) -> Vec<String> {
+            vec!["newznab".into()]
+        }
+        fn scoring_policies(&self) -> Vec<scryer_rules::UserPolicy> {
+            vec![]
+        }
+        fn management_capabilities_for_provider(
+            &self,
+            _: &str,
+        ) -> scryer_domain::IndexerManagementCapabilities {
+            scryer_domain::IndexerManagementCapabilities {
+                supports_managed_children_sync: self.0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn grants_fail_closed_without_provider_and_refuse_parent_or_nonnumeric_nab_categories() {
+        let (mut app, _) = crate::lib_tests::bootstrap();
+        let now = app.runtime.environment.now();
+        app.services
+            .integrations
+            .indexer_configs
+            .create(
+                serde_json::from_value(serde_json::json!({
+                    "id": "grant-source", "name": "Grant fixture", "provider_type": "newznab",
+                    "base_url": "https://fixture.invalid", "is_enabled": true,
+                    "enable_interactive_search": true, "enable_auto_search": false,
+                    "created_at": now, "updated_at": now
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut configuration = IndexerClientConfiguration {
+            name: "Grant fixture".into(),
+            enabled: true,
+            protocols: vec![IndexerClientProtocol::Newznab],
+            grants: vec![IndexerClientGrant {
+                indexer_id: "grant-source".into(),
+                categories: None,
+            }],
+        };
+        app.services.integrations.plugin_provider = crate::RuntimeFeature::Disabled;
+        assert_eq!(
+            app.validate_indexer_client_configuration(configuration.clone())
+                .await
+                .unwrap_err()
+                .reason(),
+            Some(reasons::UNAVAILABLE)
+        );
+        app.services.integrations.plugin_provider =
+            crate::RuntimeFeature::Enabled(Arc::new(Provider(true)));
+        assert_eq!(
+            app.validate_indexer_client_configuration(configuration.clone())
+                .await
+                .unwrap_err()
+                .reason(),
+            Some(reasons::GRANT_INVALID)
+        );
+        app.services.integrations.plugin_provider =
+            crate::RuntimeFeature::Enabled(Arc::new(Provider(false)));
+        for category in ["software", "0", "4294967296"] {
+            configuration.grants[0].categories = Some(vec![category.into()]);
+            assert_eq!(
+                app.validate_indexer_client_configuration(configuration.clone())
+                    .await
+                    .unwrap_err()
+                    .reason(),
+                Some(reasons::GRANT_INVALID)
+            );
+        }
+        configuration.grants[0].categories = Some(vec!["100123".into()]);
+        assert!(
+            app.validate_indexer_client_configuration(configuration)
+                .await
+                .is_ok()
+        );
     }
 }

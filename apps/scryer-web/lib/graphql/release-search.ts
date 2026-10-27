@@ -62,6 +62,7 @@ export type InteractiveSearchProgress = {
   continuation?: string | null;
   deadlineReached?: boolean;
   failureCode?: string | null;
+  failureMessage?: string | null;
 };
 
 export {
@@ -79,6 +80,7 @@ type InteractiveReleaseSearchJobPayload = {
   continuation?: string | null;
   deadlineReached?: boolean;
   failureCode?: string | null;
+  failureMessage?: string | null;
 };
 
 const POLL_INTERVAL_MS = 1_000;
@@ -139,6 +141,7 @@ export async function runIterativeReleaseSearch(
       continuation: job.continuation,
       deadlineReached: job.deadlineReached,
       failureCode: job.failureCode,
+      failureMessage: job.failureMessage,
     });
   };
 

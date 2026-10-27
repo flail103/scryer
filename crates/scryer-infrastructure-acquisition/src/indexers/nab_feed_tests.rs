@@ -202,7 +202,7 @@ fn only_download_or_credential_urls_are_rewritten_and_password_metadata_survives
 }
 
 #[test]
-fn invalid_names_and_xml_control_characters_are_refused_instead_of_injected() {
+fn invalid_names_and_xml_control_characters_are_skipped_without_truncating_the_feed() {
     for attributes in [
         vec![attribute(Some("bad\"/><injected"), "tag", "value")],
         vec![attribute(Some("undeclared"), "tag", "value")],
@@ -216,21 +216,10 @@ fn invalid_names_and_xml_control_characters_are_refused_instead_of_injected() {
         }],
     ] {
         let result = result(attributes);
-        let error = write_xml_feed(
-            io::sink(),
-            NabProtocol::Newznab,
-            &NabFeedPage {
-                offset: 0,
-                total: None,
-            },
-            [NabFeedItem {
-                result: &result,
-                external_guid: "safe",
-                retrieval_url: "https://scryer.example/get",
-            }],
-        )
-        .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let output = xml(&result, None);
+        assert!(parsed_attributes(&output).is_empty());
+        assert!(output.ends_with("</channel></rss>"));
+        assert!(!output.contains("injected"));
     }
 }
 
@@ -267,7 +256,10 @@ fn output_failure_is_propagated_without_consuming_the_rest_of_the_page() {
 #[test]
 fn lazy_owned_links_preserve_output_and_stop_after_a_reference_failure() {
     let row = result(Vec::new());
-    let page = NabFeedPage { offset: 0, total: None };
+    let page = NabFeedPage {
+        offset: 0,
+        total: None,
+    };
     for json in [false, true] {
         let mut visited = 0;
         let items = std::iter::from_fn(|| {
@@ -287,7 +279,8 @@ fn lazy_owned_links_preserve_output_and_stop_after_a_reference_failure() {
             try_write_json_feed(&mut output, NabProtocol::Newznab, &page, items)
         } else {
             try_write_xml_feed(&mut output, NabProtocol::Newznab, &page, items)
-        }.unwrap_err();
+        }
+        .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(visited, 2);
         let output = String::from_utf8(output).unwrap();
@@ -410,4 +403,80 @@ fn non_nab_adapters_emit_normalized_claims_without_inventing_extended_attributes
             .unwrap()
             .contains("do-not-serialize")
     );
+}
+
+#[test]
+fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
+    let mut bad = result(vec![]);
+    bad.title = "bad\0title".into();
+    let good = result(vec![PluginReleaseAttribute {
+        origin: PluginReleaseAttributeOrigin::Element,
+        namespace: None,
+        namespace_uri: None,
+        name: "enclosure".into(),
+        value: "https://source.example/private".into(),
+    }]);
+    let mut output = Vec::new();
+    write_xml_feed(
+        &mut output,
+        NabProtocol::Newznab,
+        &NabFeedPage {
+            offset: 0,
+            total: None,
+        },
+        [&bad, &good].into_iter().map(|result| NabFeedItem {
+            result,
+            external_guid: "safe",
+            retrieval_url: "https://scryer.example/get",
+        }),
+    )
+    .unwrap();
+    let xml = String::from_utf8(output).unwrap();
+    assert_eq!(xml.matches("<item>").count(), 1);
+    assert_eq!(xml.matches("<enclosure ").count(), 1);
+    assert!(xml.ends_with("</channel></rss>"));
+    assert!(parsed_attributes(&xml).is_empty());
+    let mut output = Vec::new();
+    write_json_feed(
+        &mut output,
+        NabProtocol::Newznab,
+        &NabFeedPage {
+            offset: 0,
+            total: None,
+        },
+        [NabFeedItem {
+            result: &good,
+            external_guid: "safe",
+            retrieval_url: "https://scryer.example/get",
+        }],
+    )
+    .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(
+        json["channel"]["item"][0]["enclosure"]["@attributes"]["url"],
+        "https://scryer.example/get"
+    );
+}
+
+#[test]
+fn credential_aliases_paths_and_source_host_urls_are_rewritten() {
+    for value in [
+        "https://other.example/file?r=secret",
+        "https://other.example/file?i=secret",
+        "https://other.example/api_key/secret/file",
+        "https://other.example/key/secret",
+        "https://source.example/download/rotating-secret",
+    ] {
+        let output = xml(
+            &result(vec![attribute(Some("newznab"), "comments", value)]),
+            None,
+        );
+        let attributes = parsed_attributes(&output);
+        assert_eq!(attributes[0].0.as_deref(), Some(NEWZNAB_NAMESPACE));
+        assert_eq!(
+            attributes[0].2,
+            "https://scryer.example/torznab/api?t=get&id=reference"
+        );
+        assert!(!output.contains("secret"));
+    }
 }

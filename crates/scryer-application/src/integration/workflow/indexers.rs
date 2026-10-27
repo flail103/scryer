@@ -509,6 +509,7 @@ impl AppUseCase {
                     proxy,
                     accounting,
                     intent: crate::SchedulerIntent::Maintenance,
+                    now: self.runtime.environment.now(),
                 },
             )
             .await

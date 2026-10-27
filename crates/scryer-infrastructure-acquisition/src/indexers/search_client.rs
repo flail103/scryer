@@ -4706,10 +4706,12 @@ impl MultiIndexerSearchClient {
         &self,
         config: &IndexerConfig,
         proxies: &HashMap<String, Option<scryer_domain::ProxyConfig>>,
+        intent: SchedulerIntent,
     ) -> (IndexerConfig, scryer_application::IndexerCapsDiagnostic) {
         let mut resolved_config = config.clone();
         let Some(refresher) = self.caps_refresher.as_ref() else {
-            let diagnostic = scryer_application::cached_indexer_caps(config, Utc::now()).diagnostic();
+            let diagnostic =
+                scryer_application::cached_indexer_caps(config, Utc::now()).diagnostic();
             return (resolved_config, diagnostic);
         };
         let proxy = config
@@ -4727,7 +4729,8 @@ impl MultiIndexerSearchClient {
                     refresher: refresher.as_ref(),
                     proxy,
                     accounting: accounting.as_ref(),
-                    intent: SchedulerIntent::InteractiveSearch,
+                    intent,
+                    now: Utc::now(),
                 },
             )
             .await;
@@ -6768,8 +6771,13 @@ impl IndexerClient for MultiIndexerSearchClient {
                     ),
                     IndexerSearchEligibility::Eligible
                 ) {
-                    self.resolved_caps_config(config, &proxy_configs_by_id)
-                        .await.0
+                    self.resolved_caps_config(
+                        config,
+                        &proxy_configs_by_id,
+                        Self::scheduler_intent(mode, is_rss_request),
+                    )
+                    .await
+                    .0
                 } else {
                     (*config).clone()
                 }
@@ -9420,9 +9428,15 @@ impl IndexerClient for MultiIndexerSearchClient {
             };
             if caps.is_some() {
                 page.get_or_insert_with(|| scryer_application::IndexerSearchPageMetadata {
-                    caps: None, completion, next_cursor: None,
-                    api_current: None, api_max: None, grab_current: None, grab_max: None,
-                }).caps = caps;
+                    caps: None,
+                    completion,
+                    next_cursor: None,
+                    api_current: None,
+                    api_max: None,
+                    grab_current: None,
+                    grab_max: None,
+                })
+                .caps = caps;
             }
             if !completion.is_complete() {
                 response.completion = if selected.len() == 1 {
@@ -9564,11 +9578,19 @@ impl MultiIndexerSearchClient {
         proxy_configs_by_id: &HashMap<String, Option<scryer_domain::ProxyConfig>>,
         request: RawTextSearchRequest,
         cancel_token: &CancellationToken,
-    ) -> AppResult<(Option<IndexerSearchResponse>, IndexerSearchOutcome, Option<scryer_application::IndexerCapsDiagnostic>)> {
+    ) -> AppResult<(
+        Option<IndexerSearchResponse>,
+        IndexerSearchOutcome,
+        Option<scryer_application::IndexerCapsDiagnostic>,
+    )> {
         let canceled = || AppError::canceled("indexer search canceled");
         let (id, name) = (config.id.as_str(), config.name.as_str());
         if let Some(until) = config.disabled_until.filter(|until| *until > Utc::now()) {
-            return Ok((None, IndexerSearchOutcome::BackedOff { until: Some(until) }, None));
+            return Ok((
+                None,
+                IndexerSearchOutcome::BackedOff { until: Some(until) },
+                None,
+            ));
         }
         if let Some(backoff) = persisted_backoff {
             self.backoff_tracker.seed_persisted(id, name, backoff).await;
@@ -9599,7 +9621,13 @@ impl MultiIndexerSearchClient {
         {
             return Ok((None, IndexerSearchOutcome::Unsupported, None));
         }
-        let (resolved_config, caps_diagnostic) = self.resolved_caps_config(config, proxy_configs_by_id).await;
+        let (resolved_config, caps_diagnostic) = self
+            .resolved_caps_config(
+                config,
+                proxy_configs_by_id,
+                SchedulerIntent::InteractiveSearch,
+            )
+            .await;
         let config = &resolved_config;
         let (client, _, search_timeout) =
             match Self::client_from_config(config, &self.plugin_provider, proxy_configs_by_id) {
@@ -19313,35 +19341,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn caps_refresh_preserves_background_and_interactive_scheduler_intent() {
+        struct RecordingCaps(Arc<std::sync::Mutex<Vec<SchedulerIntent>>>);
+        #[async_trait]
+        impl scryer_application::IndexerCapsSnapshotRefresher for RecordingCaps {
+            async fn fetch_for_config(
+                &self,
+                _: &IndexerConfig,
+                _: Option<&scryer_domain::ProxyConfig>,
+            ) -> AppResult<Option<scryer_domain::IndexerCapsSnapshot>> {
+                panic!("intent must be supplied")
+            }
+            async fn fetch_for_config_with_intent(
+                &self,
+                _: &IndexerConfig,
+                _: Option<&scryer_domain::ProxyConfig>,
+                _: Option<&scryer_application::IndexerAccountingContext>,
+                intent: SchedulerIntent,
+            ) -> AppResult<Option<scryer_domain::IndexerCapsSnapshot>> {
+                self.0.lock().unwrap().push(intent);
+                Ok(None)
+            }
+        }
+        for (mode, rss, expected) in [
+            (SearchMode::Auto, true, SchedulerIntent::BackgroundRss),
+            (
+                SearchMode::Auto,
+                false,
+                SchedulerIntent::BackgroundAcquisition,
+            ),
+            (
+                SearchMode::Interactive,
+                false,
+                SchedulerIntent::InteractiveSearch,
+            ),
+        ] {
+            let mut config = mock_indexer_config();
+            config.provider_type = "newznab".into();
+            config.managed_parent_config_id = Some("parent".into());
+            config.caps_snapshot_json = Some(
+                serde_json::to_string(&scryer_domain::IndexerCapsSnapshot::default()).unwrap(),
+            );
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let (multi, _) = raw_search_client(config.clone(), movie_caps(), &[]);
+            let multi = multi.with_caps_resolution(
+                Arc::new(scryer_application::CapsRequestCache::default()),
+                Arc::new(RecordingCaps(observed.clone())),
+            );
+            for _ in 0..2 {
+                multi
+                    .resolved_caps_config(
+                        &config,
+                        &HashMap::new(),
+                        MultiIndexerSearchClient::scheduler_intent(mode, rss),
+                    )
+                    .await;
+            }
+            assert_eq!(*observed.lock().unwrap(), vec![expected]);
+        }
+    }
+
+    #[tokio::test]
     async fn raw_search_retains_caps_diagnostics_without_changing_completion() {
         struct DeferredCaps;
         #[async_trait]
         impl scryer_application::IndexerCapsSnapshotRefresher for DeferredCaps {
-            async fn fetch_for_config(&self, _: &IndexerConfig, _: Option<&scryer_domain::ProxyConfig>)
-                -> AppResult<Option<scryer_domain::IndexerCapsSnapshot>> {
+            async fn fetch_for_config(
+                &self,
+                _: &IndexerConfig,
+                _: Option<&scryer_domain::ProxyConfig>,
+            ) -> AppResult<Option<scryer_domain::IndexerCapsSnapshot>> {
                 Err(AppError::TemporaryUnavailable {
-                    reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_BUSY),
+                    reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_DEFERRED),
                     message: "Discovery deferred".into(),
-                    retry_after: Some(std::time::Duration::from_secs(31)),
+                    retry_after: Some(std::time::Duration::from_secs(30)),
                     rate_limit_cooldown: scryer_application::RateLimitCooldownAction::None,
                 })
             }
         }
         let mut config = mock_indexer_config();
         config.provider_type = "newznab".into();
-        config.caps_snapshot_json = Some(serde_json::to_string(&scryer_domain::IndexerCapsSnapshot::default()).unwrap());
+        config.caps_snapshot_json =
+            Some(serde_json::to_string(&scryer_domain::IndexerCapsSnapshot::default()).unwrap());
         let (multi, calls) = raw_search_client(config, movie_caps(), &["Software.Release"]);
-        let multi = multi.with_caps_resolution(Arc::new(scryer_application::CapsRequestCache::default()), Arc::new(DeferredCaps));
+        let multi = multi.with_caps_resolution(
+            Arc::new(scryer_application::CapsRequestCache::default()),
+            Arc::new(DeferredCaps),
+        );
         let response = run_raw_search(&multi, "Software", &[]).await;
         assert_eq!(calls.lock().unwrap().len(), 1);
         assert!(response.completion.is_complete());
         let page = response.indexer_outcomes[0].page.as_ref().unwrap();
         assert!(page.completion.is_complete());
-        assert_eq!(page.caps, Some(scryer_application::IndexerCapsDiagnostic {
-            source: scryer_application::IndexerCapsSource::Stale,
-            reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_BUSY),
-            retry_after: Some(std::time::Duration::from_secs(31)),
-        }));
+        assert_eq!(
+            page.caps,
+            Some(scryer_application::IndexerCapsDiagnostic {
+                source: scryer_application::IndexerCapsSource::Stale,
+                reason: Some(scryer_application::error_reasons::indexer_caps::REFRESH_DEFERRED),
+                retry_after: Some(std::time::Duration::from_secs(30)),
+            })
+        );
     }
 
     #[tokio::test]
@@ -19353,7 +19452,10 @@ mod tests {
         let response = run_raw_search(&multi, "Software", &[]).await;
         assert!(calls.lock().unwrap().is_empty());
         assert!(!response.completion.is_complete());
-        assert_eq!(response.indexer_outcomes[0].outcome, IndexerSearchOutcome::BackedOff { until: Some(until) });
+        assert_eq!(
+            response.indexer_outcomes[0].outcome,
+            IndexerSearchOutcome::BackedOff { until: Some(until) }
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -19361,7 +19463,11 @@ mod tests {
         use std::future::Future;
         let (multi, calls) = raw_search_client(mock_indexer_config(), movie_caps(), &[]);
         assert_eq!(multi.interactive_search_limit.available_permits(), 24);
-        let occupied = multi.interactive_search_limit.clone().try_acquire_many_owned(24).unwrap();
+        let occupied = multi
+            .interactive_search_limit
+            .clone()
+            .try_acquire_many_owned(24)
+            .unwrap();
         let read = run_raw_search(&multi, "Queued Source", &[]);
         tokio::pin!(read);
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
@@ -19371,19 +19477,36 @@ mod tests {
         assert!(read.as_mut().poll(&mut context).is_pending());
         assert!(calls.lock().unwrap().is_empty());
         drop(occupied);
-        let response = tokio::time::timeout(std::time::Duration::from_secs(10), read).await.unwrap();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(10), read)
+            .await
+            .unwrap();
         assert!(response.completion.is_complete());
         assert_eq!(calls.lock().unwrap().len(), 1);
 
-        let occupied = multi.interactive_search_limit.clone().try_acquire_many_owned(24).unwrap();
+        let occupied = multi
+            .interactive_search_limit
+            .clone()
+            .try_acquire_many_owned(24)
+            .unwrap();
         let cancel = CancellationToken::new();
-        let read = IndexerClient::search_raw_text(&multi, RawTextSearchRequest {
-            query: "Cancelled Queue".into(), ..Default::default()
-        }, cancel.clone());
+        let read = IndexerClient::search_raw_text(
+            &multi,
+            RawTextSearchRequest {
+                query: "Cancelled Queue".into(),
+                ..Default::default()
+            },
+            cancel.clone(),
+        );
         tokio::pin!(read);
         assert!(read.as_mut().poll(&mut context).is_pending());
         cancel.cancel();
-        assert!(tokio::time::timeout(std::time::Duration::from_secs(10), read).await.unwrap().unwrap_err().is_canceled());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(10), read)
+                .await
+                .unwrap()
+                .unwrap_err()
+                .is_canceled()
+        );
         assert_eq!(calls.lock().unwrap().len(), 1);
         drop(occupied);
     }

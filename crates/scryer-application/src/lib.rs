@@ -1,6 +1,5 @@
 mod acquisition;
 mod api_keys;
-pub mod indexer_clients;
 pub mod application_upgrade;
 mod authorization;
 mod catalog;
@@ -12,6 +11,7 @@ mod download_client_config;
 mod download_client_path_mappings;
 mod download_identity;
 pub mod http_release_refusal;
+pub mod indexer_clients;
 pub mod login_challenge_refusal;
 pub mod public_url;
 pub mod rate_limit_proxy_policy;
@@ -224,8 +224,8 @@ pub use import::post_processing as app_usecase_post_processing;
 pub use import::srrdb::{SRRDB_API_BASE_URL, SrrdbHttpFilenameLookup};
 pub use import::upgrade;
 pub use integration::indexer_caps_cache::{
-    CapsRequestCache, IndexerCapsDiagnostic, IndexerCapsRefreshContext, IndexerCapsSource, ResolvedIndexerCaps,
-    cached_indexer_caps,
+    CapsRequestCache, IndexerCapsDiagnostic, IndexerCapsRefreshContext, IndexerCapsSource,
+    ResolvedIndexerCaps, cached_indexer_caps,
 };
 pub use integration::tracked_downloads;
 pub use library::filesystem_walk;
@@ -349,7 +349,8 @@ pub use catalog::interactive_release_search::{
     InteractiveReleaseSearchIndexerView, InteractiveReleaseSearchRequest,
     InteractiveReleaseSearchSnapshot, InteractiveReleaseSearchState,
     InteractiveSearchArtifactBundle, InteractiveSearchArtifactTarget, QueueUnlinkedReleaseOutcome,
-    SearchPrincipal, RawSearchOutputLease, RawSearchPage, RawSearchRow, RawSearchSourceProgress, RAW_SEARCH_PAGE_SIZE,
+    RAW_SEARCH_PAGE_SIZE, RawSearchOutputLease, RawSearchPage, RawSearchRow,
+    RawSearchSourceProgress, SearchPrincipal,
 };
 pub use catalog::release_search::release_candidate_fingerprint;
 pub use catalog::title_hydration::start_background_title_hydration_loop;
@@ -830,7 +831,7 @@ pub use types::{
     WebauthnCredentialRecord,
 };
 pub use types::{
-    CapturedIndexerHttpHeader, CapturedIndexerHttpResponse, INDEXER_CAPS_REFRESH_ERROR_PREFIX,
+    CapturedIndexerHttpHeader, CapturedIndexerHttpResponse, INDEXER_PAGE_CURSOR_MAX_BYTES,
     IndexerErrorClassification, IndexerErrorDetail, IndexerErrorOperation, IndexerErrorPage,
     IndexerErrorSummary, IndexerFirstPageGate, IndexerFirstPageVerdict, IndexerQueryOutcome,
     IndexerResponseAttributes, IndexerRssCatchUp, IndexerSearchCompletion,
@@ -839,7 +840,7 @@ pub use types::{
     IndexerSearchPlanCapability, IndexerSearchPlanRequest, IndexerSearchPlanSummary,
     IndexerSearchResponse, IndexerSearchResult, IndexerSearchStrategyEvent,
     IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, NewIndexerError,
-    INDEXER_PAGE_CURSOR_MAX_BYTES, RawTextSearchPage, RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
+    RawTextSearchPage, RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
     ReleaseStrategyKind, extract_magnet_info_hash, indexer_search_identity, is_valid_magnet_uri,
     search_relevant_indexer_caps, search_relevant_managed_indexer_metadata,
 };

@@ -1770,6 +1770,8 @@ pub struct InteractiveReleaseSearchPayload {
     pub deadline_reached: bool,
     /// Stable raw-search refusal condition, independent of the display sentence.
     pub failure_code: Option<String>,
+    /// Safe server fallback when a client does not recognize the refusal code.
+    pub failure_message: Option<String>,
 }
 
 #[derive(SimpleObject, Clone)]

@@ -2624,9 +2624,6 @@ mod canonical_download_source_tests {
     }
 }
 
-/// Prefix shared by caps-health persistence and automatic-search suppression.
-pub const INDEXER_CAPS_REFRESH_ERROR_PREFIX: &str = "caps refresh failed:";
-
 /// Project an indexer's caps snapshot down to fields that can change search
 /// dispatch or the returned corpus. Health and display-only metadata must not
 /// reopen convergence.

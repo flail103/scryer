@@ -21,6 +21,28 @@ use wiremock::{
     matchers::{method, query_param},
 };
 
+// The feed writer binds the protocol namespace on each preserved attribute.
+// Check both the qualified name and that local binding here; the serializer's
+// NsReader tests separately validate namespace resolution and XML escaping.
+fn protocol_attributes(xml: &str) -> Vec<(String, String)> {
+    xml.split("<newznab:attr ")
+        .skip(1)
+        .filter_map(|tail| {
+            let tag = tail.split_once("/>")?.0;
+            if !tag.contains("xmlns:newznab=\"http://www.newznab.com/DTD/2010/feeds/attributes/\"")
+            {
+                return None;
+            }
+            let field = |name: &str| {
+                tag.split_once(&format!(" {name}=\""))
+                    .and_then(|(_, tail)| tail.split_once('"'))
+                    .map(|(value, _)| value.to_owned())
+            };
+            Some((field("name")?, field("value")?))
+        })
+        .collect()
+}
+
 fn config(base: &str) -> IndexerConfig {
     let now = chrono::Utc::now();
     IndexerConfig {
@@ -123,7 +145,7 @@ async fn authenticated_http_json_upstream_preserves_xml_metadata_and_stable_link
             "channel":{"item":[{"title":"Software & tools","guid":"stable-release",
                 "enclosure":{"@attributes":{"url":"https://upstream.example/get?apikey=upstream-secret",
                     "length":"1234","type":"application/x-nzb"}},
-                "newznab:attr":[{"@attributes":{"name":"category","value":"4000"}},
+                "attr":[{"@attributes":{"name":"category","value":"4000"}},
                     {"@attributes":{"name":"custom","value":"001.00"}},
                     {"@attributes":{"name":"custom","value":"second & <third>"}},
                     {"@attributes":{"name":"large","value":"\"".repeat(1024 * 1024)}},
@@ -205,7 +227,15 @@ async fn authenticated_http_json_upstream_preserves_xml_metadata_and_stable_link
         .unwrap();
         let xml = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(xml.contains("<title>Software &amp; tools</title>"));
-        assert_eq!(xml.matches("name=\"custom\"").count(), 2);
+        let attributes = protocol_attributes(&xml);
+        assert_eq!(
+            attributes
+                .iter()
+                .filter(|(name, _)| name == "custom")
+                .count(),
+            2
+        );
+        assert!(attributes.contains(&("custom".into(), "001.00".into())));
         assert_eq!(
             xml.matches("&quot;").count(),
             1024 * 1024,
@@ -286,7 +316,7 @@ async fn real_json_upstream_search_emits_xml_and_uses_host_caps() {
                 "enclosure": {"@attributes": {"url": "https://upstream.example/get?apikey=upstream-secret",
                     "length": "1234", "type": "application/x-nzb"}},
                 "category": ["4000", "Software & tools"],
-                "newznab:attr": [
+                "attr": [
                     {"@attributes": {"name": "category", "value": "4000"}},
                     {"@attributes": {"name": "category", "value": "6000"}},
                     {"@attributes": {"name": "category", "value": "100123"}},
@@ -339,10 +369,11 @@ async fn real_json_upstream_search_emits_xml_and_uses_host_caps() {
     let xml = String::from_utf8(output).unwrap();
     assert!(xml.starts_with("<?xml"));
     assert!(xml.contains("<title>Software &amp; tools</title>"));
+    let attributes = protocol_attributes(&xml);
     for value in ["4000", "6000", "100123", "001.00", "release-password"] {
         assert!(
-            xml.contains(&format!("value=\"{value}\"")),
-            "missing {value}"
+            attributes.iter().any(|(_, actual)| actual == value),
+            "missing namespaced {value}"
         );
     }
     assert!(xml.contains("name=\"custom\" value=\"second &amp; &lt;third&gt;\""));

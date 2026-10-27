@@ -35,10 +35,25 @@ pub mod indexer_clients {
     pub const CREDENTIALS_AMBIGUOUS: &str = "INDEXER_CLIENTS_CREDENTIALS_AMBIGUOUS";
     /// The retrieval reference is malformed, unauthenticated or no longer authorized.
     pub const REFERENCE_INVALID: &str = "INDEXER_CLIENTS_REFERENCE_INVALID";
-    pub const ALL: &[&str] = &[EXPERIMENTAL_DISABLED, INTERACTIVE_SESSION_REQUIRED, ALL_PERMISSIONS_REQUIRED, KEY_INVALID,
-        UNAVAILABLE, NOT_FOUND, CONFIGURATION_CHANGED, NAME_INVALID, GRANT_INVALID, REVISION_EXHAUSTED,
-        PROTOCOL_FORBIDDEN, SEARCH_UNSUPPORTED, CATEGORY_INVALID, SOURCE_CHANGED,
-        REQUEST_INVALID, CREDENTIALS_AMBIGUOUS, REFERENCE_INVALID];
+    pub const ALL: &[&str] = &[
+        EXPERIMENTAL_DISABLED,
+        INTERACTIVE_SESSION_REQUIRED,
+        ALL_PERMISSIONS_REQUIRED,
+        KEY_INVALID,
+        UNAVAILABLE,
+        NOT_FOUND,
+        CONFIGURATION_CHANGED,
+        NAME_INVALID,
+        GRANT_INVALID,
+        REVISION_EXHAUSTED,
+        PROTOCOL_FORBIDDEN,
+        SEARCH_UNSUPPORTED,
+        CATEGORY_INVALID,
+        SOURCE_CHANGED,
+        REQUEST_INVALID,
+        CREDENTIALS_AMBIGUOUS,
+        REFERENCE_INVALID,
+    ];
 
     #[cfg(test)]
     #[test]
@@ -46,7 +61,11 @@ pub mod indexer_clients {
         let mut seen = std::collections::HashSet::new();
         for reason in ALL {
             assert!(reason.starts_with("INDEXER_CLIENTS_"));
-            assert!(reason.bytes().all(|byte| byte.is_ascii_uppercase() || byte == b'_'));
+            assert!(
+                reason
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+            );
             assert!(seen.insert(reason));
         }
     }
@@ -69,8 +88,19 @@ pub mod raw_search {
     pub const ALL_SOURCES_LIMITED: &str = "RAW_SEARCH_ALL_SOURCES_LIMITED";
     /// No eligible source produced a successful response.
     pub const NO_SOURCE_SUCCEEDED: &str = "RAW_SEARCH_NO_SOURCE_SUCCEEDED";
-    pub const ALL: &[&str] = &[RETAINED_STATE_FULL, CURSOR_REPEATED, CURSOR_INVALID, OFFSET_INVALID, CANCELLED,
-        HISTORY_EXPIRED, ALL_SOURCES_LIMITED, NO_SOURCE_SUCCEEDED];
+    /// The raw search coordinator could not complete the page.
+    pub const SEARCH_FAILED: &str = "RAW_SEARCH_FAILED";
+    pub const ALL: &[&str] = &[
+        RETAINED_STATE_FULL,
+        CURSOR_REPEATED,
+        CURSOR_INVALID,
+        OFFSET_INVALID,
+        CANCELLED,
+        HISTORY_EXPIRED,
+        ALL_SOURCES_LIMITED,
+        NO_SOURCE_SUCCEEDED,
+        SEARCH_FAILED,
+    ];
 
     #[cfg(test)]
     #[test]
@@ -78,7 +108,11 @@ pub mod raw_search {
         let mut seen = std::collections::HashSet::new();
         for reason in ALL {
             assert!(reason.starts_with("RAW_SEARCH_"));
-            assert!(reason.bytes().all(|byte| byte.is_ascii_uppercase() || byte == b'_'));
+            assert!(
+                reason
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+            );
             assert!(seen.insert(reason));
         }
     }
@@ -3979,12 +4013,10 @@ pub mod media_servers {
 pub mod indexer_caps {
     /// Capability discovery failed; the previous snapshot remains usable.
     pub const REFRESH_FAILED: &str = "INDEXER_CAPS_REFRESH_FAILED";
-    /// The bounded host refresh registry has no admission capacity.
-    pub const REFRESH_BUSY: &str = "INDEXER_CAPS_REFRESH_BUSY";
     /// Discovery did not provide a usable replacement for missing or stale caps.
     pub const REFRESH_DEFERRED: &str = "INDEXER_CAPS_REFRESH_DEFERRED";
     /// Every reason owned by capability resolution.
-    pub const ALL: &[&str] = &[REFRESH_FAILED, REFRESH_BUSY, REFRESH_DEFERRED];
+    pub const ALL: &[&str] = &[REFRESH_FAILED, REFRESH_DEFERRED];
 
     #[cfg(test)]
     mod tests {

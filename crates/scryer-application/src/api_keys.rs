@@ -164,7 +164,13 @@ impl AppUseCase {
                 "API key is expired or revoked",
             ));
         }
-        if !verify_key_material(&self.auth.jwt_signing_salt, "api-key", &lookup_id, &secret, &record.secret_hash) {
+        if !verify_key_material(
+            &self.auth.jwt_signing_salt,
+            "api-key",
+            &lookup_id,
+            &secret,
+            &record.secret_hash,
+        ) {
             return Err(AppError::unauthorized_reason(
                 crate::error_reasons::api_keys::VALUE_INVALID,
                 "invalid API key",
@@ -373,13 +379,26 @@ pub(crate) fn parse_key_material(raw_key: &str, prefix: &str) -> Option<(String,
 
 pub(crate) fn hash_key_material(salt: &str, domain: &str, lookup_id: &str, secret: &str) -> String {
     let key = hmac::Key::new(hmac::HMAC_SHA256, salt.as_bytes());
-    URL_SAFE_NO_PAD.encode(hmac::sign(&key, format!("{domain}:{lookup_id}:{secret}").as_bytes()).as_ref())
+    URL_SAFE_NO_PAD
+        .encode(hmac::sign(&key, format!("{domain}:{lookup_id}:{secret}").as_bytes()).as_ref())
 }
 
-pub(crate) fn verify_key_material(salt: &str, domain: &str, lookup_id: &str, secret: &str, stored: &str) -> bool {
-    let Ok(tag) = URL_SAFE_NO_PAD.decode(stored) else { return false; };
-    hmac::verify(&hmac::Key::new(hmac::HMAC_SHA256, salt.as_bytes()),
-        format!("{domain}:{lookup_id}:{secret}").as_bytes(), &tag).is_ok()
+pub(crate) fn verify_key_material(
+    salt: &str,
+    domain: &str,
+    lookup_id: &str,
+    secret: &str,
+    stored: &str,
+) -> bool {
+    let Ok(tag) = URL_SAFE_NO_PAD.decode(stored) else {
+        return false;
+    };
+    hmac::verify(
+        &hmac::Key::new(hmac::HMAC_SHA256, salt.as_bytes()),
+        format!("{domain}:{lookup_id}:{secret}").as_bytes(),
+        &tag,
+    )
+    .is_ok()
 }
 
 pub(crate) fn generate_api_key_material() -> AppResult<(String, String)> {

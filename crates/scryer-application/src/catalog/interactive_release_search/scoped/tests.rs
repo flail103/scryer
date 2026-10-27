@@ -177,8 +177,11 @@ async fn expiry_cancels_a_pending_source_and_releases_its_retained_budget() {
     struct PendingClient(mpsc::UnboundedSender<oneshot::Sender<()>>);
     #[async_trait::async_trait]
     impl IndexerClient for PendingClient {
-        async fn search_raw_text(&self, _: RawTextSearchRequest, _: CancellationToken)
-            -> AppResult<IndexerSearchResponse> {
+        async fn search_raw_text(
+            &self,
+            _: RawTextSearchRequest,
+            _: CancellationToken,
+        ) -> AppResult<IndexerSearchResponse> {
             let (send, receive) = oneshot::channel();
             self.0.send(send).unwrap();
             // Model admission that has not started the provider operation timer.
@@ -190,30 +193,49 @@ async fn expiry_cancels_a_pending_source_and_releases_its_retained_budget() {
     let (send, mut reads) = mpsc::unbounded_channel();
     app.services.integrations.indexer_client = Arc::new(PendingClient(send));
     let budget = app.runtime.acquisition.raw_search_budget.clone();
-    let (id, generation) = app.scoped_raw_generation(
-        principal("a"), "query".into(), sources(), 0).await.unwrap();
+    let (id, generation) = app
+        .scoped_raw_generation(principal("a"), "query".into(), sources(), 0)
+        .await
+        .unwrap();
     let weak = Arc::downgrade(&generation);
     let reader = tokio::spawn(async move { generation.page(0, 100).await });
     let mut pending = tokio::time::timeout(Duration::from_secs(60), reads.recv())
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     tokio::time::advance(raw::RAW_SEARCH_RESPONSE_DEADLINE).await;
     let page = tokio::time::timeout(Duration::from_secs(60), reader)
-        .await.unwrap().unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     drop(page);
     assert!(budget.used() > 0);
     assert!(!pending.is_closed());
     tokio::time::advance(raw::RAW_SEARCH_IDLE_TTL).await;
     {
-        let mut entries = app.runtime.acquisition.interactive_release_searches.lock().await;
+        let mut entries = app
+            .runtime
+            .acquisition
+            .interactive_release_searches
+            .lock()
+            .await;
         evict_stale_entries(&mut entries, app.runtime.environment.now());
         assert!(!entries.contains_key(&id));
     }
-    tokio::time::timeout(Duration::from_secs(60), pending.closed()).await.unwrap();
+    // A continuously-ready yield loop prevents paused time from advancing.
+    // Resume only the failure clock after the explicit expiry trigger.
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(60), pending.closed())
+        .await
+        .unwrap();
     tokio::time::timeout(Duration::from_secs(60), async {
         while weak.upgrade().is_some() || budget.used() != 0 {
             tokio::task::yield_now().await;
         }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     assert_eq!(budget.used(), 0);
 }
 
@@ -387,4 +409,23 @@ async fn internal_source_and_cached_page_admission_reclaim_idle_but_protect_acti
             drop(pressure);
         }
     }
+}
+
+#[tokio::test]
+async fn initial_read_never_joins_a_running_offset_rebuild() {
+    let (app, _reads) = fixture();
+    let (rebuild_id, _) = app
+        .scoped_raw_generation(principal("a"), "same".into(), sources(), 100)
+        .await
+        .unwrap();
+    let (initial_id, _) = app
+        .scoped_raw_generation(principal("a"), "same".into(), sources(), 0)
+        .await
+        .unwrap();
+    assert_ne!(initial_id, rebuild_id);
+    let (joined_id, _) = app
+        .scoped_raw_generation(principal("a"), "same".into(), sources(), 0)
+        .await
+        .unwrap();
+    assert_eq!(initial_id, joined_id);
 }

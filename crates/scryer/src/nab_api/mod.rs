@@ -232,6 +232,32 @@ impl std::io::Write for ByteCount {
     }
 }
 
+fn request_scheme(headers: &HeaderMap, tls: bool) -> &str {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| matches!(*value, "http" | "https"))
+        .unwrap_or(if tls { "https" } else { "http" })
+}
+
+#[test]
+fn forwarded_scheme_is_validated_before_the_tls_fallback() {
+    let mut headers = HeaderMap::new();
+    assert_eq!(request_scheme(&headers, false), "http");
+    assert_eq!(request_scheme(&headers, true), "https");
+    for (value, expected) in [
+        ("https", "https"),
+        ("https, http", "https"),
+        ("http", "http"),
+        ("javascript", "http"),
+    ] {
+        headers.insert("x-forwarded-proto", value.parse().unwrap());
+        assert_eq!(request_scheme(&headers, false), expected);
+    }
+}
+
 fn endpoint_url(
     state: &NabState,
     headers: &HeaderMap,
@@ -251,7 +277,8 @@ fn endpoint_url(
         if authority.as_str().contains('@') {
             return Err(unavailable());
         }
-        format!("{}://{authority}", if state.tls { "https" } else { "http" })
+        let scheme = request_scheme(headers, state.tls);
+        format!("{scheme}://{authority}")
     };
     let path = match protocol {
         IndexerClientProtocol::Newznab => NEWZNAB_PATH,

@@ -21,7 +21,9 @@ fn matching_generation(
         (entry.principal == *principal
             && entry.scope_key == scope_key
             && !entry.cancel.is_cancelled()
-            && (offset != 0 || entry.snapshot.state == InteractiveReleaseSearchState::Running))
+            && (offset != 0
+                || (entry.raw_starts_at_zero
+                    && entry.snapshot.state == InteractiveReleaseSearchState::Running)))
             .then(|| entry.raw.as_ref().map(|raw| (id.clone(), raw.clone())))
             .flatten()
     })
@@ -84,11 +86,7 @@ impl AppUseCase {
             drop(task_charge);
         });
         receive.await.map_err(|_| {
-            AppError::temporary_unavailable_reason(
-                reasons::NO_SOURCE_SUCCEEDED,
-                "Raw search could not complete",
-                None,
-            )
+            AppError::Repository("Raw search driver stopped before completing".into())
         })?
     }
 
@@ -171,6 +169,7 @@ impl AppUseCase {
                 cancel,
                 raw: Some(generation.clone()),
                 raw_page_request: 0,
+                raw_starts_at_zero: offset == 0,
                 _raw_registry_charge: Some(registry_charge),
             },
         );

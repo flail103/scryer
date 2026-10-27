@@ -172,6 +172,7 @@ impl AppUseCase {
                         .iter()
                         .all(|kind| *kind == protocol),
                     categories: result_categories,
+                    allow_uncategorized: grant.categories.is_none(),
                 },
                 request: raw_request,
             });

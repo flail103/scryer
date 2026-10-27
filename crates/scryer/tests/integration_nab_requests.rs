@@ -230,10 +230,30 @@ async fn authenticated_outcomes_are_recorded_without_stamping_invalid_keys() {
 async fn keys_do_not_cross_protocol_grants_and_revocation_applies_to_both_routes() {
     let (context, router, key, store) = fixture().await;
     enable(&context, true).await;
+    let actor = context.app.find_or_create_default_user().await.unwrap();
+    let personal = context
+        .app
+        .create_api_key(
+            &actor,
+            scryer_application::CreateApiKey {
+                label: "Personal fixture".into(),
+                expiry: scryer_application::ApiKeyExpiryPreset::Days30,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(personal.raw_key.starts_with("ska_"));
+    assert!(
+        context
+            .app
+            .authenticate_api_key(&personal.raw_key)
+            .await
+            .is_ok()
+    );
     let (status, _) = call(
         &router,
         "/newznab/api?t=caps",
-        Some(("x-api-key", "spk_personal.fixture")),
+        Some(("x-api-key", &personal.raw_key)),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -257,4 +277,99 @@ async fn keys_do_not_cross_protocol_grants_and_revocation_applies_to_both_routes
     assert!(store.save(&record, Some(2)).await.unwrap());
     let (status, _) = call(&router, "/newznab/api?t=caps", Some(("x-api-key", &key))).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn retrieval_survives_idle_expiry_without_an_interactive_actor_or_cached_search() {
+    use scryer_application::{
+        AppResult, DownloadClient, DownloadClientAddRequest, DownloadGrabResult,
+        IndexerArtifactResolutionRequest, IndexerConfigRepository, ResolvedDownloadArtifact,
+    };
+    use scryer_infrastructure_acquisition::indexers::config_store::IndexerConfigStore;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct ArtifactOnly(AtomicUsize);
+    #[async_trait::async_trait]
+    impl DownloadClient for ArtifactOnly {
+        async fn submit_download(
+            &self,
+            _: &DownloadClientAddRequest,
+        ) -> AppResult<DownloadGrabResult> {
+            panic!("a client artifact request must never enqueue a download");
+        }
+        async fn fetch_release_artifact(
+            &self,
+            request: &IndexerArtifactResolutionRequest,
+        ) -> AppResult<ResolvedDownloadArtifact> {
+            assert_eq!(request.indexer_id.as_deref(), Some("artifact-source"));
+            assert_eq!(request.source_url, "https://fixture.invalid/artifact");
+            assert!(request.title_id.is_none() && request.search_facet.is_none());
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(ResolvedDownloadArtifact::Nzb {
+                bytes: b"<nzb/>".to_vec(),
+                password_candidates: Default::default(),
+                file_name: None,
+                content_type: None,
+            })
+        }
+    }
+    let (context, _, _, clients) = fixture().await;
+    enable(&context, true).await;
+    let now = chrono::Utc::now();
+    let configs =
+        IndexerConfigStore::new(context.db.datastore(), context.db.encryption_key_state());
+    configs
+        .create(
+            serde_json::from_value(serde_json::json!({
+                "id": "artifact-source", "name": "Artifact fixture", "provider_type": "newznab",
+                "base_url": "https://fixture.invalid", "is_enabled": true,
+                "enable_interactive_search": true, "enable_auto_search": false,
+                "created_at": now, "updated_at": now
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut client = clients.get_by_id("http-client").await.unwrap().unwrap();
+    client.configuration.grants.push(IndexerClientGrant {
+        indexer_id: "artifact-source".into(),
+        categories: None,
+    });
+    client.revision += 1;
+    assert!(clients.save(&client, Some(1)).await.unwrap());
+    let reference: IndexerClientArtifactReference = serde_json::from_value(serde_json::json!({
+        "client_id": client.id, "key_generation": client.key_generation,
+        "protocol": IndexerClientProtocol::Newznab, "indexer_id": "artifact-source",
+        "result_identity": "release", "source_url": "https://fixture.invalid/artifact",
+        "source_kind": scryer_application::DownloadSourceKind::NzbUrl,
+        "categories": [], "info_hash_hint": null
+    }))
+    .unwrap();
+    let cipher = Arc::new(ArtifactReferenceCipher::new(&EncryptionKey::from_bytes(
+        [42; 32],
+    )));
+    let envelope = cipher
+        .seal(&serde_json::to_vec(&reference).unwrap())
+        .unwrap();
+    let download = Arc::new(ArtifactOnly(AtomicUsize::new(0)));
+    let app = context.app.clone().with_test_overrides(|builder| {
+        builder
+            .with_indexer_client_repository(clients)
+            .with_download_client(download.clone())
+    });
+    // There is deliberately no actor or interactive job. The browser-download
+    // workflow requires both, so a successful fetch proves this stays on the
+    // client's narrow artifact path even after the raw cache's idle lifetime.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(301)).await;
+    tokio::time::resume();
+    let router = nab_api::router(nab_api::NabState {
+        app,
+        cipher,
+        base_path: String::new(),
+        tls: false,
+    });
+    let (status, body) = call(&router, &format!("/newznab/api?t=get&id={envelope}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, "<nzb/>");
+    assert_eq!(download.0.load(Ordering::SeqCst), 1);
 }
