@@ -1,5 +1,5 @@
-mod mutation;
 mod indexer_clients;
+mod mutation;
 
 use async_graphql::{Context, ID, Object, Result as GqlResult};
 use chrono::{DateTime, Utc};
@@ -17,8 +17,8 @@ use scryer_interface_media::mappers::{
 };
 use scryer_interface_media::types::*;
 
-pub use mutation::SettingsMutations;
 pub use indexer_clients::{IndexerClientMutations, IndexerClientQueries};
+pub use mutation::SettingsMutations;
 
 #[derive(Default)]
 pub struct SettingsQueries;

@@ -1,4 +1,6 @@
-const SOURCE_KEYS: Readonly<Record<string, string>> = {
+import type { IndexerCapsSource } from "../graphql/release-search.ts";
+
+const SOURCE_KEYS: Readonly<Record<IndexerCapsSource, string>> = {
   FRESH: "indexerSearch.caps.fresh",
   MANAGED_METADATA: "indexerSearch.caps.managed",
   REFRESHED: "indexerSearch.caps.refreshed",
@@ -18,7 +20,7 @@ export function indexerCapsDiagnostic(
 ): string | undefined {
   if (!entry.capsSource) return undefined;
   const parts = [t(Object.hasOwn(SOURCE_KEYS, entry.capsSource)
-    ? SOURCE_KEYS[entry.capsSource]! : "indexerSearch.caps.unknown")];
+    ? SOURCE_KEYS[entry.capsSource as IndexerCapsSource] : "indexerSearch.caps.unknown")];
   if (entry.capsReason) {
     parts.push(t(Object.hasOwn(REASON_KEYS, entry.capsReason)
       ? REASON_KEYS[entry.capsReason]! : "indexerSearch.caps.refreshUnavailable"));

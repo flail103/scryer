@@ -784,8 +784,10 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // Background restore adds `restoreStatus`, the read a caller polls while
     // the restore it started runs on its own: 195->196.
     assert!(query_field_names.contains(&"restoreStatus"));
+    // Indexer clients add `indexerClients`, the administration list: 196->197.
+    assert!(query_field_names.contains(&"indexerClients"));
     assert_eq!(
-        query_field_count, 196,
+        query_field_count, 197,
         "query fields: {query_field_names:?}"
     );
     // First-class proxies (WP4) add one mutation, resetProxyHostKey: SSH host
@@ -837,8 +839,22 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // the inline operations stay as compatibility wrappers: 274->276.
     assert!(mutation_field_names.contains(&"startInspectRestoreBundle"));
     assert!(mutation_field_names.contains(&"startApplyRestoreBundle"));
+    // Indexer clients add create, update, rotate and revoke, and paged query
+    // search adds `continueInteractiveReleaseSearch`: 276->281.
+    for name in [
+        "createIndexerClient",
+        "updateIndexerClient",
+        "rotateIndexerClientKey",
+        "revokeIndexerClientKey",
+        "continueInteractiveReleaseSearch",
+    ] {
+        assert!(
+            mutation_field_names.contains(&name),
+            "missing mutation {name}"
+        );
+    }
     assert_eq!(
-        mutation_field_count, 276,
+        mutation_field_count, 281,
         "mutation fields: {mutation_field_names:?}"
     );
     // Cross-library transfer (T082, FR-055/FR-056) surfaces destination-title
@@ -1198,14 +1214,30 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     // Background restore adds the attempt it reports, `RestoreJobPayload`:
     // public types 973->974, OBJECT 527->528.
     assert!(public_type_names.contains(&"RestoreJobPayload"));
+    // Indexer clients add their configuration and grant inputs, the client,
+    // grant and issued-key payloads, and the protocol and request-outcome
+    // enums; raw search adds the capability-source enum: public types
+    // 974->982, OBJECT 528->531, INPUT_OBJECT 238->240, ENUM 196->199.
+    for name in [
+        "IndexerClientConfigurationInput",
+        "IndexerClientGrantInput",
+        "IndexerClientPayload",
+        "IndexerClientGrantPayload",
+        "IssuedIndexerClientKeyPayload",
+        "IndexerClientProtocolValue",
+        "IndexerClientRequestOutcomeValue",
+        "IndexerCapsSourceValue",
+    ] {
+        assert!(public_type_names.contains(&name), "missing type {name}");
+    }
     assert_eq!(
         public_types.len(),
-        974,
+        982,
         "public types: {public_type_names:?}"
     );
-    assert_eq!(kind_count("OBJECT"), 528);
-    assert_eq!(kind_count("INPUT_OBJECT"), 238);
-    assert_eq!(kind_count("ENUM"), 196);
+    assert_eq!(kind_count("OBJECT"), 531);
+    assert_eq!(kind_count("INPUT_OBJECT"), 240);
+    assert_eq!(kind_count("ENUM"), 199);
     assert_eq!(kind_count("SCALAR"), 10);
     assert_eq!(kind_count("UNION"), 2);
     assert!(mutation_field_names.contains(&"mediaFileDiscEpisodeTargets"));

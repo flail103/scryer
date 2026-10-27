@@ -159,7 +159,7 @@ async fn client_management_graphql_requires_interactive_full_permissions_and_mfa
             .unwrap()
             .starts_with("sck_")
     );
-    assert_eq!(issued["createIndexerClient"]["client"]["revision"], "1");
+    assert_eq!(issued["createIndexerClient"]["client"]["revision"], 1);
 }
 
 #[tokio::test]
@@ -213,8 +213,8 @@ async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated
         .unwrap();
     let key = issued["createIndexerClient"]["apiKey"].as_str().unwrap();
     let authenticated = app.authenticate_indexer_client(key).await.unwrap();
-    let rotate = "mutation($id: ID!, $rev: String!) { rotateIndexerClientKey(id: $id, expectedRevision: $rev) { apiKey client { revision } } }";
-    let variables = Variables::from_json(json!({"id": id, "rev": "1"}));
+    let rotate = "mutation($id: ID!, $rev: Long!) { rotateIndexerClientKey(id: $id, expectedRevision: $rev) { apiKey client { revision } } }";
+    let variables = Variables::from_json(json!({"id": id, "rev": 1}));
     let rotated = data(
         schema
             .execute(request(rotate, &actor, true, false, until).variables(variables.clone()))
@@ -234,7 +234,7 @@ async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated
         "INDEXER_CLIENTS_CONFIGURATION_CHANGED"
     );
 
-    let disable = "mutation($id: ID!) { updateIndexerClient(id: $id, expectedRevision: \"2\", input: {
+    let disable = "mutation($id: ID!) { updateIndexerClient(id: $id, expectedRevision: 2, input: {
         name: \"Disabled client\", enabled: false, protocols: [NEWZNAB], grants: [] }) { revision enabled } }";
     data(
         schema
@@ -246,7 +246,7 @@ async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated
     );
     assert!(app.authenticate_indexer_client(new_key).await.is_err());
     assert!(app.revalidate_indexer_client(&authenticated).await.is_err());
-    let revoke = "mutation($id: ID!) { revokeIndexerClientKey(id: $id, expectedRevision: \"3\") { revision keyActive } }";
+    let revoke = "mutation($id: ID!) { revokeIndexerClientKey(id: $id, expectedRevision: 3) { revision keyActive } }";
     let revoked = data(
         schema
             .execute(
@@ -268,7 +268,7 @@ async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated
             ))
             .await,
     );
-    assert_eq!(public["indexerClients"][0]["revision"], "4");
+    assert_eq!(public["indexerClients"][0]["revision"], 4);
     assert!(!public.to_string().contains(key) && !public.to_string().contains(new_key));
     let sdl = schema.sdl();
     let client_type = sdl

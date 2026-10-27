@@ -1,14 +1,17 @@
 use async_graphql::{Context, Enum, ID, InputObject, Object, Result as GqlResult, SimpleObject};
 use scryer_application::indexer_clients::{
     IndexerClientConfiguration, IndexerClientGrant, IndexerClientProtocol, IndexerClientRecord,
+    IndexerClientUseOutcome,
 };
 use scryer_interface_core::{
     AuthlessDefaultSession, InteractiveSession, actor_from_ctx, app_from_ctx,
     mfa_verification_from_ctx, to_gql_error,
 };
+use scryer_interface_media::types::Long;
 
-#[derive(Clone, Copy, PartialEq, Eq, Enum)]
-/// Compatibility protocol a client may use.
+/// Compatibility protocol an indexer client may use.
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
 enum IndexerClientProtocolValue {
     /// Newznab feeds for Usenet releases.
     Newznab,
@@ -32,6 +35,57 @@ impl From<IndexerClientProtocol> for IndexerClientProtocolValue {
             IndexerClientProtocol::Torznab => Self::Torznab,
         }
     }
+}
+
+/// How Scryer finished preparing the most recent request from an indexer client.
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
+enum IndexerClientRequestOutcomeValue {
+    /// A capabilities response was prepared.
+    CapsReady,
+    /// A search page was prepared with every granted source answering.
+    SearchReady,
+    /// A search page was prepared while some sources were pending or unavailable.
+    SearchPartial,
+    /// An authorized download was fetched and revalidated for delivery.
+    ArtifactReady,
+    /// The request was refused by the client's current authorization or input.
+    Refused,
+    /// The request could not be served for now.
+    Unavailable,
+    /// The request failed before a response was prepared.
+    Failed,
+}
+
+impl From<IndexerClientUseOutcome> for IndexerClientRequestOutcomeValue {
+    fn from(value: IndexerClientUseOutcome) -> Self {
+        match value {
+            IndexerClientUseOutcome::CapsReady => Self::CapsReady,
+            IndexerClientUseOutcome::SearchReady => Self::SearchReady,
+            IndexerClientUseOutcome::SearchPartial => Self::SearchPartial,
+            IndexerClientUseOutcome::ArtifactReady => Self::ArtifactReady,
+            IndexerClientUseOutcome::Refused => Self::Refused,
+            IndexerClientUseOutcome::Unavailable => Self::Unavailable,
+            IndexerClientUseOutcome::Failed => Self::Failed,
+        }
+    }
+}
+
+/// Reads a persisted outcome code back into its outcome. A code this build
+/// does not write maps to null rather than failing the whole client list.
+fn stored_outcome(code: &str) -> Option<IndexerClientRequestOutcomeValue> {
+    [
+        IndexerClientUseOutcome::CapsReady,
+        IndexerClientUseOutcome::SearchReady,
+        IndexerClientUseOutcome::SearchPartial,
+        IndexerClientUseOutcome::ArtifactReady,
+        IndexerClientUseOutcome::Refused,
+        IndexerClientUseOutcome::Unavailable,
+        IndexerClientUseOutcome::Failed,
+    ]
+    .into_iter()
+    .find(|outcome| outcome.code() == code)
+    .map(Into::into)
 }
 
 #[derive(InputObject)]
@@ -83,7 +137,8 @@ struct IndexerClientGrantPayload {
     categories: Option<Vec<String>>,
 }
 
-/// This projection intentionally has no lookup identifier or verification hash.
+/// Management record for an indexer client. This projection intentionally has
+/// no lookup identifier or key verification material.
 #[derive(SimpleObject)]
 struct IndexerClientPayload {
     /// Stable client identity.
@@ -98,12 +153,12 @@ struct IndexerClientPayload {
     grants: Vec<IndexerClientGrantPayload>,
     /// Whether the client has a key that has not been revoked.
     key_active: bool,
-    /// Opaque concurrency token, represented as a string to avoid JS integer loss.
-    revision: String,
-    /// Most recent request recorded for this client.
+    /// Current client revision required by update, rotate and revoke.
+    revision: Long,
+    /// When the most recent request from this client was recorded, or null if never.
     last_used_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Stable outcome code for the most recently recorded request.
-    last_outcome_code: Option<String>,
+    /// Outcome of the most recently recorded request, or null if none was recorded.
+    last_outcome: Option<IndexerClientRequestOutcomeValue>,
     /// When this client was created.
     created_at: chrono::DateTime<chrono::Utc>,
     /// When its configuration or key last changed.
@@ -132,9 +187,9 @@ impl From<IndexerClientRecord> for IndexerClientPayload {
                 })
                 .collect(),
             key_active: value.secret_hash.is_some(),
-            revision: value.revision.to_string(),
+            revision: Long::from_u64_saturating(value.revision),
             last_used_at: value.last_used_at,
-            last_outcome_code: value.last_outcome_code,
+            last_outcome: value.last_outcome_code.as_deref().and_then(stored_outcome),
             created_at: value.created_at,
             updated_at: value.updated_at,
         }
@@ -155,11 +210,10 @@ fn interactive(ctx: &Context<'_>) -> bool {
         && ctx.data_opt::<AuthlessDefaultSession>().is_none()
 }
 
-fn revision(value: &str) -> GqlResult<u64> {
-    value
-        .parse::<u64>()
+fn revision(value: Long) -> GqlResult<u64> {
+    u64::try_from(value.0)
         .ok()
-        .filter(|revision| *revision > 0 && *revision <= i64::MAX as u64)
+        .filter(|revision| *revision > 0)
         .ok_or_else(|| {
             to_gql_error(scryer_application::AppError::validation_refused(
                 scryer_application::error_reasons::indexer_clients::CONFIGURATION_CHANGED,
@@ -173,7 +227,8 @@ pub struct IndexerClientQueries;
 
 #[Object]
 impl IndexerClientQueries {
-    /// Client administration is available only to fully privileged interactive sessions.
+    /// List indexer clients. Client administration is available only to fully
+    /// privileged interactive sessions.
     async fn indexer_clients(&self, ctx: &Context<'_>) -> GqlResult<Vec<IndexerClientPayload>> {
         let app = app_from_ctx(ctx)?;
         let actor = actor_from_ctx(ctx)?;
@@ -222,7 +277,7 @@ impl IndexerClientMutations {
         ctx: &Context<'_>,
         #[graphql(desc = "Client identity to update.")] id: ID,
         #[graphql(desc = "Revision observed when opening the client for editing.")]
-        expected_revision: String,
+        expected_revision: Long,
         #[graphql(desc = "Complete replacement configuration and grants.")]
         input: IndexerClientConfigurationInput,
     ) -> GqlResult<IndexerClientPayload> {
@@ -233,7 +288,7 @@ impl IndexerClientMutations {
             interactive(ctx),
             mfa_verification_from_ctx(ctx).step_up_verified_until,
             id.as_str(),
-            revision(&expected_revision)?,
+            revision(expected_revision)?,
             input.into(),
         )
         .await
@@ -246,7 +301,7 @@ impl IndexerClientMutations {
         &self,
         ctx: &Context<'_>,
         #[graphql(desc = "Client whose key is rotated.")] id: ID,
-        #[graphql(desc = "Current client revision.")] expected_revision: String,
+        #[graphql(desc = "Current client revision.")] expected_revision: Long,
     ) -> GqlResult<IssuedIndexerClientKeyPayload> {
         let app = app_from_ctx(ctx)?;
         let actor = actor_from_ctx(ctx)?;
@@ -256,7 +311,7 @@ impl IndexerClientMutations {
                 interactive(ctx),
                 mfa_verification_from_ctx(ctx).step_up_verified_until,
                 id.as_str(),
-                revision(&expected_revision)?,
+                revision(expected_revision)?,
             )
             .await
             .map_err(to_gql_error)?;
@@ -271,7 +326,7 @@ impl IndexerClientMutations {
         &self,
         ctx: &Context<'_>,
         #[graphql(desc = "Client whose key is revoked.")] id: ID,
-        #[graphql(desc = "Current client revision.")] expected_revision: String,
+        #[graphql(desc = "Current client revision.")] expected_revision: Long,
     ) -> GqlResult<IndexerClientPayload> {
         let app = app_from_ctx(ctx)?;
         let actor = actor_from_ctx(ctx)?;
@@ -280,10 +335,52 @@ impl IndexerClientMutations {
             interactive(ctx),
             mfa_verification_from_ctx(ctx).step_up_verified_until,
             id.as_str(),
-            revision(&expected_revision)?,
+            revision(expected_revision)?,
         )
         .await
         .map(Into::into)
         .map_err(to_gql_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_recorded_outcome_code_reads_back_as_its_outcome() {
+        for code in scryer_application::indexer_clients::usage::ALL {
+            let outcome = stored_outcome(code).expect("recorded code maps to an outcome");
+            let expected = match *code {
+                scryer_application::indexer_clients::usage::CAPS_READY => {
+                    IndexerClientRequestOutcomeValue::CapsReady
+                }
+                scryer_application::indexer_clients::usage::SEARCH_READY => {
+                    IndexerClientRequestOutcomeValue::SearchReady
+                }
+                scryer_application::indexer_clients::usage::SEARCH_PARTIAL => {
+                    IndexerClientRequestOutcomeValue::SearchPartial
+                }
+                scryer_application::indexer_clients::usage::ARTIFACT_READY => {
+                    IndexerClientRequestOutcomeValue::ArtifactReady
+                }
+                scryer_application::indexer_clients::usage::REFUSED => {
+                    IndexerClientRequestOutcomeValue::Refused
+                }
+                scryer_application::indexer_clients::usage::UNAVAILABLE => {
+                    IndexerClientRequestOutcomeValue::Unavailable
+                }
+                scryer_application::indexer_clients::usage::FAILED => {
+                    IndexerClientRequestOutcomeValue::Failed
+                }
+                other => panic!("unmapped recorded outcome code {other}"),
+            };
+            assert!(outcome == expected, "{code} read back as the wrong outcome");
+        }
+    }
+
+    #[test]
+    fn an_unrecognized_stored_outcome_code_reads_as_no_outcome() {
+        assert!(stored_outcome("SYNTHETIC_UNKNOWN_OUTCOME").is_none());
     }
 }

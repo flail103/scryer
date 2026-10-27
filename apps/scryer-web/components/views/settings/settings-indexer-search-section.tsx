@@ -1076,15 +1076,6 @@ export function SettingsIndexerSearchSection(
     <div className="w-full min-w-0 max-w-full">
       <QueryCard {...props} />
       {hasSearched ? <HealthLine {...props} /> : null}
-      {hasSearched ? (
-        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span>{t("indexerSearch.page.localSort")}</span>
-          {props.deadlineReached ? <span role="status">{t("indexerSearch.page.pending")}</span> : null}
-          <Button variant="outline" size="sm" disabled={searching || !props.hasNextPage} onClick={props.onNextPage}>
-            {t("indexerSearch.page.next")}
-          </Button>
-        </div>
-      ) : null}
       <div className="flex w-full min-w-0 max-w-full flex-col items-start gap-4 lg:flex-row">
         {hasSearched && props.facetGroups.length > 0 ? (
           <RefineRail {...props} />
@@ -1097,7 +1088,28 @@ export function SettingsIndexerSearchSection(
             >
               {t("indexerSearch.results.matched", { count: matchedCount })}
             </span>
+            {props.deadlineReached ? (
+              <span
+                id="indexer-search-page-pending"
+                role="status"
+                className="text-[13px] text-[var(--scry-warning-text)]"
+              >
+                {t("indexerSearch.page.pending")}
+              </span>
+            ) : null}
             <div className="min-w-2 flex-1" />
+            {props.onNextPage ? (
+              <Button
+                id="indexer-search-next-page"
+                variant="outline"
+                size="sm"
+                className="h-[34px]"
+                disabled={searching || !props.hasNextPage}
+                onClick={props.onNextPage}
+              >
+                {t("indexerSearch.page.next")}
+              </Button>
+            ) : null}
             <Select
               value={sort}
               onValueChange={(value) =>
@@ -1122,6 +1134,14 @@ export function SettingsIndexerSearchSection(
                 ))}
               </SelectContent>
             </Select>
+            {hasSearched ? (
+              <p
+                id="indexer-search-page-scope"
+                className="basis-full text-[12px] text-[var(--scry-text3)]"
+              >
+                {t("indexerSearch.page.localSort")}
+              </p>
+            ) : null}
           </div>
 
           <div className="w-full min-w-0 max-w-full overflow-x-auto">

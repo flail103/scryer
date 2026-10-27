@@ -1952,10 +1952,10 @@ export const startInteractiveReleaseSearchMutation = `mutation StartInteractiveR
   startInteractiveReleaseSearch(input: $input) {
     id
     state
-    continuation
+    nextCursor
     deadlineReached
-    failureCode
-    failureMessage
+    failureReason
+    failureReasonCode
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {
@@ -1978,19 +1978,32 @@ export const startInteractiveReleaseSearchMutation = `mutation StartInteractiveR
   }
 }`;
 
-export const continueInteractiveReleaseSearchMutation = `mutation ContinueInteractiveReleaseSearch($continuation: String!, $aggregatePageSize: Int) {
-  continueInteractiveReleaseSearch(continuation: $continuation, aggregatePageSize: $aggregatePageSize) {
+// Fetches the following page of a query search from its `nextCursor`; the
+// returned job is then polled like a started one.
+export const continueInteractiveReleaseSearchMutation = `mutation ContinueInteractiveReleaseSearch($after: String!, $first: Int) {
+  continueInteractiveReleaseSearch(after: $after, first: $first) {
     id
     state
-    continuation
+    nextCursor
     deadlineReached
-    failureCode
-    failureMessage
+    failureReason
+    failureReasonCode
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {
-      indexerId name priority status resultCount elapsedMs failureReason rateLimited skipReason skippedUntil
-      capsSource capsReason capsRetryAfterSeconds
+      indexerId
+      name
+      priority
+      status
+      resultCount
+      elapsedMs
+      failureReason
+      skipReason
+      skippedUntil
+      rateLimited
+      capsSource
+      capsReason
+      capsRetryAfterSeconds
     }
     startedAt
     completedAt

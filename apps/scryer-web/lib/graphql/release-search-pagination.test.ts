@@ -31,16 +31,16 @@ test("raw continuation forwards the opaque cursor and keeps aggregate size separ
       calls.push({ document, variables });
       return { toPromise: async () => ({ data: { continueInteractiveReleaseSearch: {
         id: "generation", state: "COMPLETED", results: [result], indexers: [],
-        continuation: "next-opaque-cursor", deadlineReached: true, failureCode: null,
+        nextCursor: "next-opaque-cursor", deadlineReached: true, failureReasonCode: null,
       } } }) };
     },
   } as unknown as Client;
   const rows = await runner()(client, { query: "ignored by continuation", limit: 400, aggregatePageSize: 100 }, {
-    continuation: "opaque-cursor", onUpdate: (update) => updates.push(update),
+    after: "opaque-cursor", onUpdate: (update) => updates.push(update),
   });
-  assert.deepEqual(calls, [{ document: "continue", variables: { continuation: "opaque-cursor", aggregatePageSize: 100 } }]);
+  assert.deepEqual(calls, [{ document: "continue", variables: { after: "opaque-cursor", first: 100 } }]);
   assert.deepEqual(rows, [result]);
-  assert.equal(updates[0].continuation, "next-opaque-cursor");
+  assert.equal(updates[0].nextCursor, "next-opaque-cursor");
   assert.equal(updates[0].deadlineReached, true);
 });
 
@@ -53,12 +53,12 @@ test("an initial raw request forwards both page sizes and preserves coded failur
       calls.push({ document, variables });
       return { toPromise: async () => ({ data: { startInteractiveReleaseSearch: {
         id: "generation", state: "COMPLETED", results: [], indexers: [],
-        continuation: null, deadlineReached: false, failureCode: "RAW_SEARCH_ALL_SOURCES_LIMITED",
+        nextCursor: null, deadlineReached: false, failureReasonCode: "RAW_SEARCH_ALL_SOURCES_LIMITED",
       } } }) };
     },
   } as unknown as Client;
   await runner()(client, input, { onUpdate: (update) => updates.push(update) });
   assert.deepEqual(calls, [{ document: "start", variables: { input } }]);
-  assert.equal(updates[0].failureCode, "RAW_SEARCH_ALL_SOURCES_LIMITED");
-  assert.equal(updates[0].continuation, null);
+  assert.equal(updates[0].failureReasonCode, "RAW_SEARCH_ALL_SOURCES_LIMITED");
+  assert.equal(updates[0].nextCursor, null);
 });

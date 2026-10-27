@@ -35,11 +35,22 @@ export type InteractiveSearchIndexerProgress = {
   skipReason?: InteractiveSearchSkipReason | null;
   /** When a skip that lifts on its own ends, if known. */
   skippedUntil?: string | null;
-  /** Host capability provenance; does not change the source's search outcome. */
-  capsSource?: string | null;
+  /** How the capabilities used for this indexer were obtained; never changes its search outcome. */
+  capsSource?: IndexerCapsSource | null;
+  /** Stable reason code for a capability fallback; an open set, so unknown codes are expected. */
   capsReason?: string | null;
+  /** Seconds the provider asked Scryer to wait before discovering capabilities again. */
   capsRetryAfterSeconds?: number | null;
 };
+
+/** How Scryer obtained the capabilities it used to search an indexer. */
+export type IndexerCapsSource =
+  | "FRESH"
+  | "MANAGED_METADATA"
+  | "REFRESHED"
+  | "STALE"
+  | "PERMISSIVE"
+  | "PROVIDER_DECLARATIONS";
 
 export type InteractiveSearchSkipReason =
   | "INDEXER_DISABLED"
@@ -59,10 +70,14 @@ export type InteractiveSearchProgress = {
   state: "RUNNING" | "COMPLETED" | "CANCELLED";
   startedAt?: string;
   completedAt?: string | null;
-  continuation?: string | null;
+  /** Opaque cursor for the following page of a query search; null when there is none. */
+  nextCursor?: string | null;
+  /** The page was returned at its time bound while some indexers were still searching. */
   deadlineReached?: boolean;
-  failureCode?: string | null;
-  failureMessage?: string | null;
+  /** Server sentence for a failed query search, shown only for an unknown code. */
+  failureReason?: string | null;
+  /** Stable failure condition of a query search. */
+  failureReasonCode?: string | null;
 };
 
 export {
@@ -77,10 +92,10 @@ type InteractiveReleaseSearchJobPayload = {
   indexers: InteractiveSearchIndexerProgress[] | null;
   startedAt?: string;
   completedAt?: string | null;
-  continuation?: string | null;
+  nextCursor?: string | null;
   deadlineReached?: boolean;
-  failureCode?: string | null;
-  failureMessage?: string | null;
+  failureReason?: string | null;
+  failureReasonCode?: string | null;
 };
 
 const POLL_INTERVAL_MS = 1_000;
@@ -108,7 +123,8 @@ export async function runIterativeReleaseSearch(
   input: InteractiveReleaseSearchInput,
   options: {
     signal?: AbortSignal;
-    continuation?: string;
+    /** `nextCursor` of the previous page; fetches the following page instead of starting a search. */
+    after?: string;
     onUpdate?: (snapshot: InteractiveSearchProgress) => void;
   } = {},
 ): Promise<Release[]> {
@@ -138,10 +154,10 @@ export async function runIterativeReleaseSearch(
       state: job.state,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
-      continuation: job.continuation,
+      nextCursor: job.nextCursor,
       deadlineReached: job.deadlineReached,
-      failureCode: job.failureCode,
-      failureMessage: job.failureMessage,
+      failureReason: job.failureReason,
+      failureReasonCode: job.failureReasonCode,
     });
   };
 
@@ -153,13 +169,13 @@ export async function runIterativeReleaseSearch(
   try {
     const { data, error } = await client
       .mutation(
-        options.continuation ? continueInteractiveReleaseSearchMutation : startInteractiveReleaseSearchMutation,
-        options.continuation ? { continuation: options.continuation, aggregatePageSize: input.aggregatePageSize } : { input },
+        options.after ? continueInteractiveReleaseSearchMutation : startInteractiveReleaseSearchMutation,
+        options.after ? { after: options.after, first: input.aggregatePageSize } : { input },
         fetchOptions,
       )
       .toPromise();
     if (error) throw error;
-    job = (options.continuation ? data?.continueInteractiveReleaseSearch : data?.startInteractiveReleaseSearch) as
+    job = (options.after ? data?.continueInteractiveReleaseSearch : data?.startInteractiveReleaseSearch) as
       | InteractiveReleaseSearchJobPayload
       | undefined;
   } catch (startError) {

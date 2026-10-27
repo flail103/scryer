@@ -1400,10 +1400,10 @@ export const interactiveReleaseSearchQuery = `query InteractiveReleaseSearch($id
   interactiveReleaseSearch(id: $id) {
     id
     state
-    continuation
+    nextCursor
     deadlineReached
-    failureCode
-    failureMessage
+    failureReason
+    failureReasonCode
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {

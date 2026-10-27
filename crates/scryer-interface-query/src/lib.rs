@@ -604,7 +604,17 @@ pub fn from_interactive_release_search_snapshot(
                 .elapsed_ms
                 .map(|elapsed| i32::try_from(elapsed).unwrap_or(i32::MAX)),
             failure_reason: indexer.failure_reason,
-            caps_source: indexer.caps.map(|caps| caps.source.code().into()),
+            caps_source: indexer.caps.map(|caps| {
+                use scryer_application::IndexerCapsSource as Source;
+                match caps.source {
+                    Source::Fresh => IndexerCapsSourceValue::Fresh,
+                    Source::ManagedMetadata => IndexerCapsSourceValue::ManagedMetadata,
+                    Source::Refreshed => IndexerCapsSourceValue::Refreshed,
+                    Source::Stale => IndexerCapsSourceValue::Stale,
+                    Source::Permissive => IndexerCapsSourceValue::Permissive,
+                    Source::ProviderDeclarations => IndexerCapsSourceValue::ProviderDeclarations,
+                }
+            }),
             caps_reason: indexer.caps.and_then(|caps| caps.reason).map(str::to_owned),
             caps_retry_after_seconds: indexer
                 .caps
@@ -634,12 +644,12 @@ pub fn from_interactive_release_search_snapshot(
         indexers,
         started_at: snapshot.started_at,
         completed_at: snapshot.completed_at,
-        continuation,
+        next_cursor: continuation,
         deadline_reached,
-        failure_code: snapshot.raw_failure_reason.map(str::to_owned),
-        failure_message: snapshot
+        failure_reason: snapshot
             .raw_failure_reason
             .map(|_| "Raw search could not complete".to_owned()),
+        failure_reason_code: snapshot.raw_failure_reason.map(str::to_owned),
     }
 }
 

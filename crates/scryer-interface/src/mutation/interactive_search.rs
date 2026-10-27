@@ -52,16 +52,28 @@ impl InteractiveSearchMutations {
         Ok(from_interactive_release_search_snapshot(snapshot))
     }
 
-    /// Continue a raw search through its opaque aggregate continuation.
+    /// Fetch the following page of a `query` interactive release search.
     async fn continue_interactive_release_search(
-        &self, ctx: &Context<'_>,
-        #[graphql(desc = "Opaque continuation returned by the previous raw search page.")] continuation: String,
-        #[graphql(desc = "Aggregate results per page, defaulting to 100 and limited to 1 through 100.")] aggregate_page_size: Option<i32>,
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(desc = "Opaque `nextCursor` returned by the previous page of the search.")]
+        after: String,
+        #[graphql(
+            default = 100,
+            desc = "Merged results per page from 1 through 100; defaults to 100."
+        )]
+        first: Option<i32>,
     ) -> GqlResult<InteractiveReleaseSearchPayload> {
         let app = app_from_ctx(ctx)?;
         let actor = actor_from_ctx(ctx)?;
-        let snapshot = app.continue_interactive_release_search_cursor(&actor, &continuation,
-            aggregate_page_size.unwrap_or(100).clamp(1, 100) as usize).await.map_err(to_gql_error)?;
+        let snapshot = app
+            .continue_interactive_release_search_cursor(
+                &actor,
+                &after,
+                first.unwrap_or(100).clamp(1, 100) as usize,
+            )
+            .await
+            .map_err(to_gql_error)?;
         Ok(from_interactive_release_search_snapshot(snapshot))
     }
 

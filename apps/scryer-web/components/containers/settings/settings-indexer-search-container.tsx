@@ -25,7 +25,7 @@ import {
   type InteractiveSearchIndexerProgress,
 } from "@/lib/graphql/release-search";
 import type { IndexerRecord, Release } from "@/lib/types";
-import { RAW_SEARCH_REFUSAL_KEYS } from "@/lib/utils/raw-search-error";
+import { rawSearchErrorMessage, rawSearchFailureMessage } from "@/lib/utils/raw-search-error";
 import {
   earliestSearchExpiry,
   expireIndexerSearches,
@@ -108,7 +108,7 @@ export function SettingsIndexerSearchContainer() {
   >([]);
   const [searching, setSearching] = React.useState(false);
   const [hasSearched, setHasSearched] = React.useState(false);
-  const [continuation, setContinuation] = React.useState<string | null>(null);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [deadlineReached, setDeadlineReached] = React.useState(false);
   // Frozen per snapshot so ages and age sorting stay pure across renders.
   const [nowMs, setNowMs] = React.useState(() => Date.now());
@@ -172,7 +172,7 @@ export function SettingsIndexerSearchContainer() {
       setSizeRangeGiB(null);
       setSearching(false);
       setHasSearched(false);
-      setContinuation(null);
+      setNextCursor(null);
       setDeadlineReached(false);
       return true;
     }
@@ -279,7 +279,7 @@ export function SettingsIndexerSearchContainer() {
         setSizeRangeGiB(null);
         publishRowOwners(new Map());
       }
-      setContinuation(null);
+      setNextCursor(null);
       setDeadlineReached(false);
       setHasSearched(true);
       setSearching(true);
@@ -302,7 +302,7 @@ export function SettingsIndexerSearchContainer() {
           },
           {
             signal: controller.signal,
-            continuation: nextPage,
+            after: nextPage,
             onUpdate: (snapshot) => {
               if (controller.signal.aborted || searchAbortRef.current !== controller) return;
               // Earlier searches may expire while this one runs; only this
@@ -315,13 +315,11 @@ export function SettingsIndexerSearchContainer() {
               if (controller.signal.aborted) return;
               setExpiresAt(earliestSearchExpiry(deadlinesRef.current));
               setNowMs(Date.now());
-              setContinuation(snapshot.continuation ?? null);
+              setNextCursor(snapshot.nextCursor ?? null);
               setDeadlineReached(snapshot.deadlineReached ?? false);
-              if (snapshot.failureCode && !reportedFailures.has(snapshot.failureCode)) {
-                reportedFailures.add(snapshot.failureCode);
-                const key = Object.hasOwn(RAW_SEARCH_REFUSAL_KEYS, snapshot.failureCode)
-                  ? RAW_SEARCH_REFUSAL_KEYS[snapshot.failureCode] : undefined;
-                setGlobalStatus(key ? t(key) : (snapshot.failureMessage ?? t("status.apiError")), { level: "ERROR" });
+              if (snapshot.failureReasonCode && !reportedFailures.has(snapshot.failureReasonCode)) {
+                reportedFailures.add(snapshot.failureReasonCode);
+                setGlobalStatus(rawSearchFailureMessage(snapshot, t, t("status.apiError")), { level: "ERROR" });
               }
               const liveBase = isRetry ? releases.filter((release) => {
                 const owner = rowOwnersRef.current.get(indexerSearchRowKey(release));
@@ -355,10 +353,9 @@ export function SettingsIndexerSearchContainer() {
           },
         );
       } catch (error) {
-        setGlobalStatus(
-          userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
-          { level: "ERROR" },
-        );
+        setGlobalStatus(rawSearchErrorMessage(error, t, t("status.apiError")), {
+          level: "ERROR",
+        });
       } finally {
         if (searchAbortRef.current === controller) {
           searchAbortRef.current = null;
@@ -586,8 +583,8 @@ export function SettingsIndexerSearchContainer() {
         onRemoveSavedSearch={handleRemoveSavedSearch}
         onSearch={handleSearch}
         onCancelSearch={handleCancelSearch}
-        onNextPage={() => { if (continuation) void runSearch(undefined, continuation); }}
-        hasNextPage={continuation !== null}
+        onNextPage={() => { if (nextCursor) void runSearch(undefined, nextCursor); }}
+        hasNextPage={nextCursor !== null}
         deadlineReached={deadlineReached}
         searching={searching}
         hasSearched={hasSearched}
