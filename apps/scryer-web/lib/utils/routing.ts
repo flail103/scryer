@@ -232,11 +232,12 @@ export function indexerSettingsTabFromPath(pathname: string): IndexerSettingsTab
 /// Which panes the Indexers page offers on this instance.
 ///
 /// Indexer search stays available; client management requires the instance opt-in.
-export function indexerSettingsTabs(experimentalFeaturesEnabled = false): IndexerSettingsTab[] {
-  return experimentalFeaturesEnabled
-    ? ["indexers", "search", "clients", "seedingProfiles"]
-    : ["indexers", "search", "seedingProfiles"];
-}
+export const INDEXER_SETTINGS_TABS: readonly IndexerSettingsTab[] = [
+  "indexers",
+  "search",
+  "clients",
+  "seedingProfiles",
+];
 
 export const CONTENT_SECTION_PATH: Record<ContentSettingsSection, string> = {
   overview: "overview",

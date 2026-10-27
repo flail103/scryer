@@ -5,8 +5,7 @@ mod common;
 use async_graphql::{Request, Variables};
 use common::TestContext;
 use scryer_application::{
-    SettingsRepository, TotpCredentialRecord, TotpRepository, UserRepository,
-    testing::AppUseCaseTestExt,
+    TotpCredentialRecord, TotpRepository, UserRepository, testing::AppUseCaseTestExt,
 };
 use scryer_domain::{AppPermissionMask, User};
 use scryer_infrastructure_acquisition::indexers::client_store::IndexerClientStore;
@@ -56,27 +55,9 @@ fn data(response: async_graphql::Response) -> Value {
     response.data.into_json().unwrap()
 }
 
-async fn seed_experimental_setting(ctx: &TestContext) {
-    ctx.settings_store
-        .batch_ensure_setting_definitions(vec![
-            scryer_infrastructure_sql::types::SettingDefinitionSeed {
-                category: "ui".into(),
-                scope: scryer_application::SETTINGS_SCOPE_SYSTEM.into(),
-                key_name: scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY.into(),
-                data_type: "boolean".into(),
-                default_value_json: "false".into(),
-                is_sensitive: false,
-                validation_json: None,
-            },
-        ])
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn client_management_graphql_requires_session_full_permissions_and_enrolled_mfa() {
     let ctx = TestContext::new().await;
-    seed_experimental_setting(&ctx).await;
     let store = Arc::new(IndexerClientStore::new(ctx.db.datastore()));
     let app = ctx
         .app
@@ -86,26 +67,6 @@ async fn client_management_graphql_requires_session_full_permissions_and_enrolle
     actor.authorization.app = AppPermissionMask::ALL;
     actor.authorization.loaded = true;
     ctx.users.create(actor.clone()).await.unwrap();
-    for query in ["{ indexerClients { id } }", CREATE] {
-        let response = schema
-            .execute(request(query, &actor, true, false, Some(i64::MAX)))
-            .await;
-        assert_eq!(
-            error_field(&response, "reason"),
-            "INDEXER_CLIENTS_EXPERIMENTAL_DISABLED"
-        );
-    }
-    ctx.settings_store
-        .upsert_setting_json(
-            scryer_application::SETTINGS_SCOPE_SYSTEM,
-            scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
-            None,
-            "true".into(),
-            "test",
-            None,
-        )
-        .await
-        .unwrap();
     // With login on, the default actor is the local-IP bypass and is refused.
     ctx.auth_runtime.apply_saved_security_settings(true, true);
     for (interactive, bypass) in [(false, false), (false, true), (true, true)] {
@@ -205,18 +166,6 @@ async fn client_management_graphql_requires_session_full_permissions_and_enrolle
 #[tokio::test]
 async fn graphql_client_rotation_revocation_and_disable_invalidate_authenticated_requests() {
     let ctx = TestContext::new().await;
-    seed_experimental_setting(&ctx).await;
-    ctx.settings_store
-        .upsert_setting_json(
-            scryer_application::SETTINGS_SCOPE_SYSTEM,
-            scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
-            None,
-            "true".into(),
-            "test",
-            None,
-        )
-        .await
-        .unwrap();
     let store = Arc::new(IndexerClientStore::new(ctx.db.datastore()));
     let app = ctx
         .app

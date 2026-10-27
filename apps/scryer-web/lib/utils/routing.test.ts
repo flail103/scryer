@@ -7,7 +7,7 @@ import {
   buildOverviewDetailPath,
   buildRulesPath,
   indexerSettingsTabFromPath,
-  indexerSettingsTabs,
+  INDEXER_SETTINGS_TABS,
   listsSectionFromPath,
   maintenanceRulesSectionFromPath,
   resolveAppRoute,
@@ -341,13 +341,8 @@ test("rules pane paths round-trip through the section helpers", () => {
   assert.equal(maintenanceRulesSectionFromPath("/settings/profile"), "rules");
 });
 
-test("indexerSettingsTabs always offers the search pane", () => {
-  assert.deepEqual(indexerSettingsTabs(), [
-    "indexers",
-    "search",
-    "seedingProfiles",
-  ]);
-  assert.deepEqual(indexerSettingsTabs(true), [
+test("indexer settings always offer the search and client panes", () => {
+  assert.deepEqual(INDEXER_SETTINGS_TABS, [
     "indexers",
     "search",
     "clients",

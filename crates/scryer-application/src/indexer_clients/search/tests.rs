@@ -275,9 +275,8 @@ impl crate::IndexerClient for ControlledSource {
 #[tokio::test(start_paused = true)]
 async fn client_search_uses_shared_raw_dispatch_and_rechecks_grants_before_delivery() {
     use std::{sync::Arc, time::Duration};
-    for change_during_read in 0..3 {
+    for grants_change_during_read in [false, true] {
         let (mut app, _) = crate::lib_tests::bootstrap();
-        set_experimental_features(&app, true).await;
         let now = app.runtime.environment.now();
         let config = IndexerConfig {
             id: "json-source".into(),
@@ -353,7 +352,7 @@ async fn client_search_uses_shared_raw_dispatch_and_rechecks_grants_before_deliv
         app.services.integrations.indexer_clients = crate::RuntimeFeature::Enabled(records.clone());
         app.services.integrations.plugin_provider =
             crate::RuntimeFeature::Enabled(Arc::new(NativeProvider));
-        if change_during_read == 0 {
+        if !grants_change_during_read {
             for (grant, requested, expected) in [
                 (
                     Some(vec!["4000".into()]),
@@ -408,23 +407,16 @@ async fn client_search_uses_shared_raw_dispatch_and_rechecks_grants_before_deliv
         );
         assert_eq!(source_request.categories, ["100123", "4000", "6000"]);
         assert!(source_request.nab.is_none() && source_request.limit.is_none());
-        if change_during_read == 1 {
+        if grants_change_during_read {
             records.0.lock().unwrap().configuration.grants.clear();
-        } else if change_during_read == 2 {
-            set_experimental_features(&app, false).await;
         }
         answer.send(()).unwrap();
         let response = tokio::time::timeout(Duration::from_secs(90), task)
             .await
             .unwrap()
             .unwrap();
-        if change_during_read == 1 {
+        if grants_change_during_read {
             assert_eq!(response.unwrap_err().reason(), Some(reasons::KEY_INVALID));
-        } else if change_during_read == 2 {
-            assert_eq!(
-                response.unwrap_err().reason(),
-                Some(reasons::EXPERIMENTAL_DISABLED)
-            );
         } else {
             assert!(response.unwrap().exhausted);
             let mut next = next_request;

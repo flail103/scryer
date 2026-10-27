@@ -327,7 +327,6 @@ impl AppUseCase {
         &self,
         raw_key: &str,
     ) -> AppResult<AuthenticatedIndexerClient> {
-        self.require_indexer_clients_enabled().await?;
         let lookup = indexer_client_key_lookup(raw_key).ok_or_else(invalid_key)?;
         let client = self
             .indexer_client_repository()?
@@ -350,7 +349,6 @@ impl AppUseCase {
         &self,
         authenticated: &AuthenticatedIndexerClient,
     ) -> AppResult<()> {
-        self.require_indexer_clients_enabled().await?;
         let current = self
             .indexer_client_repository()?
             .get_by_id(&authenticated.client.id)

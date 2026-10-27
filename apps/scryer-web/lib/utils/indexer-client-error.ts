@@ -1,7 +1,6 @@
 import { graphQlErrorExtension, userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 
 export const INDEXER_CLIENT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
-  INDEXER_CLIENTS_EXPERIMENTAL_DISABLED: "indexerClients.error.experimental",
   INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED: "indexerClients.error.session",
   INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED: "indexerClients.error.permissions",
   INDEXER_CLIENTS_KEY_INVALID: "indexerClients.error.key",
@@ -16,7 +15,6 @@ export const INDEXER_CLIENT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
 /// Refusals that mean this session may not use client management at all. The
 /// page explains these in place of the client list rather than as a failure.
 const ACCESS_REFUSAL_REASONS: ReadonlySet<string> = new Set([
-  "INDEXER_CLIENTS_EXPERIMENTAL_DISABLED",
   "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED",
   "INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED",
 ]);

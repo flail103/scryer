@@ -115,7 +115,6 @@ async fn controlled_fixture_with_cooldown(
     Arc<ReadJournal>,
 ) {
     let (context, _, key, clients) = fixture().await;
-    enable(&context, true).await;
     let configs = Arc::new(IndexerConfigStore::new(
         context.db.datastore(),
         context.db.encryption_key_state(),

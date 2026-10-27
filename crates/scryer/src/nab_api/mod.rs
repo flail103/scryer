@@ -108,7 +108,6 @@ async fn handle(
     let mut usage = None;
     let mut success_outcome = IndexerClientUseOutcome::CapsReady;
     let result = async {
-        state.app.require_indexer_clients_enabled().await?;
         let request = request::parse(&headers, &query, protocol)?;
         format = request.format;
         if let Operation::Get(reference) = request.operation {

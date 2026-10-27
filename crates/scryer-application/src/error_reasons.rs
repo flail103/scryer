@@ -1,8 +1,6 @@
 //! Stable conditions owned by application policy. Sentences remain display-only.
 
 pub mod indexer_clients {
-    /// The instance has not opted into the experimental client API.
-    pub const EXPERIMENTAL_DISABLED: &str = "INDEXER_CLIENTS_EXPERIMENTAL_DISABLED";
     /// Client management requires an authenticated interactive session.
     pub const INTERACTIVE_SESSION_REQUIRED: &str = "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED";
     /// The acting user does not hold every application permission.
@@ -36,7 +34,6 @@ pub mod indexer_clients {
     /// The retrieval reference is malformed, unauthenticated or no longer authorized.
     pub const REFERENCE_INVALID: &str = "INDEXER_CLIENTS_REFERENCE_INVALID";
     pub const ALL: &[&str] = &[
-        EXPERIMENTAL_DISABLED,
         INTERACTIVE_SESSION_REQUIRED,
         ALL_PERMISSIONS_REQUIRED,
         KEY_INVALID,

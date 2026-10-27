@@ -26,7 +26,6 @@ test("only refusals that close client management to the session count as access 
   for (const [code, reason, key] of [
     ["UNAUTHORIZED", "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED", "session"],
     ["UNAUTHORIZED", "INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED", "permissions"],
-    ["VALIDATION_ERROR", "INDEXER_CLIENTS_EXPERIMENTAL_DISABLED", "experimental"],
   ]) {
     assert.equal(indexerClientAccessRefusal(refusal(code!, reason!), t), `translated:indexerClients.error.${key}`);
   }

@@ -49,7 +49,7 @@ import {
   buildIndexerSettingsPath,
   buildRulesPath,
   indexerSettingsTabFromPath,
-  indexerSettingsTabs as allIndexerSettingsTabs,
+  INDEXER_SETTINGS_TABS,
   maintenanceRulesSectionFromPath,
   rulesSectionFromPath,
   rulesSectionsFor,
@@ -172,16 +172,16 @@ const INDEXER_SETTINGS_TAB_LABEL_KEYS: Record<IndexerSettingsTab, string> = {
   seedingProfiles: "settings.seedingProfiles",
 };
 
+const BETA_INDEXER_SETTINGS_TABS: ReadonlySet<IndexerSettingsTab> = new Set(["search", "clients"]);
+
 /// Pane tabs for the Indexers page. An indexer and the seeding profile it
 /// applies are two views of the same subject, so they share a page instead of
 /// scattering across the settings nav. Same shape as the Lists page's tabs.
 function IndexerSettingsTabs({
   activeTab,
-  tabs,
   t,
 }: {
   activeTab: IndexerSettingsTab;
-  tabs: IndexerSettingsTab[];
   t: ReturnType<typeof useTranslate>;
 }) {
   return (
@@ -192,14 +192,14 @@ function IndexerSettingsTabs({
         aria-label={t("settings.indexers")}
         className="relative top-px flex min-h-12 flex-wrap gap-x-2"
       >
-        {tabs.map((tab) => (
+        {INDEXER_SETTINGS_TABS.map((tab) => (
           <UnderlineTabLink
             key={tab}
             id={selectorId("settings-indexers-subnav", tab)}
             to={buildIndexerSettingsPath(tab)}
             selected={activeTab === tab}
             label={t(INDEXER_SETTINGS_TAB_LABEL_KEYS[tab])}
-            badge={tab === "search" ? t("settings.pluginBeta") : undefined}
+            badge={BETA_INDEXER_SETTINGS_TABS.has(tab) ? t("settings.pluginBeta") : undefined}
           />
         ))}
       </div>
@@ -369,12 +369,6 @@ export const SettingsContainer = memo(function SettingsContainer({
     settingsSection === "requestRules" && !experimentalFeaturesEnabled;
   const effectiveRulesSection =
     maintenanceRulesHidden || requestRulesHidden ? "scoring" : rulesSection;
-  // Indexer search is in beta rather than experimental: the pane is always
-  // offered, and the page header carries the notice.
-  const indexerSettingsTabs = allIndexerSettingsTabs(experimentalFeaturesEnabled);
-  const effectiveIndexerSettingsTab = indexerSettingsTabs.includes(indexerSettingsTab)
-    ? indexerSettingsTab
-    : "indexers";
   const [indexerDownloadClientMappingCatalogResource, setIndexerDownloadClientMappingCatalogResource] =
     useState<IndexerDownloadClientMappingCatalogResource>({
       catalog: null,
@@ -468,7 +462,7 @@ export const SettingsContainer = memo(function SettingsContainer({
     settingsSection === "subtitles";
   const referenceContentWidth = showReferenceRail
     ? settingsSection === "indexers"
-      ? effectiveIndexerSettingsTab === "search"
+      ? indexerSettingsTab === "search"
         ? INDEXER_SEARCH_FILTERED_PLUGIN_CONTENT_WIDTH
         : INDEXERS_FILTERED_PLUGIN_CONTENT_WIDTH
       : STANDARD_FILTERED_PLUGIN_CONTENT_WIDTH
@@ -757,14 +751,6 @@ export const SettingsContainer = memo(function SettingsContainer({
                 <h1 className="flex flex-wrap items-center gap-2.5 text-[25px] font-bold tracking-normal text-[var(--scry-ink2)]">
                   {pageLabel}
                 </h1>
-                {settingsSection === "indexers" && effectiveIndexerSettingsTab === "search" ? (
-                  <p
-                    id="settings-indexer-search-beta-notice"
-                    className="mt-1 max-w-[640px] text-[13.5px] text-[var(--scry-muted)]"
-                  >
-                    {t("settings.indexerSearchBetaNotice")}
-                  </p>
-                ) : null}
                 {!usesAutomationHeader &&
                 !usesIntegrationsHeader &&
                 !usesSystemHeader &&
@@ -802,8 +788,7 @@ export const SettingsContainer = memo(function SettingsContainer({
           </div>
           {settingsSection === "indexers" ? (
             <IndexerSettingsTabs
-              activeTab={effectiveIndexerSettingsTab}
-              tabs={indexerSettingsTabs}
+              activeTab={indexerSettingsTab}
               t={t}
             />
           ) : null}
@@ -831,15 +816,15 @@ export const SettingsContainer = memo(function SettingsContainer({
             <SettingsMediaServersContainer />
           ) : settingsSection === "indexers" ? (
             <>
-              {effectiveIndexerSettingsTab === "seedingProfiles" ? (
+              {indexerSettingsTab === "seedingProfiles" ? (
                 <SettingsSeedingProfilesContainer />
-              ) : effectiveIndexerSettingsTab === "search" ? (
+              ) : indexerSettingsTab === "search" ? (
                 <SettingsIndexerSearchContainer />
-              ) : effectiveIndexerSettingsTab === "clients" ? (
+              ) : indexerSettingsTab === "clients" ? (
                 <SettingsIndexerClientsContainer />
               ) : (
                 <SettingsIndexersContainer
-                  indexerSettingsTab={effectiveIndexerSettingsTab}
+                  indexerSettingsTab={indexerSettingsTab}
                   providerCatalogVersion={providerCatalogVersions.INDEXER}
                   indexerDownloadClientMappingCatalogResource={
                     indexerDownloadClientMappingCatalogResource

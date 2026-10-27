@@ -103,36 +103,8 @@ impl AppUseCase {
                 "Every application permission is required for indexer client management",
             ));
         }
-        self.require_indexer_clients_enabled().await
-    }
-
-    /// One runtime gate for management, authentication and retained delivery.
-    pub async fn require_indexer_clients_enabled(&self) -> AppResult<()> {
-        if !self.experimental_features_enabled().await? {
-            return Err(AppError::validation_refused(
-                reasons::EXPERIMENTAL_DISABLED,
-                "Enable experimental features to use indexer clients",
-            ));
-        }
         Ok(())
     }
-}
-
-#[cfg(test)]
-async fn set_experimental_features(app: &AppUseCase, enabled: bool) {
-    app.services
-        .config
-        .settings
-        .upsert_setting_json(
-            crate::SETTINGS_SCOPE_SYSTEM,
-            crate::EXPERIMENTAL_FEATURES_ENABLED_KEY,
-            None,
-            enabled.to_string(),
-            "test",
-            None,
-        )
-        .await
-        .unwrap();
 }
 
 #[cfg(test)]
@@ -142,7 +114,6 @@ mod tests {
     #[tokio::test]
     async fn client_management_rejects_bypass_and_any_missing_permission() {
         let (app, mut actor) = crate::lib_tests::bootstrap();
-        set_experimental_features(&app, true).await;
         actor.authorization.loaded = true;
         actor.authorization.app = AppPermissionMask::ALL;
         let bypass = app

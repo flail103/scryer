@@ -43,7 +43,6 @@ impl IndexerClientRepository for ClientFixture {
 #[tokio::test]
 async fn authentication_and_delivery_revalidation_reject_changed_authority() {
     let (mut app, _) = crate::lib_tests::bootstrap();
-    set_experimental_features(&app, true).await;
     let issued = issue_indexer_client_key(&app.auth.jwt_signing_salt).unwrap();
     let now = app.runtime.environment.now();
     let original = IndexerClientRecord {
@@ -80,22 +79,6 @@ async fn authentication_and_delivery_revalidation_reject_changed_authority() {
         }
     ));
     assert!(app.revalidate_indexer_client(&authenticated).await.is_ok());
-    set_experimental_features(&app, false).await;
-    assert_eq!(
-        app.authenticate_indexer_client(&issued.raw_key)
-            .await
-            .unwrap_err()
-            .reason(),
-        Some(reasons::EXPERIMENTAL_DISABLED)
-    );
-    assert_eq!(
-        app.revalidate_indexer_client(&authenticated)
-            .await
-            .unwrap_err()
-            .reason(),
-        Some(reasons::EXPERIMENTAL_DISABLED)
-    );
-    set_experimental_features(&app, true).await;
     assert!(app.authenticate_api_key(&issued.raw_key).await.is_err());
 
     let other = issue_indexer_client_key(&app.auth.jwt_signing_salt).unwrap();

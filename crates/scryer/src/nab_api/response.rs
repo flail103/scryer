@@ -15,9 +15,6 @@ use scryer_infrastructure_acquisition::indexers::nab_caps::{write_json_error, wr
 /// contain credentials, request URLs, and private connection details.
 pub(super) fn error_response(error: &AppError, format: Format) -> Response {
     let (status, code, description) = match error.reason() {
-        Some(clients::EXPERIMENTAL_DISABLED) => {
-            (StatusCode::SERVICE_UNAVAILABLE, 910, "API Disabled")
-        }
         Some(clients::PROTOCOL_FORBIDDEN) => (
             StatusCode::FORBIDDEN,
             102,

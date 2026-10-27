@@ -12,7 +12,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use common::TestContext;
-use scryer_application::{SettingsRepository, indexer_clients::*, testing::AppUseCaseTestExt};
+use scryer_application::{indexer_clients::*, testing::AppUseCaseTestExt};
 use scryer_infrastructure_acquisition::indexers::client_store::IndexerClientStore;
 use scryer_infrastructure_crypto::{EncryptionKey, artifact_reference::ArtifactReferenceCipher};
 use std::{sync::Arc, time::Duration};
@@ -20,21 +20,6 @@ use tower::ServiceExt;
 
 async fn fixture() -> (TestContext, Router, String, Arc<IndexerClientStore>) {
     let context = TestContext::new().await;
-    context
-        .settings_store
-        .batch_ensure_setting_definitions(vec![
-            scryer_infrastructure_sql::types::SettingDefinitionSeed {
-                category: "ui".into(),
-                scope: scryer_application::SETTINGS_SCOPE_SYSTEM.into(),
-                key_name: scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY.into(),
-                data_type: "boolean".into(),
-                default_value_json: "false".into(),
-                is_sensitive: false,
-                validation_json: None,
-            },
-        ])
-        .await
-        .unwrap();
     let store = Arc::new(IndexerClientStore::new(context.db.datastore()));
     let key = issue_indexer_client_key("test-salt").unwrap();
     let now = chrono::Utc::now();
@@ -80,21 +65,6 @@ async fn fixture() -> (TestContext, Router, String, Arc<IndexerClientStore>) {
     (context, router, key.raw_key, store)
 }
 
-async fn enable(context: &TestContext, enabled: bool) {
-    context
-        .settings_store
-        .upsert_setting_json(
-            scryer_application::SETTINGS_SCOPE_SYSTEM,
-            scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
-            None,
-            enabled.to_string(),
-            "test".into(),
-            None,
-        )
-        .await
-        .unwrap();
-}
-
 async fn call(router: &Router, uri: &str, key: Option<(&str, &str)>) -> (StatusCode, String) {
     let mut request = Request::builder().uri(uri).header("host", "scryer.example");
     if let Some((name, value)) = key {
@@ -119,19 +89,8 @@ async fn call(router: &Router, uri: &str, key: Option<(&str, &str)>) -> (StatusC
 }
 
 #[tokio::test]
-async fn shared_routes_require_the_experimental_gate_and_a_client_key_for_caps_and_search() {
-    let (context, router, key, _) = fixture().await;
-    for path in ["/newznab/api", "/torznab/api"] {
-        let (status, body) = call(
-            &router,
-            &format!("{path}?t=caps"),
-            Some(("x-api-key", &key)),
-        )
-        .await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(body.contains("910"));
-    }
-    enable(&context, true).await;
+async fn shared_routes_require_a_client_key_for_caps_and_search() {
+    let (_context, router, key, _) = fixture().await;
     for path in ["/newznab/api", "/torznab/api"] {
         for operation in ["caps", "search"] {
             let (status, body) = call(&router, &format!("{path}?t={operation}&o=json"), None).await;
@@ -163,8 +122,7 @@ async fn shared_routes_require_the_experimental_gate_and_a_client_key_for_caps_a
 
 #[tokio::test]
 async fn authenticated_outcomes_are_recorded_without_stamping_invalid_keys() {
-    let (context, router, key, store) = fixture().await;
-    enable(&context, true).await;
+    let (_context, router, key, store) = fixture().await;
     assert!(
         store
             .get_by_id("http-client")
@@ -229,7 +187,6 @@ async fn authenticated_outcomes_are_recorded_without_stamping_invalid_keys() {
 #[tokio::test]
 async fn keys_do_not_cross_protocol_grants_and_revocation_applies_to_both_routes() {
     let (context, router, key, store) = fixture().await;
-    enable(&context, true).await;
     let actor = context.app.find_or_create_default_user().await.unwrap();
     let personal = context
         .app
@@ -313,7 +270,6 @@ async fn retrieval_survives_idle_expiry_without_an_interactive_actor_or_cached_s
         }
     }
     let (context, _, _, clients) = fixture().await;
-    enable(&context, true).await;
     let now = chrono::Utc::now();
     let configs =
         IndexerConfigStore::new(context.db.datastore(), context.db.encryption_key_state());

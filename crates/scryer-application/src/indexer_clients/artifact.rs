@@ -150,7 +150,6 @@ impl AppUseCase {
         reference: &IndexerClientArtifactReference,
         protocol: IndexerClientProtocol,
     ) -> AppResult<ResolvedDownloadArtifact> {
-        self.require_indexer_clients_enabled().await?;
         let client = self
             .indexer_client_repository()?
             .get_by_id(&reference.client_id)
