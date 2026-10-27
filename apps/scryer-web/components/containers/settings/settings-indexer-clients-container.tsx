@@ -31,7 +31,7 @@ import { useTranslate } from "@/lib/context/translate-context";
 import { useUiDateTimeFormat } from "@/lib/context/ui-settings-context";
 import { useAuth, type AuthUser } from "@/lib/hooks/use-auth";
 import { mfaVerifyStepUpMutation } from "@/lib/graphql/mutations";
-import { indexersQuery } from "@/lib/graphql/queries";
+import { indexersQuery, tlsSettingsQuery } from "@/lib/graphql/queries";
 import {
   createIndexerClientMutation,
   indexerClientsQuery,
@@ -43,12 +43,14 @@ import {
   type IndexerClientRecord,
 } from "@/lib/graphql/indexer-clients";
 import type { IndexerRecord } from "@/lib/types";
+import type { ServiceSettings } from "@/lib/types/settings";
 import { formatUiDateTime } from "@/lib/utils/date-format";
 import { selectorId } from "@/lib/utils/dom-ids";
 import { indexerClientAccessRefusal, indexerClientErrorMessage } from "@/lib/utils/indexer-client-error";
 import { indexerClientOutcomeMessage } from "@/lib/utils/indexer-client-outcome";
 import { withMfaStepUp } from "@/lib/utils/with-mfa-step-up";
 import { getRuntimeBasePath } from "@/lib/runtime-config";
+import { indexerClientEndpointUrl } from "@/lib/utils/indexer-client-endpoint";
 
 const PROTOCOLS: readonly IndexerClientProtocol[] = ["NEWZNAB", "TORZNAB"];
 const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
@@ -56,27 +58,24 @@ const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
   TORZNAB: "indexerClients.protocol.torznab",
 };
 
-/** *arr apps join the URL and API path fields; their API path defaults to this. */
-const ENDPOINT_API_PATH = "/api";
-
-function EndpointField({ id, label, value, copied, onCopy, className, t }: {
+function EndpointField({ id, label, value, copied, onCopy, t }: {
   id: string;
   label: string;
   value: string;
   copied: boolean;
   onCopy: () => void;
-  className?: string;
   t: (key: string) => string;
 }) {
   return (
-    <div className={`flex min-w-0 items-center ${className ?? ""}`}>
+    <div className="flex w-fit min-w-0 max-w-full items-center">
       <Input
         id={id}
         aria-label={label}
         readOnly
         value={value}
+        size={value.length + 2}
         onFocus={(event) => event.currentTarget.select()}
-        className="h-9 min-w-0 flex-1 rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
+        className="h-9 w-auto min-w-0 max-w-full rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
       />
       <IconButton
         id={`${id}-copy`}
@@ -165,10 +164,24 @@ export function SettingsIndexerClientsContainer() {
   useEffect(() => { setPluginsTarget(document.getElementById(SETTINGS_REFERENCE_SLOT_ID)); }, []);
   const refreshAfterPluginChange = useCallback(async () => { await load(); }, [load]);
   const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
-  const endpointUrl = (protocol: IndexerClientProtocol) => {
-    const basePath = getRuntimeBasePath();
-    return `${window.location.origin}${basePath === "/" ? "" : basePath}/${protocol.toLowerCase()}`;
-  };
+  const [endpointBase, setEndpointBase] = useState<Pick<ServiceSettings, "publicUrl" | "basePath"> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .query<{ serviceSettings: ServiceSettings }>(tlsSettingsQuery, {}, { requestPolicy: "network-only" })
+      .toPromise()
+      .then((result) => {
+        if (!cancelled && result.data) setEndpointBase(result.data.serviceSettings);
+      });
+    return () => { cancelled = true; };
+  }, [api]);
+  const endpointUrl = (protocol: IndexerClientProtocol) =>
+    indexerClientEndpointUrl(
+      protocol,
+      endpointBase?.publicUrl ?? null,
+      endpointBase?.basePath ?? getRuntimeBasePath(),
+      window.location.origin,
+    );
   const copyEndpoint = async (key: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -253,28 +266,16 @@ export function SettingsIndexerClientsContainer() {
       <div className="border-b border-border px-3 py-2">
         <CardTitle className="text-base">{t("indexerClients.endpoints")}</CardTitle>
       </div>
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 p-3">
-        <span />
-        <span className="text-xs font-medium text-[var(--scry-muted3)]">{t("indexerClients.endpointUrl")}</span>
-        <span className="text-xs font-medium text-[var(--scry-muted3)]">{t("indexerClients.endpointApiPath")}</span>
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 p-3">
         {PROTOCOLS.map((protocol) => (
           <Fragment key={protocol}>
             <span className="font-medium text-[var(--scry-ink2)]">{t(PROTOCOL_LABEL_KEYS[protocol])}</span>
             <EndpointField
               id={`indexer-client-endpoint-${protocol.toLowerCase()}`}
-              label={`${t(PROTOCOL_LABEL_KEYS[protocol])} ${t("indexerClients.endpointUrl")}`}
+              label={t(PROTOCOL_LABEL_KEYS[protocol])}
               value={endpointUrl(protocol)}
-              copied={copiedEndpoint === `${protocol}:url`}
-              onCopy={() => void copyEndpoint(`${protocol}:url`, endpointUrl(protocol))}
-              t={t}
-            />
-            <EndpointField
-              id={`indexer-client-endpoint-${protocol.toLowerCase()}-api-path`}
-              label={`${t(PROTOCOL_LABEL_KEYS[protocol])} ${t("indexerClients.endpointApiPath")}`}
-              value={ENDPOINT_API_PATH}
-              copied={copiedEndpoint === `${protocol}:path`}
-              onCopy={() => void copyEndpoint(`${protocol}:path`, ENDPOINT_API_PATH)}
-              className="w-28"
+              copied={copiedEndpoint === protocol}
+              onCopy={() => void copyEndpoint(protocol, endpointUrl(protocol))}
               t={t}
             />
           </Fragment>
