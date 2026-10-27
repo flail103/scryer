@@ -48,6 +48,7 @@ import { selectorId } from "@/lib/utils/dom-ids";
 import { indexerClientAccessRefusal, indexerClientErrorMessage } from "@/lib/utils/indexer-client-error";
 import { indexerClientOutcomeMessage } from "@/lib/utils/indexer-client-outcome";
 import { withMfaStepUp } from "@/lib/utils/with-mfa-step-up";
+import { getRuntimeBasePath } from "@/lib/runtime-config";
 
 const PROTOCOLS: readonly IndexerClientProtocol[] = ["NEWZNAB", "TORZNAB"];
 const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
@@ -128,6 +129,19 @@ export function SettingsIndexerClientsContainer() {
   const [pluginsTarget, setPluginsTarget] = useState<HTMLElement | null>(null);
   useEffect(() => { setPluginsTarget(document.getElementById(SETTINGS_REFERENCE_SLOT_ID)); }, []);
   const refreshAfterPluginChange = useCallback(async () => { await load(); }, [load]);
+  const [copiedEndpoint, setCopiedEndpoint] = useState<IndexerClientProtocol | null>(null);
+  const endpointUrl = (protocol: IndexerClientProtocol) => {
+    const basePath = getRuntimeBasePath();
+    return `${window.location.origin}${basePath === "/" ? "" : basePath}/${protocol.toLowerCase()}`;
+  };
+  const copyEndpoint = async (protocol: IndexerClientProtocol) => {
+    try {
+      await navigator.clipboard.writeText(endpointUrl(protocol));
+      setCopiedEndpoint(protocol);
+    } catch {
+      setError(t("indexerClients.endpointCopyFailed"));
+    }
+  };
 
   const requestMfa = useCallback(() => new Promise<string | null>((resolve) => {
     if (!mounted.current) { resolve(null); return; }
@@ -199,6 +213,40 @@ export function SettingsIndexerClientsContainer() {
       ? createPortal(<FilteredPluginList family="INDEXER" refreshProviderOptions={refreshAfterPluginChange} />, pluginsTarget)
       : null}
     <p className="text-[var(--scry-muted3)]">{t("indexerClients.description")}</p>
+
+    <div id="settings-indexer-client-endpoints" className="rounded border border-border">
+      <div className="border-b border-border px-3 py-2">
+        <CardTitle className="text-base">{t("indexerClients.endpoints")}</CardTitle>
+      </div>
+      <div className="space-y-2 p-3">
+        {PROTOCOLS.map((protocol) => (
+          <div key={protocol} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="w-20 shrink-0 font-medium text-[var(--scry-ink2)]">{t(PROTOCOL_LABEL_KEYS[protocol])}</span>
+            <div className="flex min-w-0 items-center">
+              <a
+                id={`indexer-client-endpoint-${protocol.toLowerCase()}`}
+                href={endpointUrl(protocol)}
+                target="_blank"
+                rel="noreferrer"
+                className="truncate font-[var(--font-code)] text-[var(--scry-accent-text)] underline-offset-2 hover:underline"
+              >
+                {endpointUrl(protocol)}
+              </a>
+              <IconButton
+                id={`indexer-client-endpoint-copy-${protocol.toLowerCase()}`}
+                label={copiedEndpoint === protocol ? t("label.copied") : t("label.copy")}
+                tone={copiedEndpoint === protocol ? "enabled" : "neutral"}
+                className="ml-2 h-8 w-8 shrink-0"
+                onClick={() => void copyEndpoint(protocol)}
+              >
+                {copiedEndpoint === protocol ? <CheckCircle2 className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+              </IconButton>
+            </div>
+            <span className="text-[var(--scry-muted3)]">{t("indexerClients.endpointApiPath", { path: "/api" })}</span>
+          </div>
+        ))}
+      </div>
+    </div>
 
     {error ? (
       <div
