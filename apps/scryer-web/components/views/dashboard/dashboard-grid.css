@@ -51,8 +51,8 @@
 }
 
 /*
- * Crosshairs at the grid's corners while a panel resizes, a few rows past the
- * bottom so a panel growing downward still has corners to snap to.
+ * Crosshairs at the grid's corners while a panel moves or resizes, a few rows
+ * past the bottom so a panel heading downward still has corners to snap to.
  */
 .scry-dashboard-grid-cells {
   position: absolute;
@@ -63,44 +63,6 @@
   fill: none;
   stroke: rgba(var(--scry-accent-rgb), 0.55);
   stroke-width: 1;
-}
-
-/*
- * Every spot a dragged panel can land, behind the panels. Regions meet edge
- * to edge and share one fixed stripe, so an open area reads as one shape.
- */
-.scry-dashboard-drop-targets {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.scry-dashboard-drop-target {
-  position: absolute;
-  background: repeating-linear-gradient(
-    135deg,
-    rgba(var(--scry-accent-rgb), 0.09) 0 8px,
-    rgba(var(--scry-accent-rgb), 0.03) 8px 16px
-  );
-  background-attachment: fixed;
-}
-
-/*
- * The grid's cells while a panel resizes, a few rows past the bottom so a
- * panel growing downward still has cells to snap to. The two masks intersect,
- * leaving one tile per cell with the gaps clear.
- */
-.scry-dashboard-grid-cells {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  pointer-events: none;
-  background: rgba(var(--scry-accent-rgb), 0.08);
-  mask-repeat: repeat;
-  mask-composite: intersect;
-  -webkit-mask-repeat: repeat;
-  -webkit-mask-composite: source-in;
 }
 
 /* Where a dragged or resized panel will land. */

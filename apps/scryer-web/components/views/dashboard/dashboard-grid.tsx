@@ -68,8 +68,8 @@ import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-
 import { dashboardDropRegions, type GridRect } from "@/lib/utils/dashboard-drop-targets";
 
 /**
- * Behind the grid during a resize: a crosshair at every grid corner, so the
- * edge being dragged can be seen snapping to them. One repeating SVG pattern
+ * Behind the grid during a move or resize: a crosshair at every grid corner,
+ * so the panel being dragged can be seen snapping to them. One repeating SVG pattern
  * draws them all, so it costs the same however many rows there are.
  *
  * A corner sits in the middle of the gap between cells. The layer starts half
@@ -562,7 +562,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             carry over from the breakpoint just left.
           */}
           <div className="relative">
-          {editing && gesture && gesture !== "move" && !stacked ? (
+          {editing && gesture && !stacked ? (
             <DashboardGridCells width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
           ) : null}
           {editing && dropTargets ? (
