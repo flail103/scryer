@@ -126,6 +126,7 @@ pub use ports::{
 };
 mod quality;
 mod rate_limit_signal;
+mod release_facts;
 pub mod request_rules;
 mod rules;
 pub use rules::preview::{
@@ -256,6 +257,7 @@ pub use quality::release_dedup;
 pub use quality::release_listing::{
     ReleaseListingView, release_listing_view, search_result_listing_json,
 };
+pub use release_facts::{ReleaseExternalIds, ReleaseFacts};
 pub use rules::metrics::describe_rule_metrics;
 pub use services::{
     ActiveImportStream, ActiveImportStreamHandle, ActiveImportStreamPhase, ActiveImportStreamSync,

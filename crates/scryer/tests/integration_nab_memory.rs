@@ -129,6 +129,7 @@ fn encoder_workspace_for_large_attributes_and_references() {
     let metadata = NabFeedPage {
         offset: 0,
         total: None,
+        generated_at: chrono::DateTime::UNIX_EPOCH,
     };
     for case in [
         "plain",

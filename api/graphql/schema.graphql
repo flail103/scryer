@@ -9213,21 +9213,63 @@ type IndexerSearchResultPayload {
 	"""
 	seeders: Int
 	"""
-	Torrent peer count, or null for non-torrent results.
+	Torrent peer count, or null for non-torrent results. Seeders plus
+	leechers when the indexer reported those but no peer count.
 	"""
 	peers: Int
+	"""
+	Torrent leecher count, or null when not reported.
+	"""
+	leechers: Int
 	"""
 	Torrent info hash, or null for non-torrent results.
 	"""
 	infoHash: String
 	"""
-	Whether the torrent is marked freeleech, or null for non-torrent results.
+	Whether the torrent is freeleech: the indexer's explicit claim, or else
+	whether the download volume factor is zero. Null when neither is known.
 	"""
 	freeleech: Boolean
 	"""
 	Torrent download volume factor, or null for non-torrent results.
 	"""
 	downloadVolumeFactor: Float
+	"""
+	Torrent upload volume factor, or null when not reported.
+	"""
+	uploadVolumeFactor: Float
+	"""
+	Minimum seed ratio the tracker requires, or null when not reported.
+	"""
+	minimumSeedRatio: Float
+	"""
+	Minimum seed time the tracker requires in minutes, or null when not reported.
+	"""
+	minimumSeedTimeMinutes: Int
+	"""
+	Indexer flags such as freeleech or internal, in indexer order.
+	"""
+	indexerFlags: [String!]!
+	"""
+	Audio languages the indexer reported for the release.
+	"""
+	languages: [String!]!
+	"""
+	Subtitle languages the indexer reported for the release.
+	"""
+	subtitles: [String!]!
+	"""
+	Number of files in the release, or null when not reported.
+	"""
+	files: Int
+	"""
+	Release year the indexer reported, or null when not reported.
+	"""
+	year: Int
+	"""
+	Poster or cover image URL the indexer reported, or null when not reported.
+	"""
+	posterUrl: String
 	"""
 	Opaque token accepted when queuing this candidate, or null when unavailable.
 	"""

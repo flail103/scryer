@@ -141,6 +141,30 @@ pub(super) fn scratch_bytes(
     // Base64url cannot expand in XML. Only the endpoint and query separator do.
     let escaped_link = link.saturating_add(xml_bytes(endpoint)).saturating_add(8);
     let largest_input = encoder_values(result).map(str::len).max().unwrap_or(0);
+    // Synthesized typed attributes are owned per item: the facts, their
+    // formatted values, and the JSON group entries that hold them.
+    let facts = result.release_facts();
+    let synthesized = [
+        facts.genre.as_deref(),
+        facts.poster_url.as_deref(),
+        facts.info_hash.as_deref(),
+        facts.magnet_url.as_deref(),
+        result.password_hint.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(
+        facts
+            .indexer_flags
+            .iter()
+            .chain(&facts.languages)
+            .chain(&facts.subtitles)
+            .chain(&result.response_attributes.categories)
+            .map(String::as_str),
+    )
+    .map(|value| xml_bytes(value).saturating_add(128))
+    .fold(4096usize, usize::saturating_add)
+    .saturating_mul(3);
     let codec = match format {
         Format::Xml => {
             let attribute = result
@@ -198,6 +222,7 @@ pub(super) fn scratch_bytes(
     };
     reference_workspace
         .saturating_add(codec.max(largest_input.saturating_mul(8)))
+        .saturating_add(synthesized)
         .saturating_add(endpoint.len().saturating_mul(2))
         .saturating_add(16 * 1024)
 }
@@ -240,12 +265,15 @@ pub(super) async fn body(
         .map(|row| scratch_bytes(row.result(), &authenticated, &endpoint, format))
         .max()
         .unwrap_or(0);
+    // Read the clock once per response; the serializer never reads it.
+    let generated_at = chrono::Utc::now();
     stream::serialize_page(page, scratch, move |page, output| {
         let metadata = NabFeedPage {
             offset: page.offset,
             // Neither summed upstream totals nor offset + returned count is
             // valid for a filtered merge or an offset beyond the final row.
             total: None,
+            generated_at,
         };
         let items = page
             .rows
