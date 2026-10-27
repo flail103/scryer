@@ -68,14 +68,15 @@ import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-
 import { dashboardDropRegions, type GridRect } from "@/lib/utils/dashboard-drop-targets";
 
 /**
- * Behind the grid during a move or resize: a crosshair at every grid corner,
- * so the panel being dragged can be seen snapping to them. One repeating SVG pattern
+ * Behind the grid during a move, resize or tray drag: a crosshair at every
+ * grid corner, so the panel being dragged can be seen snapping to them. One repeating SVG pattern
  * draws them all, so it costs the same however many rows there are.
  *
  * A corner sits in the middle of the gap between cells. The layer starts half
  * a gap before the grid, so the outer edges get corners too.
  */
 const GRID_CROSSHAIR_ARM = 4;
+const DASHBOARD_ROW_STEP = DASHBOARD_ROW_HEIGHT + DASHBOARD_MARGIN[1];
 
 function DashboardGridCells({ width, columns }: { width: number; columns: number }) {
   const patternId = `scry-grid-corners-${React.useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -288,13 +289,24 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   // other panels keep their memoised elements and do not redraw.
   const [resizingPanelId, setResizingPanelId] = React.useState<string | null>(null);
   const [resizeFrame, setResizeFrame] = React.useState(0);
+  // While a panel moves, resizes or comes in from the tray, the grid area
+  // reaches a full screen past the bottom of the window, so the drop zones and
+  // crosshairs carry on below what is visible instead of stopping at the last
+  // panel. Measured once when the gesture starts.
+  const gridAreaRef = React.useRef<HTMLDivElement>(null);
+  const rowsPastViewport = React.useCallback(() => {
+    const top = gridAreaRef.current?.getBoundingClientRect().top ?? 0;
+    return Math.max(0, Math.ceil((2 * window.innerHeight - top) / DASHBOARD_ROW_STEP));
+  }, []);
+  const [gestureRows, setGestureRows] = React.useState<number | null>(null);
   const handleResizeStart = React.useCallback(
     (_layout: Layout, oldItem: LayoutItem | null, _next: unknown, _placeholder: unknown, event: Event) => {
       window.getSelection()?.removeAllRanges();
       setGesture(resizeAxisFromEvent(event));
+      setGestureRows(rowsPastViewport());
       setResizingPanelId(oldItem?.i ?? null);
     },
-    [],
+    [rowsPastViewport],
   );
   const handleResize = React.useCallback(() => setResizeFrame((frame) => frame + 1), []);
   // The area a moved panel can land in. Other panels never move during a
@@ -304,20 +316,24 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     (layout: Layout, oldItem: LayoutItem | null) => {
       window.getSelection()?.removeAllRanges();
       setGesture("move");
+      const rows = rowsPastViewport();
+      setGestureRows(rows);
       if (oldItem && !stacked) {
         setMoveTargets(
           dashboardDropRegions(
             layout.filter((item) => item.i !== oldItem.i),
             { w: oldItem.w, h: oldItem.h },
             DASHBOARD_COLUMNS[breakpoint],
+            rows,
           ),
         );
       }
     },
-    [breakpoint, stacked],
+    [breakpoint, rowsPastViewport, stacked],
   );
   const handleGestureStop = React.useCallback(() => {
     setGesture(null);
+    setGestureRows(null);
     setMoveTargets(null);
     setResizingPanelId(null);
   }, []);
@@ -387,14 +403,25 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     [breakpoint, dragPanelId],
   );
 
+  const trayDragging = Boolean(dragPanelId && !placed.has(dragPanelId) && !stacked);
+  const [trayDragRows, setTrayDragRows] = React.useState<number | null>(null);
+  const handleTrayDrag = React.useCallback(
+    (panelId: DashboardPanelId | null) => {
+      setDragPanelId(panelId);
+      setTrayDragRows(panelId ? rowsPastViewport() : null);
+    },
+    [rowsPastViewport],
+  );
+  const trayRows = trayDragging ? trayDragRows : null;
   const trayTargets = React.useMemo(
     () =>
-      dragPanelId && !placed.has(dragPanelId) && !stacked
-        ? dashboardDropRegions(items, dropItemSize, DASHBOARD_COLUMNS[breakpoint])
+      trayRows !== null
+        ? dashboardDropRegions(items, dropItemSize, DASHBOARD_COLUMNS[breakpoint], trayRows)
         : null,
-    [breakpoint, dragPanelId, dropItemSize, items, placed, stacked],
+    [breakpoint, dropItemSize, items, trayRows],
   );
   const dropTargets = moveTargets ?? trayTargets;
+  const extentRows = editing && !stacked ? (gestureRows ?? trayRows) : null;
 
   const handleDropDragOver = React.useCallback(() => {
     if (!dragPanelId || placed.has(dragPanelId)) {
@@ -561,8 +588,12 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             grid from that breakpoint's layout every time, so no positions
             carry over from the breakpoint just left.
           */}
-          <div className="relative">
-          {editing && gesture && !stacked ? (
+          <div
+            ref={gridAreaRef}
+            className="relative"
+            style={extentRows !== null ? { minHeight: extentRows * DASHBOARD_ROW_STEP } : undefined}
+          >
+          {extentRows !== null ? (
             <DashboardGridCells width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
           ) : null}
           {editing && dropTargets ? (
@@ -610,7 +641,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
         open={editing && trayOpen}
         onOpenChange={setTrayOpen}
         placed={placed}
-        onDragPanel={setDragPanelId}
+        onDragPanel={handleTrayDrag}
         onAddPanel={(panelId) => updateDraft((current) => appendDashboardPanel(current, panelId, breakpoint))}
       />
 

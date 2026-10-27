@@ -29,3 +29,8 @@ test("a gap the panel fits in is a target, merged down its rows", () => {
 test("a panel wider than the grid is clamped to its columns", () => {
   assert.deepEqual(dashboardDropRegions([], { w: 20, h: 1 }, 6), [{ x: 0, y: 0, w: 6, h: 1 }]);
 });
+
+test("the open area reaches down to the requested row count", () => {
+  const others = [{ x: 0, y: 0, w: 12, h: 2 }];
+  assert.deepEqual(dashboardDropRegions(others, { w: 4, h: 2 }, 12, 10), [{ x: 0, y: 2, w: 12, h: 8 }]);
+});

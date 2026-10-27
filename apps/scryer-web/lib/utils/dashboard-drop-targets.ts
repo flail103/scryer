@@ -6,7 +6,8 @@ export type GridRect = { x: number; y: number; w: number; h: number };
  * the cells covered by at least one position where the whole panel fits
  * without overlapping another panel. Panels never collide on the dashboard,
  * so this is exactly the area a drop can reach. The open rows below every
- * panel are included, one panel height deep.
+ * panel are included, one panel height deep, or down to `minRows` when that
+ * is further.
  *
  * The area comes back as rectangles, each a run of free columns merged with
  * the identical runs in the rows below it.
@@ -15,11 +16,12 @@ export function dashboardDropRegions(
   others: readonly GridRect[],
   size: { w: number; h: number },
   columns: number,
+  minRows = 0,
 ): GridRect[] {
   const w = Math.min(Math.max(1, size.w), columns);
   const h = Math.max(1, size.h);
   const bottom = others.reduce((max, rect) => Math.max(max, rect.y + rect.h), 0);
-  const rows = bottom + h;
+  const rows = Math.max(bottom + h, minRows);
 
   const occupied = Array.from({ length: rows }, () => new Array<boolean>(columns).fill(false));
   for (const rect of others) {
