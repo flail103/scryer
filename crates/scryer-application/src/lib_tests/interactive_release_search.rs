@@ -245,15 +245,13 @@ struct CompletedSearch {
 
 impl std::ops::Deref for CompletedSearch {
     type Target = InteractiveReleaseSearchSnapshot;
-    fn deref(&self) -> &Self::Target { &self.snapshot }
+    fn deref(&self) -> &Self::Target {
+        &self.snapshot
+    }
 }
 
 /// Poll until the job leaves `Running`, then read the completed page.
-async fn await_completion(
-    app: &AppUseCase,
-    user: &User,
-    job_id: &str,
-) -> CompletedSearch {
+async fn await_completion(app: &AppUseCase, user: &User, job_id: &str) -> CompletedSearch {
     let snapshot = wait_for(
         "the interactive release search to reach a terminal state",
         || async {
@@ -391,13 +389,28 @@ async fn a_query_asks_indexers_left_out_of_title_interactive_searches() {
 
 #[tokio::test]
 async fn raw_query_preserves_the_all_limited_reason_in_the_ui_snapshot() {
-    let client = ScriptedIndexerClient::default().with_outcome("limited",
-        crate::IndexerSearchOutcome::Deferred { retry_after: Some(Duration::from_secs(30)) }).await;
-    let (app, user) = bootstrap_search(Arc::new(StoredSettingsRepo::default()), client,
-        vec![synthetic_direct_nab_indexer_config("limited", "newznab")]);
-    let start = app.start_interactive_release_search(&user, query_request("example")).await.unwrap();
+    let client = ScriptedIndexerClient::default()
+        .with_outcome(
+            "limited",
+            crate::IndexerSearchOutcome::Deferred {
+                retry_after: Some(Duration::from_secs(30)),
+            },
+        )
+        .await;
+    let (app, user) = bootstrap_search(
+        Arc::new(StoredSettingsRepo::default()),
+        client,
+        vec![synthetic_direct_nab_indexer_config("limited", "newznab")],
+    );
+    let start = app
+        .start_interactive_release_search(&user, query_request("example"))
+        .await
+        .unwrap();
     let done = await_completion(&app, &user, &start.id).await;
-    assert_eq!(done.raw_failure_reason, Some(crate::error_reasons::raw_search::ALL_SOURCES_LIMITED));
+    assert_eq!(
+        done.raw_failure_reason,
+        Some(crate::error_reasons::raw_search::ALL_SOURCES_LIMITED)
+    );
     assert!(done.results.is_empty());
     assert!(indexer_view(&done, "limited").rate_limited);
 }
@@ -701,6 +714,94 @@ async fn equivalent_indexer_sets_replace_the_running_query_search() {
     drop(releases);
     let second = await_completion(&app, &user, &second.id).await;
     assert_eq!(second.indexers.len(), 2);
+}
+
+#[tokio::test]
+async fn a_raw_query_stays_running_until_its_page_task_resolves() {
+    let client = ScriptedIndexerClient::default()
+        .with_releases("idx-a", vec![nzb_release("Synthetic.Gate.Pack.2024", "g1")])
+        .await;
+    let (app, user) = bootstrap_search(
+        Arc::new(StoredSettingsRepo::default()),
+        client.clone(),
+        vec![synthetic_direct_nab_indexer_config("idx-a", "newznab")],
+    );
+    // Holding the scripted releases blocks the source call inside the page task.
+    let gate = client.releases.lock().await;
+    let job = app
+        .start_interactive_release_search(&user, query_request("synthetic gate"))
+        .await
+        .expect("start");
+    assert_eq!(job.state, InteractiveReleaseSearchState::Running);
+    // The source call is in flight once it has been recorded.
+    wait_for("the raw source call to start", || async {
+        (!client.calls().await.is_empty()).then_some(())
+    })
+    .await;
+    let pending = app
+        .interactive_release_search(&user, &job.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.state, InteractiveReleaseSearchState::Running);
+    assert!(pending.completed_at.is_none());
+
+    drop(gate);
+    let done = await_completion(&app, &user, &job.id).await;
+    assert_eq!(done.state, InteractiveReleaseSearchState::Completed);
+    assert!(done.completed_at.is_some());
+    assert_eq!(done.raw_failure_reason, None);
+    assert_eq!(done.results.len(), 1);
+}
+
+#[tokio::test]
+async fn in_flight_raw_queries_count_toward_the_per_actor_running_cap() {
+    let client = ScriptedIndexerClient::default();
+    let (app, user) = bootstrap_search(
+        Arc::new(StoredSettingsRepo::default()),
+        client.clone(),
+        vec![synthetic_direct_nab_indexer_config("idx-a", "newznab")],
+    );
+    let gate = client.releases.lock().await;
+    let cap = crate::catalog::interactive_release_search::MAX_RUNNING_JOBS_PER_ACTOR;
+    let mut jobs = Vec::new();
+    for index in 0..cap {
+        // Distinct texts are distinct replace keys, so none replaces another.
+        let job = app
+            .start_interactive_release_search(&user, query_request(&format!("synthetic {index}")))
+            .await
+            .expect("start within the cap");
+        jobs.push(job.id);
+    }
+    let refused = app
+        .start_interactive_release_search(&user, query_request("synthetic over cap"))
+        .await
+        .expect_err("a raw query over the cap is refused while the others are in flight");
+    assert_eq!(
+        refused.validation_reason(),
+        Some(crate::error_reasons::catalog::TOO_MANY_CONCURRENT_INTERACTIVE_SEARCHES)
+    );
+    for id in &jobs {
+        let snapshot = app
+            .interactive_release_search(&user, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.state, InteractiveReleaseSearchState::Running);
+    }
+
+    drop(gate);
+    for id in &jobs {
+        assert_eq!(
+            await_completion(&app, &user, id).await.state,
+            InteractiveReleaseSearchState::Completed
+        );
+    }
+    let after = app
+        .start_interactive_release_search(&user, query_request("synthetic after cap"))
+        .await
+        .expect("completed raw pages free the cap");
+    await_completion(&app, &user, &after.id).await;
 }
 
 #[tokio::test]

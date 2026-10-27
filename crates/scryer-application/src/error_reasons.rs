@@ -90,6 +90,9 @@ pub mod raw_search {
     pub const NO_SOURCE_SUCCEEDED: &str = "RAW_SEARCH_NO_SOURCE_SUCCEEDED";
     /// The raw search coordinator could not complete the page.
     pub const SEARCH_FAILED: &str = "RAW_SEARCH_FAILED";
+    /// A plugin search asked for recent paging and an RSS catch-up marker at
+    /// once; the host refuses it before the plugin runs.
+    pub const RECENT_PAGING_WITH_RSS_CATCH_UP: &str = "RAW_SEARCH_RECENT_PAGING_WITH_RSS_CATCH_UP";
     pub const ALL: &[&str] = &[
         RETAINED_STATE_FULL,
         CURSOR_REPEATED,
@@ -100,6 +103,7 @@ pub mod raw_search {
         ALL_SOURCES_LIMITED,
         NO_SOURCE_SUCCEEDED,
         SEARCH_FAILED,
+        RECENT_PAGING_WITH_RSS_CATCH_UP,
     ];
 
     #[cfg(test)]

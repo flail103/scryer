@@ -43,7 +43,7 @@ const COMPLETED_JOB_TTL_MINUTES: i64 = 5;
 /// Defensive cap: running jobs older than this are cancelled and evicted.
 const RUNNING_JOB_TTL_MINUTES: i64 = 10;
 /// Per-actor cap on concurrently running jobs.
-const MAX_RUNNING_JOBS_PER_ACTOR: usize = 8;
+pub(crate) const MAX_RUNNING_JOBS_PER_ACTOR: usize = 8;
 /// Releases one browser download may bundle. Each one is a separate
 /// upstream fetch, so the cap bounds how long a single request can hold.
 const MAX_INTERACTIVE_SEARCH_ARTIFACT_DOWNLOADS: usize = 50;
@@ -794,7 +794,9 @@ impl AppUseCase {
         if let Some(raw) = raw {
             let page_size = request.aggregate_page_size.unwrap_or(100).clamp(1, 100) as usize;
             let app = self.clone();
-            tokio::spawn(async move {
+            // The entry stays Running, and so counts toward the actor's cap
+            // and replace key, until this page task writes its outcome.
+            self.restore_coordinator().spawn_task(async move {
                 app.run_raw_search_page(job_id, raw, 0, page_size, 0).await;
             });
             return Ok(snapshot);
@@ -888,7 +890,12 @@ impl AppUseCase {
         let Some(entry) = registry.get_mut(&id) else {
             return;
         };
-        if entry.cancel.is_cancelled() || entry.raw_page_request != page_request {
+        // A cancelled or replaced job keeps its terminal state, and a page
+        // superseded by a later continuation leaves the job to that page.
+        if entry.cancel.is_cancelled()
+            || entry.raw_page_request != page_request
+            || entry.snapshot.state != InteractiveReleaseSearchState::Running
+        {
             return;
         }
         entry.snapshot.state = InteractiveReleaseSearchState::Completed;
@@ -1012,7 +1019,7 @@ impl AppUseCase {
         let snapshot = entry.snapshot.clone();
         let app = self.clone();
         let id = id.to_owned();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             app.run_raw_search_page(id, generation, offset, limit, page_request)
                 .await;
         });

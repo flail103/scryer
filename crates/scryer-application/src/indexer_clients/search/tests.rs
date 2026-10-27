@@ -110,7 +110,9 @@ fn unknown_caps_attempt_exact_modes_but_explicit_missing_modes_remain_unavailabl
     };
     assert!(source_request(&request, &caps, &resolved(Some(&explicit))).is_none());
     request.operation = PluginNabOperation::Book;
-    request.parameters.insert("author".into(), "Example Author".into());
+    request
+        .parameters
+        .insert("author".into(), "Example Author".into());
     for snapshot in [None, Some(IndexerCapsSnapshot::default())] {
         let routed = source_request(&request, &caps, &resolved(snapshot.as_ref())).unwrap();
         let nab = routed.nab.unwrap();

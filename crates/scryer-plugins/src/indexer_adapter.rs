@@ -205,6 +205,7 @@ impl WasmIndexerClient {
         proxy_config: Option<ProxyConfig>,
         indexer_error_recorder: Arc<dyn IndexerErrorRecorder>,
         settings: &BTreeMap<String, String>,
+        now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Self, AppError> {
         let inputs = build_runtime_inputs(&descriptor, &indexer_name, &config, proxy_config);
         let indexer_base_url = resolve_connection_url(&descriptor, Some(&inputs.config_entries))
@@ -287,7 +288,7 @@ impl WasmIndexerClient {
         );
 
         let host_caps = if config.is_direct_nab() || config.is_prowlarr_nab_proxy() {
-            let snapshot = scryer_application::cached_indexer_caps(&config, chrono::Utc::now())
+            let snapshot = scryer_application::cached_indexer_caps(&config, now)
                 .snapshot
                 .unwrap_or_default();
             Some(
@@ -856,6 +857,7 @@ impl WasmIndexerClient {
         operation: IndexerErrorOperation,
         cancel_token: CancellationToken,
     ) -> AppResult<PluginSearchCallResponse> {
+        refuse_recent_paging_with_rss_catch_up(request)?;
         let mut request = request.clone();
         request.host_caps = self.host_caps.clone();
         let attested = matches!(
@@ -1636,6 +1638,19 @@ fn build_search_context(
     }
 }
 
+/// Recent paging walks a feed by provider cursor, while an RSS catch-up
+/// marker stops a walk at a previously seen item. The two stop rules conflict,
+/// so the host never hands a plugin both on one request.
+fn refuse_recent_paging_with_rss_catch_up(request: &PluginSearchRequest) -> AppResult<()> {
+    if request.recent_paging && request.rss_catch_up.is_some() {
+        return Err(AppError::validation_refused(
+            scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP,
+            "A plugin search cannot combine recent paging with an RSS catch-up marker",
+        ));
+    }
+    Ok(())
+}
+
 /// Results an indexer search asks the plugin for when the host sets no limit.
 const DEFAULT_SEARCH_RESULT_LIMIT: usize = 1000;
 
@@ -1978,9 +1993,15 @@ fn insert_value<T: serde::Serialize>(
 }
 
 fn provider_stops_continuation(completion: IndexerSearchCompletion) -> bool {
-    matches!(completion, IndexerSearchCompletion::Partial {
-        reason: Some(HostIncompleteReason::PageCeilingReached | HostIncompleteReason::SaturatedPartition), ..
-    })
+    matches!(
+        completion,
+        IndexerSearchCompletion::Partial {
+            reason: Some(
+                HostIncompleteReason::PageCeilingReached | HostIncompleteReason::SaturatedPartition
+            ),
+            ..
+        }
+    )
 }
 
 fn preserve_raw_provider_stop(mut response: PluginSearchCallResponse) -> PluginSearchCallResponse {
@@ -2849,7 +2870,10 @@ impl IndexerClient for WasmIndexerClient {
                     cancel_token,
                 )
                 .await?;
-            return Ok(host_search_response(self, preserve_raw_provider_stop(response)));
+            return Ok(host_search_response(
+                self,
+                preserve_raw_provider_stop(response),
+            ));
         }
         self.search_with_request(
             request,
@@ -3323,19 +3347,33 @@ mod tests {
 
     #[test]
     fn raw_pages_preserve_native_provider_stops_without_inventing_a_walk_depth_limit() {
-        for reason in [HostIncompleteReason::PageCeilingReached, HostIncompleteReason::SaturatedPartition,
-            HostIncompleteReason::Unattested, HostIncompleteReason::RateLimited] {
+        for reason in [
+            HostIncompleteReason::PageCeilingReached,
+            HostIncompleteReason::SaturatedPartition,
+            HostIncompleteReason::Unattested,
+            HostIncompleteReason::RateLimited,
+        ] {
             let mut response = page(&["A"], Some("p31"));
-            let completion = IndexerSearchCompletion::Partial { reason: Some(reason), retry_after: None };
+            let completion = IndexerSearchCompletion::Partial {
+                reason: Some(reason),
+                retry_after: None,
+            };
             response.completion = completion;
             let response = preserve_raw_provider_stop(response);
             assert_eq!(response.completion, completion);
             assert_eq!(titles(&response), vec!["A"]);
-            assert_eq!(response.response.next_cursor.as_deref(),
-                (!provider_stops_continuation(completion)).then_some("p31"));
+            assert_eq!(
+                response.response.next_cursor.as_deref(),
+                (!provider_stops_continuation(completion)).then_some("p31")
+            );
         }
-        assert_eq!(preserve_raw_provider_stop(page(&["A"], Some("p31")))
-            .response.next_cursor.as_deref(), Some("p31"));
+        assert_eq!(
+            preserve_raw_provider_stop(page(&["A"], Some("p31")))
+                .response
+                .next_cursor
+                .as_deref(),
+            Some("p31")
+        );
     }
 
     #[test]
@@ -3585,6 +3623,64 @@ mod tests {
         assert_eq!(
             wire["rss_catch_up"]["last_seen_published_at"],
             "2026-09-20T10:00:00Z"
+        );
+    }
+
+    fn synthetic_rss_marker() -> scryer_plugin_sdk::PluginRssCatchUp {
+        scryer_plugin_sdk::PluginRssCatchUp {
+            last_seen_published_at: "2026-09-20T10:00:00Z".to_string(),
+            last_seen_identity: Some("marker-guid".to_string()),
+        }
+    }
+
+    #[test]
+    fn recent_paging_with_an_rss_marker_is_refused_and_each_alone_is_not() {
+        let both = PluginSearchRequest {
+            recent_paging: true,
+            rss_catch_up: Some(synthetic_rss_marker()),
+            ..PluginSearchRequest::default()
+        };
+        assert_eq!(
+            refuse_recent_paging_with_rss_catch_up(&both)
+                .expect_err("the combination is refused")
+                .validation_reason(),
+            Some(scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP)
+        );
+        for alone in [
+            PluginSearchRequest {
+                recent_paging: true,
+                ..PluginSearchRequest::default()
+            },
+            PluginSearchRequest {
+                rss_catch_up: Some(synthetic_rss_marker()),
+                ..PluginSearchRequest::default()
+            },
+            PluginSearchRequest::default(),
+        ] {
+            refuse_recent_paging_with_rss_catch_up(&alone).expect("a single flag is allowed");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_host_refuses_recent_paging_with_an_rss_marker_before_the_plugin_runs() {
+        let client = builtin_newznab_client(IndexerMemoryPolicy::default());
+        let request = PluginSearchRequest {
+            recent_paging: true,
+            rss_catch_up: Some(synthetic_rss_marker()),
+            ..PluginSearchRequest::default()
+        };
+        let error = client
+            .call_search_request(
+                &request,
+                IndexerErrorOperation::InteractiveSearch,
+                CancellationToken::new(),
+            )
+            .await
+            .err()
+            .expect("the combination never reaches the plugin");
+        assert_eq!(
+            error.validation_reason(),
+            Some(scryer_application::error_reasons::raw_search::RECENT_PAGING_WITH_RSS_CATCH_UP)
         );
     }
 
@@ -4727,6 +4823,7 @@ mod tests {
                 None,
                 Arc::new(scryer_application::NullIndexerErrorRecorder),
                 &BTreeMap::new(),
+                chrono::Utc::now(),
             )
             .expect("bundled client");
             let mut cursor = None;
@@ -4819,6 +4916,7 @@ mod tests {
             None,
             Arc::new(scryer_application::NullIndexerErrorRecorder),
             &BTreeMap::new(),
+            chrono::Utc::now(),
         )
         .expect("bundled Newznab client");
         Arc::get_mut(&mut client.component)

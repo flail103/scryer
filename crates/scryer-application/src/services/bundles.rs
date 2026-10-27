@@ -79,7 +79,8 @@ pub struct AppLibraryServices {
 #[derive(Clone)]
 pub struct AppIntegrationServices {
     pub(crate) indexer_configs: Arc<dyn IndexerConfigRepository>,
-    pub(crate) indexer_clients: RuntimeFeature<Arc<dyn crate::indexer_clients::IndexerClientRepository>>,
+    pub(crate) indexer_clients:
+        RuntimeFeature<Arc<dyn crate::indexer_clients::IndexerClientRepository>>,
     pub(crate) indexer_errors: Arc<dyn IndexerErrorRepository>,
     pub(crate) proxy_configs: Arc<dyn ProxyConfigRepository>,
     /// Serializes proxy assignment, disablement, and deletion so no client or
