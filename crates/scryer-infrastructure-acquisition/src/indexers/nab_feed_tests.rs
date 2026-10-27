@@ -164,7 +164,7 @@ fn namespace_rebinding_is_preserved_per_attribute() {
 }
 
 #[test]
-fn only_download_or_credential_urls_are_rewritten_and_password_metadata_survives() {
+fn only_download_fields_are_rewritten_and_password_metadata_survives() {
     let output = xml(
         &result(vec![
             attribute(None, "magneturl", "magnet:?xt=urn:btih:123"),
@@ -192,7 +192,10 @@ fn only_download_or_credential_urls_are_rewritten_and_password_metadata_survives
         "https://scryer.example/torznab/api?t=get&id=reference"
     );
     assert_eq!(values[1].2, "opaque-source-release");
-    assert_eq!(values[2].2, values[0].2);
+    assert_eq!(
+        values[2].2,
+        "https://source.example/comments?api_key=secret"
+    );
     assert_eq!(
         values[3].2,
         "https://release.example/?token=release-password"
@@ -459,24 +462,56 @@ fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
 }
 
 #[test]
-fn credential_aliases_paths_and_source_host_urls_are_rewritten() {
-    for value in [
-        "https://other.example/file?r=secret",
-        "https://other.example/file?i=secret",
-        "https://other.example/api_key/secret/file",
-        "https://other.example/key/secret",
-        "https://source.example/download/rotating-secret",
-    ] {
-        let output = xml(
-            &result(vec![attribute(Some("newznab"), "comments", value)]),
+fn rewrites_are_decided_by_field_name_not_by_url_content() {
+    // A comments link on the source host, carrying userinfo and an API key
+    // query, is still a comments link: only download fields are rewritten.
+    let comments = "https://member:pass@source.example/details/9?apikey=comment-key";
+    let mut attributes = vec![
+        attribute(Some("newznab"), "comments", comments),
+        attribute(None, "details", "https://source.example/key/secret/details"),
+        attribute(
             None,
-        );
-        let attributes = parsed_attributes(&output);
-        assert_eq!(attributes[0].0.as_deref(), Some(NEWZNAB_NAMESPACE));
-        assert_eq!(
-            attributes[0].2,
-            "https://scryer.example/torznab/api?t=get&id=reference"
-        );
-        assert!(!output.contains("secret"));
+            "infourl",
+            "https://other.example/info?token=info-token",
+        ),
+        attribute(None, "magneturl", "magnet:?xt=urn:btih:abc"),
+        attribute(None, "MAGNET", "magnet:?xt=urn:btih:def"),
+    ];
+    let download_family = [
+        "url",
+        "link",
+        "downloadurl",
+        "download_url",
+        "nzburl",
+        "TorrentUrl",
+    ];
+    for name in download_family {
+        attributes.push(attribute(
+            None,
+            name,
+            "https://source.example/get?apikey=upstream-secret",
+        ));
     }
+    let output = xml(&result(attributes), None);
+    let values = parsed_attributes(&output);
+    let retrieval = "https://scryer.example/torznab/api?t=get&id=reference";
+    assert_eq!(values.len(), 3 + download_family.len());
+    assert_eq!(values[0].0.as_deref(), Some(NEWZNAB_NAMESPACE));
+    assert_eq!(values[0].2, comments);
+    assert_eq!(values[1].2, "https://source.example/key/secret/details");
+    assert_eq!(values[2].2, "https://other.example/info?token=info-token");
+    for (value, name) in values[3..].iter().zip(download_family) {
+        assert_eq!(value.1, name);
+        assert_eq!(value.2, retrieval);
+    }
+    assert!(!output.contains("magnet:"));
+    assert!(!output.contains("upstream-secret"));
+    assert!(
+        output.contains("<link>https://scryer.example/torznab/api?t=get&amp;id=reference</link>")
+    );
+    assert!(
+        output.contains(
+            "<enclosure url=\"https://scryer.example/torznab/api?t=get&amp;id=reference\""
+        )
+    );
 }

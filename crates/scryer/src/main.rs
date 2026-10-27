@@ -54,7 +54,6 @@ mod jemalloc_configuration_tests {
 mod application_upgrade_evidence;
 mod application_upgrade_helper;
 mod arr_compat;
-mod nab_api;
 mod backup_routes;
 mod base_path;
 /// The exit status this binary uses to ask `scryer-tray` to relaunch the
@@ -74,6 +73,7 @@ mod log_delivery;
 mod metadata_gateway_url;
 mod metrics_setup;
 mod middleware;
+mod nab_api;
 mod oauth_routes;
 mod rate_limit;
 mod runtime_health;
@@ -2471,15 +2471,20 @@ async fn bootstrap_application(
         base_path: base_path.clone(),
         auth_runtime: auth_runtime.clone(),
     };
-    let nab_key = bootstrap_settings_store.current_encryption_key_base64().await?
+    let nab_key = bootstrap_settings_store
+        .current_encryption_key_base64()
+        .await?
         .ok_or("indexer reference encryption key is unavailable after bootstrap")?;
     let nab_route_state = nab_api::NabState {
         app: app_use_case.clone(),
-        cipher: Arc::new(scryer_infrastructure_crypto::artifact_reference::ArtifactReferenceCipher::new(
-            &EncryptionKey::from_base64(&nab_key)?,
-        )),
+        cipher: Arc::new(
+            scryer_infrastructure_crypto::artifact_reference::ArtifactReferenceCipher::new(
+                &EncryptionKey::from_base64(&nab_key)?,
+            ),
+        ),
         base_path: base_path.prefix().to_owned(),
-        tls: ["SCRYER_TLS_CERT", "SCRYER_TLS_KEY"].iter()
+        tls: ["SCRYER_TLS_CERT", "SCRYER_TLS_KEY"]
+            .iter()
             .all(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty())),
     };
     let ws_auth_state = auth_state.clone();

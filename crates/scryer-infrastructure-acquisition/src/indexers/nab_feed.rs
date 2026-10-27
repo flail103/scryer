@@ -92,64 +92,23 @@ fn standard_namespace(prefix: &str) -> Option<&'static str> {
     }
 }
 
-/// A metadata value survives unchanged except for authentication-bearing URL
-/// fields. A magnet field cannot legally contain our HTTP retrieval link.
+/// Rewrites are decided by field name only, as Prowlarr's serializer does:
+/// the GUID becomes the opaque external GUID, download fields carry the Scryer
+/// retrieval link, and magnet fields are omitted because they cannot legally
+/// hold an HTTP link. Every other attribute, including URL-valued ones such as
+/// `comments`, `details` and `infourl`, and the release `password`, passes
+/// through verbatim.
 fn public_attribute_value<'a>(
     attribute: &'a PluginReleaseAttribute,
     item: &'a NabFeedItem<'_, impl AsRef<str>>,
 ) -> Option<&'a str> {
-    let name = attribute.name.to_ascii_lowercase();
-    match name.as_str() {
-        "magneturl" | "magnet" => return None,
-        "guid" => return Some(item.external_guid.as_ref()),
+    match attribute.name.to_ascii_lowercase().as_str() {
+        "magneturl" | "magnet" => None,
+        "guid" => Some(item.external_guid.as_ref()),
         "url" | "link" | "downloadurl" | "download_url" | "nzburl" | "torrenturl" => {
-            return Some(item.retrieval_url.as_ref());
+            Some(item.retrieval_url.as_ref())
         }
-        "password" => return Some(&attribute.value),
-        _ => {}
-    }
-    if url::Url::parse(&attribute.value).ok().is_some_and(|url| {
-        matches!(url.scheme(), "http" | "https")
-            && (!url.username().is_empty()
-                || url.password().is_some()
-                || [
-                    item.result.download_url.as_deref(),
-                    item.result.link.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .filter_map(|source| url::Url::parse(source).ok())
-                .any(|source| source.host_str() == url.host_str())
-                || url.path_segments().is_some_and(|segments| {
-                    segments.into_iter().any(|part| {
-                        let part = part.to_ascii_lowercase();
-                        matches!(
-                            part.as_str(),
-                            "r" | "i" | "key" | "auth" | "secret" | "token" | "passkey"
-                        ) || part.starts_with("apikey")
-                            || part.starts_with("api_key")
-                    })
-                })
-                || url.query_pairs().any(|(key, _)| {
-                    matches!(
-                        key.to_ascii_lowercase().as_str(),
-                        "apikey"
-                            | "api_key"
-                            | "passkey"
-                            | "token"
-                            | "authkey"
-                            | "password"
-                            | "r"
-                            | "i"
-                            | "key"
-                            | "auth"
-                            | "secret"
-                    )
-                }))
-    }) {
-        Some(item.retrieval_url.as_ref())
-    } else {
-        Some(&attribute.value)
+        _ => Some(&attribute.value),
     }
 }
 

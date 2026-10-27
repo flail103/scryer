@@ -9400,6 +9400,13 @@ impl IndexerClient for MultiIndexerSearchClient {
         for (config, answer) in selected.iter().zip(answers) {
             let (source, outcome, caps) = answer?;
             let mut page = source.as_ref().map(IndexerSearchResponse::page_metadata);
+            // Only a caps diagnostic worth explaining is reported, and it never
+            // invents page metadata for a source that failed to answer.
+            let caps = caps.filter(|caps| !nominal_caps_diagnostic(caps));
+            let failed = matches!(
+                outcome,
+                IndexerSearchOutcome::BackedOff { .. } | IndexerSearchOutcome::Errored
+            );
             let completion = match outcome {
                 IndexerSearchOutcome::Complete { .. } | IndexerSearchOutcome::Unsupported => {
                     IndexerSearchCompletion::Complete
@@ -9427,16 +9434,19 @@ impl IndexerClient for MultiIndexerSearchClient {
                 }
             };
             if caps.is_some() {
-                page.get_or_insert_with(|| scryer_application::IndexerSearchPageMetadata {
-                    caps: None,
-                    completion,
-                    next_cursor: None,
-                    api_current: None,
-                    api_max: None,
-                    grab_current: None,
-                    grab_max: None,
-                })
-                .caps = caps;
+                if let Some(page) = page.as_mut() {
+                    page.caps = caps;
+                } else if !failed {
+                    page = Some(scryer_application::IndexerSearchPageMetadata {
+                        caps,
+                        completion,
+                        next_cursor: None,
+                        api_current: None,
+                        api_max: None,
+                        grab_current: None,
+                        grab_max: None,
+                    });
+                }
             }
             if !completion.is_complete() {
                 response.completion = if selected.len() == 1 {
@@ -10531,6 +10541,16 @@ fn filter_strategy_results(
             "title guard: removed irrelevant results"
         );
     }
+}
+
+/// Caps resolved the ordinary way, with no refresh problem to explain.
+fn nominal_caps_diagnostic(caps: &scryer_application::IndexerCapsDiagnostic) -> bool {
+    matches!(
+        caps.source,
+        scryer_application::IndexerCapsSource::ProviderDeclarations
+            | scryer_application::IndexerCapsSource::Fresh
+    ) && caps.reason.is_none()
+        && caps.retry_after.is_none()
 }
 
 #[cfg(test)]
