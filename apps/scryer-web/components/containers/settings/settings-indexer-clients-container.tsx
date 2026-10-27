@@ -103,8 +103,8 @@ const configurationOf = (client: IndexerClientRecord): IndexerClientConfiguratio
 
 type KeyChange = { client: IndexerClientRecord; operation: "rotate" | "revoke" };
 type MutationData = {
-  createIndexerClient?: { apiKey: string };
-  rotateIndexerClientKey?: { apiKey: string };
+  createIndexerClient?: { apiKey: string; client: { id: string } };
+  rotateIndexerClientKey?: { apiKey: string; client: { id: string } };
 };
 
 export function SettingsIndexerClientsContainer() {
@@ -121,7 +121,8 @@ export function SettingsIndexerClientsContainer() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accessRefusal, setAccessRefusal] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<string | null>(null);
+  /** A new key is shown once, under the row of the client it belongs to. */
+  const [revealed, setRevealed] = useState<{ clientId: string; apiKey: string } | null>(null);
   const [revealedCopied, setRevealedCopied] = useState(false);
   const [confirmation, setConfirmation] = useState<KeyChange | null>(null);
   const [mfaOpen, setMfaOpen] = useState(false);
@@ -227,7 +228,8 @@ export function SettingsIndexerClientsContainer() {
         token ? { fetchOptions: { headers: { Authorization: `Bearer ${token}` } } } : undefined).toPromise(), requestMfa);
       if (!mounted.current || !result) return;
       if (result.error || !result.data) throw result.error;
-      setRevealed(result.data.createIndexerClient?.apiKey ?? result.data.rotateIndexerClientKey?.apiKey ?? null);
+      const issued = result.data.createIndexerClient ?? result.data.rotateIndexerClientKey;
+      setRevealed(issued ? { clientId: issued.client.id, apiKey: issued.apiKey } : null);
       setRevealedCopied(false);
       if (closeOnSuccess) closeEditor();
       await load();
@@ -238,7 +240,7 @@ export function SettingsIndexerClientsContainer() {
   const copyRevealed = async () => {
     if (!revealed) return;
     try {
-      await navigator.clipboard.writeText(revealed);
+      await navigator.clipboard.writeText(revealed.apiKey);
       setRevealedCopied(true);
     } catch {
       setError(t("error.fallback.unableToCopyTheAPIKey"));
@@ -296,36 +298,6 @@ export function SettingsIndexerClientsContainer() {
       </div>
     ) : null}
 
-    {revealed ? (
-      <div id="settings-indexer-client-revealed" className="space-y-3 rounded-[12px] border border-[var(--scry-warning-border)] bg-[var(--scry-warning-bg)] p-4">
-        <div className="flex items-start gap-2">
-          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--scry-warning-text)]" aria-hidden="true" />
-          <p className="font-medium text-[var(--scry-warning-text)]">{t("indexerClients.secretOnce")}</p>
-        </div>
-        <div className="flex w-fit max-w-full items-center">
-          <Input
-            id="indexer-client-revealed-key"
-            aria-label={t("indexerClients.apiKey")}
-            readOnly
-            value={revealed}
-            size={revealed.length + 2}
-            autoComplete="off"
-            className="h-10 w-auto max-w-full rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
-          />
-          <IconButton
-            id="indexer-client-revealed-copy"
-            label={revealedCopied ? t("label.copied") : t("label.copy")}
-            tone={revealedCopied ? "enabled" : "neutral"}
-            className="-ml-px h-10 shrink-0 rounded-l-none"
-            onClick={() => void copyRevealed()}
-          >
-            {revealedCopied ? <CheckCircle2 className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
-          </IconButton>
-        </div>
-        <Button type="button" variant="outline" onClick={() => setRevealed(null)}>{t("label.dismiss")}</Button>
-      </div>
-    ) : null}
-
     <div id="settings-indexer-clients-table-card" className="rounded border border-border">
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
         <CardTitle className="text-base">{t("indexerClients.existing")}</CardTitle>
@@ -364,8 +336,8 @@ export function SettingsIndexerClientsContainer() {
           </TableHeader>
           <TableBody>
             {clients.map((client) => (
+              <Fragment key={client.id}>
               <TableRow
-                key={client.id}
                 id={selectorId("settings-indexer-client-row", client.id)}
                 data-ui="settings-table-row"
                 data-client-name={client.name}
@@ -434,6 +406,43 @@ export function SettingsIndexerClientsContainer() {
                   </div>
                 </TableActionsCell>
               </TableRow>
+              {revealed?.clientId === client.id ? (
+                <TableRow id={selectorId("settings-indexer-client-revealed", client.id)}>
+                  <TableCell colSpan={7} className="bg-[var(--scry-warning-bg)] p-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 shrink-0 text-[var(--scry-warning-text)]" aria-hidden="true" />
+                        <p className="font-medium text-[var(--scry-warning-text)]">{t("indexerClients.secretOnce")}</p>
+                      </div>
+                      <div className="flex w-fit max-w-full items-center">
+                        <Input
+                          id="indexer-client-revealed-key"
+                          aria-label={t("indexerClients.apiKey")}
+                          readOnly
+                          value={revealed.apiKey}
+                          size={revealed.apiKey.length + 2}
+                          autoComplete="off"
+                          onFocus={(event) => event.currentTarget.select()}
+                          className="h-9 w-auto max-w-full rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
+                        />
+                        <IconButton
+                          id="indexer-client-revealed-copy"
+                          label={revealedCopied ? t("label.copied") : t("label.copy")}
+                          tone={revealedCopied ? "enabled" : "neutral"}
+                          className="-ml-px h-9 shrink-0 rounded-l-none"
+                          onClick={() => void copyRevealed()}
+                        >
+                          {revealedCopied ? <CheckCircle2 className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+                        </IconButton>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setRevealed(null)}>
+                        {t("label.dismiss")}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              </Fragment>
             ))}
           </TableBody>
         </Table>
