@@ -225,6 +225,7 @@ pub(crate) enum ReleaseAutoDecisionCode {
     Eligible,
     ParseAmbiguous,
     ParseUnparseable,
+    NumberingPackUnresolved,
     TitleMismatch,
     EpisodeMismatch,
     EpisodeNotMonitored,
@@ -280,6 +281,7 @@ impl ReleaseAutoDecisionCode {
             "eligible" => Some(Self::Eligible),
             "parse_ambiguous" => Some(Self::ParseAmbiguous),
             "parse_unparseable" => Some(Self::ParseUnparseable),
+            "numbering_pack_unresolved" => Some(Self::NumberingPackUnresolved),
             "title_mismatch" => Some(Self::TitleMismatch),
             "episode_mismatch" => Some(Self::EpisodeMismatch),
             "episode_not_monitored" => Some(Self::EpisodeNotMonitored),
@@ -320,6 +322,7 @@ impl ReleaseAutoDecisionCode {
             Self::Eligible => "eligible",
             Self::ParseAmbiguous => "parse_ambiguous",
             Self::ParseUnparseable => "parse_unparseable",
+            Self::NumberingPackUnresolved => "numbering_pack_unresolved",
             Self::TitleMismatch => "title_mismatch",
             Self::EpisodeMismatch => "episode_mismatch",
             Self::EpisodeNotMonitored => "episode_not_monitored",
@@ -357,6 +360,9 @@ impl ReleaseAutoDecisionCode {
             Self::Eligible => "auto search would grab this release",
             Self::ParseAmbiguous => "release parse is ambiguous and blocks auto-grab",
             Self::ParseUnparseable => "release could not be parsed and blocks auto-grab",
+            Self::NumberingPackUnresolved => {
+                "numbering bridge cannot determine the episodes covered by this pack"
+            }
             Self::TitleMismatch => "release title does not match the target title",
             Self::EpisodeMismatch => "release numbering does not match the target episode",
             // Distinct from `EpisodeMismatch` on purpose: "the numbering does
@@ -423,6 +429,7 @@ impl ReleaseAutoDecisionCode {
         matches!(
             self,
             Self::SubtitlesOnly
+                | Self::NumberingPackUnresolved
                 | Self::TitleMismatch
                 | Self::EpisodeMismatch
                 | Self::CategoryMismatch
@@ -2015,7 +2022,7 @@ pub(crate) fn evaluate_auto_candidate(
                 .any(|hint| hint == "identity:unresolved_pack_scope")
         })
     {
-        return ReleaseAutoDecisionCode::ParseUnparseable;
+        return ReleaseAutoDecisionCode::NumberingPackUnresolved;
     }
 
     let parse_state = candidate_parse_state(candidate);
@@ -5966,8 +5973,8 @@ mod tests {
             .parse_hints
             .push("identity:unresolved_pack_scope".into());
         assert_eq!(
-            decision_for(&title, &subject, &candidate),
-            ReleaseAutoDecisionCode::ParseUnparseable
+            decision_for(&title, &subject, &candidate).as_str(),
+            "numbering_pack_unresolved"
         );
     }
 

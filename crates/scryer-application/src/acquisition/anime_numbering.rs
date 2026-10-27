@@ -1729,6 +1729,15 @@ pub(crate) fn translate_release_numbering(
         parsed
             .parse_hints
             .push("identity:unresolved_pack_scope".to_string());
+        let decision =
+            crate::acquisition_release_search::ReleaseAutoDecisionCode::NumberingPackUnresolved;
+        tracing::info!(
+            title_id = %title.id,
+            release_title = %parsed.raw_title,
+            bridge_source = ?bridge.source,
+            decision_code = decision.as_str(),
+            "{}", decision.summary()
+        );
     }
     resolution
 }
