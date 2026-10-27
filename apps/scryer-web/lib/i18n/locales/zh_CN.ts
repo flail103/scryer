@@ -905,7 +905,6 @@ const zh_CN: LocaleDictionary = {
   "title.episodeRange": "第 {{start}} 集 - 第 {{end}} 集",
   "title.episodeCountOne": "{{count}} 集",
   "title.episodeCountOther": "{{count}} 集",
-  "title.searchingReleases": "正在索引站中搜索发布资源…",
   "title.noReleasesFound": "未找到 {{name}} 的发布资源。",
   "title.searchNeedsDownloadClientTitle": "搜索需要下载客户端",
   "title.searchNeedsDownloadClientDescription":

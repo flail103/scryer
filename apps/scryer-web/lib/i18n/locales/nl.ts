@@ -1333,7 +1333,6 @@ const nl: LocaleDictionary = {
   "title.episodeRange": "Afleveringen {{start}} - {{end}}",
   "title.episodeCountOne": "{{count}} aflevering",
   "title.episodeCountOther": "{{count}} afleveringen",
-  "title.searchingReleases": "Indexers doorzoeken naar releases…",
   "title.contextReleaseSearchSummary":
     "{{releaseCount}} releases · {{indexerCount}} indexers doorzocht",
   "title.contextReleaseSearchProgress":

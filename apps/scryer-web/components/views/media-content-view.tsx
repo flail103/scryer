@@ -199,6 +199,7 @@ import { SeriesOverviewContainer } from "@/components/containers/series-overview
 import { handleFixTitleMatchComplete } from "@/lib/fix-title-match";
 import type { TitleOptionUpdates } from "@/lib/types/title-options";
 import { LoadingMark } from "@/components/common/loading-mark";
+import { ReleaseSearchLoader, ReleaseSearchSummary } from "@/components/common/release-search-status";
 
 type Facet = "MOVIE" | "SERIES" | "ANIME";
 
@@ -753,40 +754,6 @@ function TitleContextReleaseSearchPanel({
       }),
     [indexerProgress, loading, results],
   );
-  const releaseSearchDescription = React.useMemo(() => {
-    if (results === null) {
-      return t("help.interactiveSearchTooltip");
-    }
-
-    if (loading && indexerProgress !== null) {
-      return t("title.contextReleaseSearchProgress", {
-        releaseCount: results.length,
-        done: searchPresentation.completedIndexerCount,
-        total: searchPresentation.totalIndexerCount,
-      });
-    }
-
-    // Report what the run did, not which sources happened to return
-    // results: an indexer that answered with nothing still searched, and one
-    // that failed or was skipped is called out on its own line below.
-    if (searchPresentation.totalIndexerCount > 0) {
-      return t("title.contextReleaseSearchSummaryDetailed", {
-        releaseCount: results.length,
-        searched: searchPresentation.searchedIndexerCount,
-        total: searchPresentation.totalIndexerCount,
-      });
-    }
-    const sourceCount = new Set(
-      results
-        .map((release) => release.source?.trim())
-        .filter((source): source is string => Boolean(source)),
-    ).size;
-    return t("title.contextReleaseSearchSummary", {
-      releaseCount: results.length,
-      indexerCount: sourceCount,
-    });
-  }, [indexerProgress, loading, results, searchPresentation, t]);
-
   const handleSortChange = React.useCallback(
     (
       nextKey: ReleaseSearchSortKey,
@@ -887,43 +854,17 @@ function TitleContextReleaseSearchPanel({
   return (
     <section>
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--scry-line3)] pb-3">
-        <div className="min-w-0 flex-1">
-          <p
-            className="flex items-center gap-1.5 truncate text-[11.5px] text-[var(--scry-faint)]"
-            data-ui="title-release-search-summary"
-            data-search-state={loading ? "searching" : "done"}
-          >
-            {loading && indexerProgress !== null ? (
-              <LoadingMark className="h-3 w-3 shrink-0" label={t("label.searching")} />
-            ) : null}
-            <span className="truncate">{releaseSearchDescription}</span>
+        {results === null ? (
+          <p className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--scry-faint)]">
+            {t("help.interactiveSearchTooltip")}
           </p>
-          {!loading && searchPresentation.failedIndexerNames.length > 0 ? (
-            <p className="mt-0.5 truncate text-[11.5px] text-[var(--scry-danger-text)]">
-              {t("title.contextReleaseSearchIndexerFailures", {
-                count: searchPresentation.failedIndexerNames.length,
-                names: searchPresentation.failedIndexerNames.join(", "),
-              })}
-            </p>
-          ) : null}
-          {!loading && searchPresentation.skippedIndexers.length > 0 ? (
-            <p
-              className="mt-0.5 truncate text-[11.5px] text-[var(--scry-faint)]"
-              title={searchPresentation.skippedIndexers
-                .map((indexer) =>
-                  indexer.reason ? `${indexer.name}: ${indexer.reason}` : indexer.name,
-                )
-                .join("\n")}
-            >
-              {t("title.contextReleaseSearchIndexerSkipped", {
-                count: searchPresentation.skippedIndexers.length,
-                names: searchPresentation.skippedIndexers
-                  .map((indexer) => indexer.name)
-                  .join(", "),
-              })}
-            </p>
-          ) : null}
-        </div>
+        ) : (
+          <ReleaseSearchSummary
+            presentation={searchPresentation}
+            results={results}
+            dataUi="title-release-search-summary"
+          />
+        )}
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {results && results.length > 1 ? (
             <>
@@ -981,11 +922,8 @@ function TitleContextReleaseSearchPanel({
           results !== null && results.length > 0 && !searchFailed ? "pt-3" : "py-4",
         )}
       >
-        {loading && (results === null || results.length === 0) ? (
-          <div className="flex items-center gap-2 rounded-[10px] border border-[var(--scry-border2)] bg-[var(--scry-soft)] px-3 py-2 text-[12px] text-[var(--scry-muted2)]">
-            <LoadingMark className="h-4 w-4 text-[var(--scry-accent)]" />
-            {t("title.searchingReleases")}
-          </div>
+        {searchPresentation.showInitialLoader ? (
+          <ReleaseSearchLoader />
         ) : searchFailed ? (
           <p className="rounded-[10px] border border-[var(--scry-danger-border)] bg-[var(--scry-danger-bg)] px-3 py-2 text-[12px] text-[var(--scry-danger-text)]">
             {t("nzb.searchFailed")}

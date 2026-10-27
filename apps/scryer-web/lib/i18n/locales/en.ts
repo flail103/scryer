@@ -3804,7 +3804,6 @@ const en: LocaleDictionary = {
   "title.episodeRange": "Episodes {{start}} - {{end}}",
   "title.episodeCountOne": "{{count}} episode",
   "title.episodeCountOther": "{{count}} episodes",
-  "title.searchingReleases": "Searching indexers for releases…",
   "title.contextReleaseSearchSummary":
     "{{releaseCount}} releases · {{indexerCount}} indexers searched",
   "title.contextReleaseSearchProgress":

@@ -954,7 +954,6 @@ const it: LocaleDictionary = {
   "title.episodeRange": "Episodi {{start}} - {{end}}",
   "title.episodeCountOne": "{{count}} episodio",
   "title.episodeCountOther": "{{count}} episodi",
-  "title.searchingReleases": "Ricerca dei rilasci negli indicizzatori…",
   "title.noReleasesFound": "Nessun rilascio trovato per {{name}}.",
   "title.searchNeedsDownloadClientTitle":
     "La ricerca richiede un client di download",

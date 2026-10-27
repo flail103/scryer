@@ -935,7 +935,6 @@ const ko: LocaleDictionary = {
   "title.episodeRange": "에피소드 {{start}} - {{end}}",
   "title.episodeCountOne": "에피소드 {{count}}개",
   "title.episodeCountOther": "에피소드 {{count}}개",
-  "title.searchingReleases": "인덱서에서 릴리스를 검색하는 중…",
   "title.noReleasesFound": "{{name}}에 대한 릴리스를 찾지 못했습니다.",
   "title.searchNeedsDownloadClientTitle":
     "검색에는 다운로드 클라이언트가 필요합니다",

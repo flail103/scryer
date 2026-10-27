@@ -39,6 +39,7 @@ import { grabErrorMessage } from "@/lib/utils/http-release-error-message";
 import {
   runIterativeReleaseSearch,
   titleReleaseSearchInput,
+  type InteractiveSearchIndexerProgress,
 } from "@/lib/graphql/release-search";
 import { isAbortError } from "@/lib/graphql/urql-client";
 import {
@@ -1873,11 +1874,16 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
     seasonInteractiveSearchLoadingByCollection,
     setSeasonInteractiveSearchLoadingByCollection,
   ] = React.useState<Record<string, boolean>>({});
+  const [
+    seasonSearchIndexerProgressByCollection,
+    setSeasonSearchIndexerProgressByCollection,
+  ] = React.useState<Record<string, InteractiveSearchIndexerProgress[]>>({});
   const seasonSearchAbortByCollectionRef = React.useRef<Record<string, AbortController>>({});
   const seasonSearchTitleId = title?.id ?? null;
   React.useEffect(() => {
     setSeasonSearchResultsByCollection({});
     setSeasonInteractiveSearchLoadingByCollection({});
+    setSeasonSearchIndexerProgressByCollection({});
     return () => {
       Object.values(seasonSearchAbortByCollectionRef.current).forEach((controller) =>
         controller.abort(),
@@ -1928,6 +1934,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
       seasonSearchAbortByCollectionRef.current[collectionId] = abortController;
       setSeasonSearchResultsByCollection((prev) => ({ ...prev, [collectionId]: [] }));
       setSeasonInteractiveSearchLoadingByCollection((prev) => ({ ...prev, [collectionId]: true }));
+      setSeasonSearchIndexerProgressByCollection((prev) => ({ ...prev, [collectionId]: [] }));
 
       runIterativeReleaseSearch(
         client,
@@ -1939,6 +1946,10 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
             setSeasonSearchResultsByCollection((prev) => ({
               ...prev,
               [collectionId]: snapshot.releases,
+            }));
+            setSeasonSearchIndexerProgressByCollection((prev) => ({
+              ...prev,
+              [collectionId]: snapshot.indexers,
             }));
           },
         },
@@ -2103,6 +2114,7 @@ export const SeriesOverviewContainer = React.memo(function SeriesOverviewContain
         }))}
         onRunSeasonSearch={handleRunSeasonSearch}
         seasonInteractiveSearchLoadingByCollection={seasonInteractiveSearchLoadingByCollection}
+        seasonSearchIndexerProgressByCollection={seasonSearchIndexerProgressByCollection}
         onRunSeasonInteractiveSearch={handleRunSeasonInteractiveSearch}
         onQueueFromSeasonSearch={handleQueueFromSeasonSearch}
         monitoredUpdating={monitoredUpdating}

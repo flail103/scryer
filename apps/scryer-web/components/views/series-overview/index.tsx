@@ -17,6 +17,7 @@ import { isAbortError } from "@/lib/graphql/urql-client";
 import {
   runIterativeReleaseSearch,
   titleReleaseSearchInput,
+  type InteractiveSearchIndexerProgress,
 } from "@/lib/graphql/release-search";
 import {
   hasPrimaryMediaFile,
@@ -183,6 +184,7 @@ type Props = {
   seasonSearchLoadingByCollection?: Record<string, boolean>;
   onRunSeasonSearch?: (collection: TitleCollection) => Promise<void> | void;
   seasonInteractiveSearchLoadingByCollection?: Record<string, boolean>;
+  seasonSearchIndexerProgressByCollection?: Record<string, InteractiveSearchIndexerProgress[]>;
   /** Interactive search of a whole season; its results list under the season header. */
   onRunSeasonInteractiveSearch?: (collection: TitleCollection) => void;
   onQueueFromSeasonSearch?: (collection: TitleCollection, release: Release) => Promise<void> | void;
@@ -260,6 +262,7 @@ function SeriesOverviewViewImpl({
   seasonSearchLoadingByCollection,
   onRunSeasonSearch,
   seasonInteractiveSearchLoadingByCollection,
+  seasonSearchIndexerProgressByCollection,
   onRunSeasonInteractiveSearch,
   onQueueFromSeasonSearch,
   monitoredUpdating = false,
@@ -1452,6 +1455,7 @@ function SeriesOverviewViewImpl({
                       seasonInteractiveSearchLoadingByCollection?.[collection.id] === true
                     }
                     onRunSeasonInteractiveSearch={seasonInteractiveSearchActionByKey.get(item.key)}
+                    seasonSearchIndexerProgress={seasonSearchIndexerProgressByCollection?.[collection.id]}
                     searchBlocked={searchBlockedByCollection[collection.id] === true}
                     onQueueFromSeasonSearch={canManageTitle ? onQueueFromSeasonSearch : undefined}
                     onDeleteFile={canManageTitle ? onDeleteFile : undefined}

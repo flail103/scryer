@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchResultBuckets } from "@/components/common/release-search-results";
+import { ReleaseSearchLoader, ReleaseSearchSummary } from "@/components/common/release-search-status";
 import { TitleSearchDownloadClientNotice } from "@/components/common/title-search-download-client-notice";
 import { useTranslate } from "@/lib/context/translate-context";
 import type { InteractiveSearchIndexerProgress } from "@/lib/graphql/release-search";
@@ -22,7 +23,6 @@ import { blocklistEntryMatchesEpisode } from "./helpers";
 import { EpisodeDetailsPanel } from "./episode-details-panel";
 import { EpisodeBlocklistPanel } from "./episode-blocklist-panel";
 import { EMPTY_BLOCKLIST_ENTRIES } from "./season-section-utils";
-import { LoadingMark } from "@/components/common/loading-mark";
 
 export type EpisodePanelContentProps = {
   activeTab: EpisodePanelTab;
@@ -166,83 +166,17 @@ export function EpisodeSearchResults({
       }),
     [episodeIndexerProgress, episodeLoading, episodeResults.length, hasSearchResults],
   );
-  const searchDescription = React.useMemo(() => {
-    if (searchPresentation.showProgress) {
-      return t("title.contextReleaseSearchProgress", {
-        releaseCount: episodeResults.length,
-        done: searchPresentation.completedIndexerCount,
-        total: searchPresentation.totalIndexerCount,
-      });
-    }
-
-    // Report what the run did, not which sources happened to return
-    // results: an indexer that answered with nothing still searched, and one
-    // that failed or was skipped is called out on its own line below.
-    if (searchPresentation.totalIndexerCount > 0) {
-      return t("title.contextReleaseSearchSummaryDetailed", {
-        releaseCount: episodeResults.length,
-        searched: searchPresentation.searchedIndexerCount,
-        total: searchPresentation.totalIndexerCount,
-      });
-    }
-    const sourceCount = new Set(
-      episodeResults
-        .map((release) => release.source?.trim())
-        .filter((source): source is string => Boolean(source)),
-    ).size;
-    return t("title.contextReleaseSearchSummary", {
-      releaseCount: episodeResults.length,
-      indexerCount: sourceCount,
-    });
-  }, [episodeResults, searchPresentation, t]);
-
   return (
     <>
       {searchBlocked ? (
         <TitleSearchDownloadClientNotice />
       ) : (
         <div className="mb-2 flex items-start gap-4">
-          {searchPresentation.showProgress || searchPresentation.showFinalSummary ? (
-            <div className="min-w-0 flex-1">
-              <p
-                className="flex items-center gap-1.5 truncate text-[11.5px] text-[var(--scry-faint)]"
-                data-ui="episode-release-search-summary"
-                data-search-state={searchPresentation.showProgress ? "searching" : "done"}
-              >
-                {searchPresentation.showProgress ? (
-                  <LoadingMark className="h-3 w-3 shrink-0" label={t("label.searching")} />
-                ) : null}
-                <span className="truncate">{searchDescription}</span>
-              </p>
-              {searchPresentation.showFinalSummary &&
-              searchPresentation.failedIndexerNames.length > 0 ? (
-                <p className="mt-0.5 truncate text-[11.5px] text-[var(--scry-danger-text)]">
-                  {t("title.contextReleaseSearchIndexerFailures", {
-                    count: searchPresentation.failedIndexerNames.length,
-                    names: searchPresentation.failedIndexerNames.join(", "),
-                  })}
-                </p>
-              ) : null}
-              {searchPresentation.showFinalSummary &&
-              searchPresentation.skippedIndexers.length > 0 ? (
-                <p
-                  className="mt-0.5 truncate text-[11.5px] text-[var(--scry-faint)]"
-                  title={searchPresentation.skippedIndexers
-                    .map((indexer) =>
-                      indexer.reason ? `${indexer.name}: ${indexer.reason}` : indexer.name,
-                    )
-                    .join("\n")}
-                >
-                  {t("title.contextReleaseSearchIndexerSkipped", {
-                    count: searchPresentation.skippedIndexers.length,
-                    names: searchPresentation.skippedIndexers
-                      .map((indexer) => indexer.name)
-                      .join(", "),
-                  })}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          <ReleaseSearchSummary
+            presentation={searchPresentation}
+            results={episodeResults}
+            dataUi="episode-release-search-summary"
+          />
           <Button
             id={selectorId("series-overview-episode-search-refresh", episode.id)}
             type="button"
@@ -261,10 +195,7 @@ export function EpisodeSearchResults({
         </div>
       )}
       {searchBlocked ? null : searchPresentation.showInitialLoader ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-16">
-          <LoadingMark className="h-10 w-10 text-[var(--scry-accent-text)]" />
-          <p className="text-lg text-muted-foreground">{t("label.searching")}</p>
-        </div>
+        <ReleaseSearchLoader />
       ) : !searchPresentation.showResults ? (
         <p className="text-sm text-muted-foreground">{t("nzb.noResultsYet")}</p>
       ) : (

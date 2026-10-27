@@ -960,7 +960,6 @@ const pt_BR: LocaleDictionary = {
   "title.episodeRange": "Episódios {{start}} - {{end}}",
   "title.episodeCountOne": "{{count}} episódio",
   "title.episodeCountOther": "{{count}} episódios",
-  "title.searchingReleases": "Buscando lançamentos nos indexadores…",
   "title.noReleasesFound": "Nenhum lançamento encontrado para {{name}}.",
   "title.searchNeedsDownloadClientTitle":
     "A pesquisa requer um cliente de download",

@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SearchResultBuckets } from "@/components/common/release-search-results";
+import { ReleaseSearchLoader, ReleaseSearchSummary } from "@/components/common/release-search-status";
+import { deriveInteractiveSearchPresentation } from "@/lib/utils/interactive-search-presentation";
 import { TitleSearchDownloadClientNotice } from "@/components/common/title-search-download-client-notice";
 import { useTranslate } from "@/lib/context/translate-context";
 import type { InteractiveSearchIndexerProgress } from "@/lib/graphql/release-search";
@@ -116,6 +118,7 @@ type SeasonSectionProps = {
   searchBlocked?: boolean;
   onRunSeasonSearch?: () => void;
   seasonInteractiveSearchLoading?: boolean;
+  seasonSearchIndexerProgress?: InteractiveSearchIndexerProgress[];
   /** Interactive search of the whole season, listed under this header. */
   onRunSeasonInteractiveSearch?: () => void;
   onQueueFromSeasonSearch?: (collection: TitleCollection, release: Release) => Promise<void> | void;
@@ -233,6 +236,7 @@ function SeasonSectionImpl({
   searchBlocked = false,
   onRunSeasonSearch,
   seasonInteractiveSearchLoading = false,
+  seasonSearchIndexerProgress = EMPTY_INDEXER_PROGRESS,
   onRunSeasonInteractiveSearch,
   onQueueFromSeasonSearch,
   onDeleteFile,
@@ -245,6 +249,16 @@ function SeasonSectionImpl({
   onSetSeasonSelected,
 }: SeasonSectionProps) {
   const t = useTranslate();
+  const seasonSearchPresentation = React.useMemo(
+    () =>
+      deriveInteractiveSearchPresentation({
+        hasSnapshot: seasonSearchResults !== undefined,
+        loading: seasonInteractiveSearchLoading,
+        resultCount: seasonSearchResults?.length ?? 0,
+        indexers: seasonSearchIndexerProgress,
+      }),
+    [seasonInteractiveSearchLoading, seasonSearchIndexerProgress, seasonSearchResults],
+  );
   const canRefreshScores = useCanManageOverviewTitle(libraryId);
   const sectionRef = React.useRef<HTMLDivElement>(null);
   // The overview also renders inside a side panel, so the episode table
@@ -635,11 +649,15 @@ function SeasonSectionImpl({
           })}
           description={t("series.interactiveSearchSeason")}
         >
-          {seasonInteractiveSearchLoading && !seasonSearchResults?.length ? (
-            <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <LoadingMark className="h-10 w-10 text-[var(--scry-accent-text)]" />
-              <p className="text-lg text-muted-foreground">{t("label.searching")}</p>
-            </div>
+          <div className="mb-2 flex items-start gap-4">
+            <ReleaseSearchSummary
+              presentation={seasonSearchPresentation}
+              results={seasonSearchResults ?? EMPTY_RELEASES}
+              dataUi="season-release-search-summary"
+            />
+          </div>
+          {seasonSearchPresentation.showInitialLoader ? (
+            <ReleaseSearchLoader />
           ) : seasonSearchResults && seasonSearchResults.length > 0 ? (
             <SearchResultBuckets
               titleId={collection.titleId}

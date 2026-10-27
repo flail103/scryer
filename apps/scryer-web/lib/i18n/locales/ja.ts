@@ -944,7 +944,6 @@ const ja: LocaleDictionary = {
   "title.episodeRange": "第{{start}}話 - 第{{end}}話",
   "title.episodeCountOne": "{{count}}話",
   "title.episodeCountOther": "{{count}}話",
-  "title.searchingReleases": "インデクサーでリリースを検索中…",
   "title.noReleasesFound": "{{name}} のリリースは見つかりませんでした。",
   "title.searchNeedsDownloadClientTitle":
     "検索にはダウンロードクライアントが必要です",

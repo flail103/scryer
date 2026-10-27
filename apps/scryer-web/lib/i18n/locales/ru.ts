@@ -1456,7 +1456,6 @@ const ru: LocaleDictionary = {
     "title.movieCountOne": "{{count}} фильм",
     "title.movieCountOther": "{{count}} фильмов",
     "title.movieDetails": "Сведения о фильме",
-    "title.searchingReleases": "Поиск релизов в индексаторах…",
     "title.contextReleaseSearchSummary":
         "{{releaseCount}} релизов · выполнен поиск по {{indexerCount}} индексаторам",
     "title.contextReleaseSearchProgress":

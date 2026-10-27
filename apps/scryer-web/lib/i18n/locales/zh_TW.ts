@@ -1317,7 +1317,6 @@ const zh_TW: LocaleDictionary = {
   "title.episodeRange": "第 {{start}} 集 - 第 {{end}} 集",
   "title.episodeCountOne": "{{count}} 集",
   "title.episodeCountOther": "{{count}} 集",
-  "title.searchingReleases": "正在索引站中搜索釋出資源…",
   "title.contextReleaseSearchSummary": "{{releaseCount}} 個發行版本 · 已搜尋 {{indexerCount}} 個索引器",
   "title.contextReleaseSearchProgress": "{{releaseCount}} 個發行版本 · {{done}}/{{total}} 個索引器",
   "title.contextReleaseSearchSummaryDetailed": "{{releaseCount}} 個發行版本 · 已搜尋 {{searched}}/{{total}} 個索引器",
