@@ -380,7 +380,7 @@ export const IndexerCategoryPicker = React.memo(function IndexerCategoryPicker({
           onScroll={(event) => {
             panelScrollTopRef.current = event.currentTarget.scrollTop;
           }}
-          className="z-50 overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-lg"
+          className="z-50 overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-[0_18px_42px_rgba(0,0,0,0.42)]"
           style={{
             position: "fixed",
             top: panelPlacement.top,
