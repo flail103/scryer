@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use chrono::Utc;
 use scryer_application::{
     AppError, AppResult, UiCatalogViewMode, UiCatalogViewSetting, UiCatalogViewUpdate,
-    UiDateTimeFormat, UiDefaultLandingView, UiDensity, UiDeviceClass, UiPalette, UiSettings,
-    UiSettingsFacet, UiSettingsUpdate, UiSidebarMode, UiTableColumnSetting, UiTableViewMode,
-    UiTheme, UserExternalAccountRepository, UserLoginSnapshot, UserRepository,
-    UserUiSettingsRepository,
+    UiDashboardBreakpoint, UiDashboardLayout, UiDashboardLayoutItem, UiDateTimeFormat,
+    UiDefaultLandingView, UiDensity, UiDeviceClass, UiPalette, UiSettings, UiSettingsFacet,
+    UiSettingsUpdate, UiSidebarMode, UiTableColumnSetting, UiTableViewMode, UiTheme,
+    UserExternalAccountRepository, UserLoginSnapshot, UserRepository, UserUiSettingsRepository,
 };
 use scryer_domain::{
     AppPermissionMask, ExternalAccountProvider, ExternalAccountStatus, LibraryGrant, User,
@@ -533,6 +533,128 @@ impl UserUiSettingsRepository for UserStore {
         })
         .await
     }
+
+    async fn set_dashboard_layout(
+        &self,
+        user_id: &str,
+        layout: UiDashboardLayout,
+    ) -> AppResult<UiSettings> {
+        let user_id = user_id.to_string();
+        SqlRuntime::run_in_transaction(&self.datastore, "set_user_ui_dashboard_layout", move |tx| {
+            let user_id = user_id.clone();
+            let layout = layout.clone();
+            Box::pin(async move {
+                let now = Utc::now();
+                // Settings are read through their row, so a first layout save
+                // creates it with every other preference at its default.
+                tx.execute(
+                    "INSERT INTO user_ui_settings (user_id, created_at, updated_at)
+                     VALUES ({}, {}, {})
+                     ON CONFLICT(user_id) DO NOTHING",
+                    &[
+                        SqlArg::Text(user_id.clone()),
+                        SqlArg::Timestamp(now),
+                        SqlArg::Timestamp(now),
+                    ],
+                )
+                .await?;
+                let breakpoint = layout.breakpoint.as_str().to_string();
+                tx.execute(
+                    "INSERT INTO user_ui_dashboard_layouts (
+                         user_id, breakpoint, column_count, created_at, updated_at
+                     )
+                     VALUES ({}, {}, {}, {}, {})
+                     ON CONFLICT(user_id, breakpoint) DO UPDATE SET
+                         column_count = excluded.column_count,
+                         updated_at = excluded.updated_at",
+                    &[
+                        SqlArg::Text(user_id.clone()),
+                        SqlArg::Text(breakpoint.clone()),
+                        SqlArg::I64(i64::from(layout.columns)),
+                        SqlArg::Timestamp(now),
+                        SqlArg::Timestamp(now),
+                    ],
+                )
+                .await?;
+                tx.execute(
+                    "DELETE FROM user_ui_dashboard_layout_items
+                      WHERE user_id = {} AND breakpoint = {}",
+                    &[
+                        SqlArg::Text(user_id.clone()),
+                        SqlArg::Text(breakpoint.clone()),
+                    ],
+                )
+                .await?;
+                for item in &layout.items {
+                    tx.execute(
+                        "INSERT INTO user_ui_dashboard_layout_items (
+                             user_id, breakpoint, panel_id, x, y, w, h
+                         )
+                         VALUES ({}, {}, {}, {}, {}, {}, {})",
+                        &[
+                            SqlArg::Text(user_id.clone()),
+                            SqlArg::Text(breakpoint.clone()),
+                            SqlArg::Text(item.panel_id.clone()),
+                            SqlArg::I64(i64::from(item.x)),
+                            SqlArg::I64(i64::from(item.y)),
+                            SqlArg::I64(i64::from(item.w)),
+                            SqlArg::I64(i64::from(item.h)),
+                        ],
+                    )
+                    .await?;
+                }
+                load_ui_settings_by_user_id_tx(tx, &user_id)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::not_found_reason(
+                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
+                            format!("UI settings for user {user_id}"),
+                        )
+                    })
+            })
+        })
+        .await
+    }
+
+    async fn reset_dashboard_layouts(
+        &self,
+        user_id: &str,
+        breakpoint: Option<UiDashboardBreakpoint>,
+    ) -> AppResult<Option<UiSettings>> {
+        let user_id = user_id.to_string();
+        SqlRuntime::run_in_transaction(
+            &self.datastore,
+            "reset_user_ui_dashboard_layouts",
+            move |tx| {
+                let user_id = user_id.clone();
+                Box::pin(async move {
+                    // Item rows follow their layout row through ON DELETE CASCADE.
+                    match breakpoint {
+                        None => {
+                            tx.execute(
+                                "DELETE FROM user_ui_dashboard_layouts WHERE user_id = {}",
+                                &[SqlArg::Text(user_id.clone())],
+                            )
+                            .await?;
+                        }
+                        Some(breakpoint) => {
+                            tx.execute(
+                                "DELETE FROM user_ui_dashboard_layouts
+                                  WHERE user_id = {} AND breakpoint = {}",
+                                &[
+                                    SqlArg::Text(user_id.clone()),
+                                    SqlArg::Text(breakpoint.as_str().to_string()),
+                                ],
+                            )
+                            .await?;
+                        }
+                    }
+                    load_ui_settings_by_user_id_tx(tx, &user_id).await
+                })
+            },
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -1027,6 +1149,7 @@ async fn load_ui_settings_by_user_id(
     let mut settings = row_to_ui_settings(&row)?;
     settings.table_columns = load_ui_table_columns(datastore.read_exec(), user_id).await?;
     settings.catalog_views = load_ui_catalog_views(datastore.read_exec(), user_id).await?;
+    settings.dashboard_layouts = load_ui_dashboard_layouts(datastore.read_exec(), user_id).await?;
     Ok(Some(settings))
 }
 
@@ -1046,6 +1169,7 @@ async fn load_ui_settings_by_user_id_tx(
     let mut settings = row_to_ui_settings(&row)?;
     settings.table_columns = load_ui_table_columns(SqlExec::Tx(tx), user_id).await?;
     settings.catalog_views = load_ui_catalog_views(SqlExec::Tx(tx), user_id).await?;
+    settings.dashboard_layouts = load_ui_dashboard_layouts(SqlExec::Tx(tx), user_id).await?;
     Ok(Some(settings))
 }
 
@@ -1188,6 +1312,7 @@ fn row_to_ui_settings(row: &SqlRow) -> AppResult<UiSettings> {
         language: row.opt_text("language")?,
         table_columns: Vec::new(),
         catalog_views: Vec::new(),
+        dashboard_layouts: Vec::new(),
         created_at: Some(row.timestamp("created_at")?),
         updated_at: Some(row.timestamp("updated_at")?),
     })
@@ -1242,6 +1367,60 @@ async fn load_ui_catalog_views(
             })
         })
         .collect()
+}
+
+/// Loads every saved dashboard layout of the user, including layouts whose
+/// panels were all removed.
+async fn load_ui_dashboard_layouts(
+    exec: SqlExec<'_, '_>,
+    user_id: &str,
+) -> AppResult<Vec<UiDashboardLayout>> {
+    let rows = SqlRuntime::fetch_all(
+        exec,
+        "SELECT layouts.breakpoint, layouts.column_count,
+                items.panel_id, items.x, items.y, items.w, items.h
+           FROM user_ui_dashboard_layouts layouts
+           LEFT JOIN user_ui_dashboard_layout_items items
+             ON items.user_id = layouts.user_id
+            AND items.breakpoint = layouts.breakpoint
+          WHERE layouts.user_id = {}
+          ORDER BY layouts.breakpoint, items.y, items.x, items.panel_id",
+        &[SqlArg::Text(user_id.to_string())],
+    )
+    .await?;
+    let mut layouts: Vec<UiDashboardLayout> = Vec::new();
+    for row in &rows {
+        let breakpoint = parse_ui_dashboard_breakpoint(row.text("breakpoint")?)?;
+        if layouts
+            .last()
+            .is_none_or(|layout| layout.breakpoint != breakpoint)
+        {
+            layouts.push(UiDashboardLayout {
+                breakpoint,
+                columns: row.i32("column_count")?,
+                items: Vec::new(),
+            });
+        }
+        // A layout without items still yields one joined row with no panel.
+        let Some(panel_id) = row.opt_text("panel_id")? else {
+            continue;
+        };
+        if let Some(layout) = layouts.last_mut() {
+            layout.items.push(UiDashboardLayoutItem {
+                panel_id,
+                x: row.i32("x")?,
+                y: row.i32("y")?,
+                w: row.i32("w")?,
+                h: row.i32("h")?,
+            });
+        }
+    }
+    Ok(layouts)
+}
+
+fn parse_ui_dashboard_breakpoint(value: String) -> AppResult<UiDashboardBreakpoint> {
+    UiDashboardBreakpoint::parse(&value)
+        .ok_or_else(|| AppError::Repository(format!("invalid UI dashboard breakpoint {value:?}")))
 }
 
 fn parse_ui_device_class(value: String) -> AppResult<UiDeviceClass> {
@@ -1631,6 +1810,12 @@ mod tests {
         .execute(&pool)
         .await
         .expect("create user_ui_catalog_views table");
+        sqlx::raw_sql(include_str!(
+            "../../../scryer/src/db/migrations/0316_user_dashboard_layouts.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("create dashboard layout tables");
         sqlx::query(
             "CREATE UNIQUE INDEX idx_user_external_accounts_provider_identity
                ON user_external_accounts(provider, connection_id, external_user_id)",
@@ -2109,6 +2294,12 @@ mod tests {
             "user_ui_catalog_views" => {
                 "SELECT COUNT(*) FROM user_ui_catalog_views WHERE user_id = ?"
             }
+            "user_ui_dashboard_layouts" => {
+                "SELECT COUNT(*) FROM user_ui_dashboard_layouts WHERE user_id = ?"
+            }
+            "user_ui_dashboard_layout_items" => {
+                "SELECT COUNT(*) FROM user_ui_dashboard_layout_items WHERE user_id = ?"
+            }
             other => panic!("unexpected table {other}"),
         };
         sqlx::query_scalar(sql)
@@ -2116,6 +2307,118 @@ mod tests {
             .fetch_one(pool)
             .await
             .expect("count user rows")
+    }
+
+    fn dashboard_item(panel_id: &str, x: i32, y: i32) -> UiDashboardLayoutItem {
+        UiDashboardLayoutItem {
+            panel_id: panel_id.to_string(),
+            x,
+            y,
+            w: 2,
+            h: 3,
+        }
+    }
+
+    #[tokio::test]
+    async fn dashboard_layouts_replace_reset_and_cascade_with_the_user() {
+        let store = test_store().await;
+        let user = UserRepository::create(&store, test_user("dashboard_user"))
+            .await
+            .expect("create user");
+
+        let saved = UserUiSettingsRepository::set_dashboard_layout(
+            &store,
+            &user.id,
+            UiDashboardLayout {
+                breakpoint: UiDashboardBreakpoint::Lg,
+                columns: 12,
+                items: vec![
+                    dashboard_item("panel-two", 4, 0),
+                    dashboard_item("panel-one", 0, 0),
+                ],
+            },
+        )
+        .await
+        .expect("save lg layout");
+        // A first layout save creates the settings row with defaults.
+        assert_eq!(saved.theme, UiTheme::default());
+        assert_eq!(
+            saved.dashboard_layouts,
+            vec![UiDashboardLayout {
+                breakpoint: UiDashboardBreakpoint::Lg,
+                columns: 12,
+                items: vec![
+                    dashboard_item("panel-one", 0, 0),
+                    dashboard_item("panel-two", 4, 0),
+                ],
+            }]
+        );
+
+        // An empty layout is kept as a row of its own.
+        let emptied = UserUiSettingsRepository::set_dashboard_layout(
+            &store,
+            &user.id,
+            UiDashboardLayout {
+                breakpoint: UiDashboardBreakpoint::Xs,
+                columns: 2,
+                items: Vec::new(),
+            },
+        )
+        .await
+        .expect("save empty xs layout");
+        assert_eq!(emptied.dashboard_layouts.len(), 2);
+        assert_eq!(
+            emptied.dashboard_layouts[1],
+            UiDashboardLayout {
+                breakpoint: UiDashboardBreakpoint::Xs,
+                columns: 2,
+                items: Vec::new(),
+            }
+        );
+
+        let reset = UserUiSettingsRepository::reset_dashboard_layouts(
+            &store,
+            &user.id,
+            Some(UiDashboardBreakpoint::Lg),
+        )
+        .await
+        .expect("reset lg")
+        .expect("settings exist");
+        assert_eq!(
+            reset
+                .dashboard_layouts
+                .iter()
+                .map(|layout| layout.breakpoint)
+                .collect::<Vec<_>>(),
+            vec![UiDashboardBreakpoint::Xs]
+        );
+        assert_eq!(
+            count_user_rows(&store, "user_ui_dashboard_layout_items", &user.id).await,
+            0
+        );
+
+        UserUiSettingsRepository::set_dashboard_layout(
+            &store,
+            &user.id,
+            UiDashboardLayout {
+                breakpoint: UiDashboardBreakpoint::Md,
+                columns: 8,
+                items: vec![dashboard_item("panel-one", 0, 0)],
+            },
+        )
+        .await
+        .expect("save md layout");
+
+        // Deleting the user removes its layouts and their panels.
+        UserRepository::delete(&store, &user.id)
+            .await
+            .expect("delete user");
+        for table in [
+            "user_ui_dashboard_layouts",
+            "user_ui_dashboard_layout_items",
+        ] {
+            assert_eq!(count_user_rows(&store, table, &user.id).await, 0, "{table}");
+        }
     }
 
     #[tokio::test]

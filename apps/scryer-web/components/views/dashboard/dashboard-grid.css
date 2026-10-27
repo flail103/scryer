@@ -1,0 +1,107 @@
+/*
+ * Dashboard grid chrome, on top of react-grid-layout's own stylesheet.
+ *
+ * Both files are unlayered, so they outrank every Tailwind 4 utility (which
+ * lives in @layer utilities) on the same element. The grid items therefore
+ * carry no Tailwind classes that touch position, transform, transition or
+ * z-index; every override of the library's look lives here, scoped under
+ * `.scry-dashboard-grid` so it never leaks to another page. The app's own
+ * unlayered `*` rule only sets the font family and does not collide.
+ */
+
+.scry-dashboard-grid.scry-dashboard-grid-editing {
+  min-height: 240px;
+}
+
+.scry-dashboard-grid .scry-dashboard-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Poster thumbnails stay clickable through their row links. */
+.scry-dashboard-grid .react-grid-item img {
+  pointer-events: auto;
+}
+
+/* Where a dragged or resized panel will land. */
+.scry-dashboard-grid .react-grid-item.react-grid-placeholder {
+  background: rgba(var(--scry-accent-rgb), 0.12);
+  border: 1px dashed var(--scry-accent);
+  border-radius: 0.75rem;
+  opacity: 1;
+}
+
+/*
+ * Edit mode: the whole panel becomes its own move handle, and an opaque bar
+ * over the panel header names it and carries its remove button.
+ */
+.scry-dashboard-grid .scry-dashboard-drag-handle {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px dashed rgba(var(--scry-accent-rgb), 0.55);
+  border-radius: 0.75rem;
+  background: rgba(var(--scry-accent-rgb), 0.04);
+  cursor: grab;
+  touch-action: none;
+}
+
+.scry-dashboard-grid .react-draggable-dragging .scry-dashboard-drag-handle {
+  cursor: grabbing;
+}
+
+.scry-dashboard-grid .scry-dashboard-drag-bar {
+  display: flex;
+  min-width: 0;
+  height: 2.375rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.375rem 0 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0.75rem 0.75rem 0 0;
+  background: var(--card);
+  color: var(--scry-muted2);
+}
+
+.scry-dashboard-grid .scry-dashboard-drag-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--scry-ink2);
+}
+
+.scry-dashboard-grid .react-grid-item.react-draggable-dragging {
+  box-shadow: 0 18px 40px rgba(var(--scry-accent-rgb), 0.22);
+  border-radius: 0.75rem;
+}
+
+/* Resize handles sit above the move overlay and stay visible on touch. */
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle {
+  z-index: 2;
+  opacity: 1;
+}
+
+.scry-dashboard-grid .react-grid-item > .react-resizable-handle::after {
+  border-right-color: var(--scry-accent);
+  border-bottom-color: var(--scry-accent);
+}
+
+.scry-dashboard-tray-grip {
+  cursor: grab;
+  touch-action: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scry-dashboard-grid,
+  .scry-dashboard-grid .react-grid-item {
+    transition: none;
+  }
+}

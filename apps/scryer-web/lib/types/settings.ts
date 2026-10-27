@@ -136,7 +136,34 @@ export type UiSettings = {
   language: string | null;
   tableColumns: UiTableColumnSetting[];
   catalogViews: UiCatalogViewSetting[];
+  /**
+   * Dashboard grid layouts saved per breakpoint. A breakpoint with no entry
+   * shows the default layout.
+   */
+  dashboardLayouts: UiDashboardLayout[];
 };
+
+/** Dashboard grid breakpoints, keyed on the viewport width as the old media queries were. */
+export type UiDashboardBreakpoint = "XS" | "SM" | "MD" | "LG";
+
+/** One panel's place on the dashboard grid, in grid units. */
+export type UiDashboardLayoutItem = {
+  panelId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+export type UiDashboardLayout = {
+  breakpoint: UiDashboardBreakpoint;
+  /** Column count the items were laid out against. */
+  columns: number;
+  items: UiDashboardLayoutItem[];
+};
+
+/** Replaces the saved layout for one breakpoint, leaving the others alone. */
+export type SetMyDashboardLayoutInput = UiDashboardLayout;
 
 export type UiCatalogViewSetting = {
   deviceClass: UiDeviceClass;
@@ -151,7 +178,7 @@ export type UiCatalogViewSetting = {
  */
 export type SetMyUiSettingsInput = Omit<
   UiSettings,
-  "language" | "tableColumns" | "catalogViews"
+  "language" | "tableColumns" | "catalogViews" | "dashboardLayouts"
 > & {
   language?: string;
 };

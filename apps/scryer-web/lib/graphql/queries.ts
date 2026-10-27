@@ -3066,6 +3066,17 @@ export const myUiSettingsQuery = `query MyUiSettings {
       facet
       viewMode
     }
+    dashboardLayouts {
+      breakpoint
+      columns
+      items {
+        panelId
+        x
+        y
+        w
+        h
+      }
+    }
   }
 }`;
 
