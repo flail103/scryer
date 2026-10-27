@@ -4702,11 +4702,14 @@ impl MultiIndexerSearchClient {
         self
     }
 
+    // A search that is waiting on capabilities is refreshed at interactive
+    // priority whatever mode started it: the stale snapshot still serves the
+    // search, and the refresh is what unblocks every later read of this
+    // indexer. The scheduled maintenance refresh keeps its own intent.
     async fn resolved_caps_config(
         &self,
         config: &IndexerConfig,
         proxies: &HashMap<String, Option<scryer_domain::ProxyConfig>>,
-        intent: SchedulerIntent,
     ) -> (IndexerConfig, scryer_application::IndexerCapsDiagnostic) {
         let mut resolved_config = config.clone();
         let Some(refresher) = self.caps_refresher.as_ref() else {
@@ -4729,7 +4732,7 @@ impl MultiIndexerSearchClient {
                     refresher: refresher.as_ref(),
                     proxy,
                     accounting: accounting.as_ref(),
-                    intent,
+                    intent: SchedulerIntent::InteractiveSearch,
                     now: Utc::now(),
                 },
             )
@@ -6771,13 +6774,9 @@ impl IndexerClient for MultiIndexerSearchClient {
                     ),
                     IndexerSearchEligibility::Eligible
                 ) {
-                    self.resolved_caps_config(
-                        config,
-                        &proxy_configs_by_id,
-                        Self::scheduler_intent(mode, is_rss_request),
-                    )
-                    .await
-                    .0
+                    self.resolved_caps_config(config, &proxy_configs_by_id)
+                        .await
+                        .0
                 } else {
                     (*config).clone()
                 }
@@ -9631,13 +9630,8 @@ impl MultiIndexerSearchClient {
         {
             return Ok((None, IndexerSearchOutcome::Unsupported, None));
         }
-        let (resolved_config, caps_diagnostic) = self
-            .resolved_caps_config(
-                config,
-                proxy_configs_by_id,
-                SchedulerIntent::InteractiveSearch,
-            )
-            .await;
+        let (resolved_config, caps_diagnostic) =
+            self.resolved_caps_config(config, proxy_configs_by_id).await;
         let config = &resolved_config;
         let (client, _, search_timeout) =
             match Self::client_from_config(config, &self.plugin_provider, proxy_configs_by_id) {
@@ -19361,7 +19355,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn caps_refresh_preserves_background_and_interactive_scheduler_intent() {
+    async fn search_path_caps_refresh_runs_at_interactive_intent_in_every_mode() {
         struct RecordingCaps(Arc<std::sync::Mutex<Vec<SchedulerIntent>>>);
         #[async_trait]
         impl scryer_application::IndexerCapsSnapshotRefresher for RecordingCaps {
@@ -19383,19 +19377,18 @@ mod tests {
                 Ok(None)
             }
         }
-        for (mode, rss, expected) in [
-            (SearchMode::Auto, true, SchedulerIntent::BackgroundRss),
-            (
-                SearchMode::Auto,
-                false,
-                SchedulerIntent::BackgroundAcquisition,
-            ),
-            (
-                SearchMode::Interactive,
-                false,
-                SchedulerIntent::InteractiveSearch,
-            ),
+        // The search path admits every mode; the refresh it triggers is
+        // scheduled at interactive priority regardless.
+        for (mode, rss) in [
+            (SearchMode::Auto, true),
+            (SearchMode::Auto, false),
+            (SearchMode::Interactive, false),
         ] {
+            assert_ne!(
+                MultiIndexerSearchClient::scheduler_intent(mode, rss)
+                    == SchedulerIntent::InteractiveSearch,
+                mode == SearchMode::Auto
+            );
             let mut config = mock_indexer_config();
             config.provider_type = "newznab".into();
             config.managed_parent_config_id = Some("parent".into());
@@ -19409,15 +19402,12 @@ mod tests {
                 Arc::new(RecordingCaps(observed.clone())),
             );
             for _ in 0..2 {
-                multi
-                    .resolved_caps_config(
-                        &config,
-                        &HashMap::new(),
-                        MultiIndexerSearchClient::scheduler_intent(mode, rss),
-                    )
-                    .await;
+                multi.resolved_caps_config(&config, &HashMap::new()).await;
             }
-            assert_eq!(*observed.lock().unwrap(), vec![expected]);
+            assert_eq!(
+                *observed.lock().unwrap(),
+                vec![SchedulerIntent::InteractiveSearch]
+            );
         }
     }
 
