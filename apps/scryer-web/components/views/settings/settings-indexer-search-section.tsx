@@ -45,6 +45,7 @@ import type {
 import type { Release } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatUiDateTime } from "@/lib/utils/date-format";
+import { indexerCapsDiagnostic } from "@/lib/utils/indexer-caps-diagnostic";
 import {
   indexerSearchResultDownloadId,
   indexerSearchResultExpandId,
@@ -103,6 +104,9 @@ export type SettingsIndexerSearchSectionProps = {
   onRemoveSavedSearch: (index: number) => void;
   onSearch: () => void;
   onCancelSearch: () => void;
+  onNextPage?: () => void;
+  hasNextPage?: boolean;
+  deadlineReached?: boolean;
   searching: boolean;
   hasSearched: boolean;
   indexers: InteractiveSearchIndexerProgress[];
@@ -661,7 +665,7 @@ function HealthLine({
               key={entry.indexerId}
               id={selectorId("indexer-search-health", entry.name)}
               type="button"
-              title={indexerChipTitle(entry, t, dateTimeFormat)}
+              title={[indexerChipTitle(entry, t, dateTimeFormat), indexerCapsDiagnostic(entry, t)].filter(Boolean).join(" · ") || undefined}
               aria-pressed={active}
               onClick={() => onToggleFacet(facetKey)}
               className={cn(
@@ -1072,6 +1076,15 @@ export function SettingsIndexerSearchSection(
     <div className="w-full min-w-0 max-w-full">
       <QueryCard {...props} />
       {hasSearched ? <HealthLine {...props} /> : null}
+      {hasSearched ? (
+        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <span>{t("indexerSearch.page.localSort")}</span>
+          {props.deadlineReached ? <span role="status">{t("indexerSearch.page.pending")}</span> : null}
+          <Button variant="outline" size="sm" disabled={searching || !props.hasNextPage} onClick={props.onNextPage}>
+            {t("indexerSearch.page.next")}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex w-full min-w-0 max-w-full flex-col items-start gap-4 lg:flex-row">
         {hasSearched && props.facetGroups.length > 0 ? (
           <RefineRail {...props} />

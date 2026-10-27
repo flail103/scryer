@@ -1222,7 +1222,7 @@ impl IndexerPluginProvider for DynamicPluginProvider {
         let cache_key = (
             provider_key.clone(),
             config.id.clone(),
-            config.updated_at.to_rfc3339(),
+            indexer_client_revision(config),
             proxy_id,
             proxy_revision,
         );
@@ -3303,6 +3303,18 @@ fn cache_fingerprint(value: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+fn indexer_client_revision(config: &IndexerConfig) -> String {
+    let caps = scryer_application::cached_indexer_caps(config, chrono::Utc::now()).snapshot;
+    let caps = serde_json::to_string(&caps).expect("capabilities are JSON serializable");
+    // Caps write-back deliberately leaves updated_at unchanged. Replace a
+    // retained client only when its capability content changes, not its TTL.
+    format!(
+        "{}:{}",
+        config.updated_at.to_rfc3339(),
+        cache_fingerprint(&caps)
+    )
+}
+
 pub fn build_subtitle_plugin_provider(
     external_wasm_bytes: &[ExternalPluginWasm<'_>],
     disabled_builtins: &[String],
@@ -5294,6 +5306,33 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &duplicate));
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn indexer_client_revision_tracks_caps_content_but_not_cache_timestamp() {
+        let mut config: IndexerConfig = serde_json::from_value(serde_json::json!({
+            "id": "caps-client", "name": "Synthetic", "provider_type": "newznab",
+            "base_url": "https://indexer.example.test", "is_enabled": true,
+            "enable_auto_search": true, "enable_interactive_search": true,
+            "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+        }))
+        .unwrap();
+        let missing = indexer_client_revision(&config);
+        let mut caps = serde_json::json!({
+            "parser_version": scryer_domain::INDEXER_CAPS_PARSER_VERSION,
+            "searching_present": true, "search": { "available": true, "supported_params": ["q"] },
+            "cache_fetched_at": chrono::Utc::now().to_rfc3339(),
+        });
+        config.caps_snapshot_json = Some(caps.to_string());
+        let fresh = indexer_client_revision(&config);
+        assert_ne!(missing, fresh);
+        caps["cache_fetched_at"] =
+            serde_json::json!((chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339());
+        config.caps_snapshot_json = Some(caps.to_string());
+        assert_eq!(fresh, indexer_client_revision(&config));
+        caps["search"]["available"] = serde_json::json!(false);
+        config.caps_snapshot_json = Some(caps.to_string());
+        assert_ne!(fresh, indexer_client_revision(&config));
     }
 
     #[test]

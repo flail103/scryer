@@ -49,5 +49,6 @@ pub struct MutationRoot(
     subtitle::SubtitleMutations,
     recycle_bin::RecycleBinMutations,
     interactive_search::InteractiveSearchMutations,
+    scryer_interface_settings::IndexerClientMutations,
     lists::ListMutations,
 );

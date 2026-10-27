@@ -164,27 +164,7 @@ impl AppUseCase {
                 "API key is expired or revoked",
             ));
         }
-        let expected_hash = self.api_key_hash(&lookup_id, &secret);
-        let expected_tag = URL_SAFE_NO_PAD.decode(expected_hash).map_err(|_| {
-            AppError::unauthorized_reason(
-                crate::error_reasons::api_keys::VALUE_INVALID,
-                "invalid API key",
-            )
-        })?;
-        let actual_tag = URL_SAFE_NO_PAD.decode(&record.secret_hash).map_err(|_| {
-            AppError::unauthorized_reason(
-                crate::error_reasons::api_keys::VALUE_INVALID,
-                "invalid API key",
-            )
-        })?;
-        if expected_tag.len() != actual_tag.len()
-            || hmac::verify(
-                &hmac::Key::new(hmac::HMAC_SHA256, self.auth.jwt_signing_salt.as_bytes()),
-                format!("api-key:{lookup_id}:{secret}").as_bytes(),
-                &actual_tag,
-            )
-            .is_err()
-        {
+        if !verify_key_material(&self.auth.jwt_signing_salt, "api-key", &lookup_id, &secret, &record.secret_hash) {
             return Err(AppError::unauthorized_reason(
                 crate::error_reasons::api_keys::VALUE_INVALID,
                 "invalid API key",
@@ -359,9 +339,7 @@ impl AppUseCase {
     }
 
     fn api_key_hash(&self, lookup_id: &str, secret: &str) -> String {
-        let key = hmac::Key::new(hmac::HMAC_SHA256, self.auth.jwt_signing_salt.as_bytes());
-        URL_SAFE_NO_PAD
-            .encode(hmac::sign(&key, format!("api-key:{lookup_id}:{secret}").as_bytes()).as_ref())
+        hash_key_material(&self.auth.jwt_signing_salt, "api-key", lookup_id, secret)
     }
 }
 
@@ -378,7 +356,11 @@ fn api_key_summary(record: ApiKeyRecord) -> AppResult<ApiKeySummary> {
 }
 
 pub fn parse_api_key(raw_key: &str) -> Option<(String, String)> {
-    let value = raw_key.strip_prefix(&format!("{API_KEY_PREFIX}_"))?;
+    parse_key_material(raw_key, API_KEY_PREFIX)
+}
+
+pub(crate) fn parse_key_material(raw_key: &str, prefix: &str) -> Option<(String, String)> {
+    let value = raw_key.strip_prefix(&format!("{prefix}_"))?;
     let (lookup_id, secret) = value.split_once('.')?;
     if lookup_id.is_empty() || secret.is_empty() || secret.contains('.') {
         return None;
@@ -389,7 +371,18 @@ pub fn parse_api_key(raw_key: &str) -> Option<(String, String)> {
         .then(|| (lookup_id.to_string(), secret.to_string()))
 }
 
-fn generate_api_key_material() -> AppResult<(String, String)> {
+pub(crate) fn hash_key_material(salt: &str, domain: &str, lookup_id: &str, secret: &str) -> String {
+    let key = hmac::Key::new(hmac::HMAC_SHA256, salt.as_bytes());
+    URL_SAFE_NO_PAD.encode(hmac::sign(&key, format!("{domain}:{lookup_id}:{secret}").as_bytes()).as_ref())
+}
+
+pub(crate) fn verify_key_material(salt: &str, domain: &str, lookup_id: &str, secret: &str, stored: &str) -> bool {
+    let Ok(tag) = URL_SAFE_NO_PAD.decode(stored) else { return false; };
+    hmac::verify(&hmac::Key::new(hmac::HMAC_SHA256, salt.as_bytes()),
+        format!("{domain}:{lookup_id}:{secret}").as_bytes(), &tag).is_ok()
+}
+
+pub(crate) fn generate_api_key_material() -> AppResult<(String, String)> {
     let random = SystemRandom::new();
     let mut lookup = [0_u8; API_KEY_LOOKUP_BYTES];
     let mut secret = [0_u8; API_KEY_SECRET_BYTES];

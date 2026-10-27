@@ -2235,6 +2235,8 @@ pub struct ReleaseCandidateProvenance {
 /// indexer asserted nothing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IndexerResponseAttributes {
+    /// Lossless source metadata in feed order, alongside the normalized claims.
+    pub original: Vec<scryer_plugin_sdk::PluginReleaseAttribute>,
     pub tvdb_id: Option<String>,
     pub tmdb_id: Option<String>,
     pub imdb_id: Option<String>,
@@ -2335,6 +2337,19 @@ impl IndexerSearchResult {
             + optional(&self.guid)
             + optional(&self.info_url)
             + optional(&self.release_listing_json)
+            + self.response_attributes.original.capacity()
+                * std::mem::size_of::<scryer_plugin_sdk::PluginReleaseAttribute>()
+            + self
+                .response_attributes
+                .original
+                .iter()
+                .map(|attribute| {
+                    attribute.name.capacity()
+                        + attribute.value.capacity()
+                        + attribute.namespace.as_ref().map_or(0, String::capacity)
+                        + attribute.namespace_uri.as_ref().map_or(0, String::capacity)
+                })
+                .sum::<usize>()
             + extra
     }
 }
@@ -2626,9 +2641,13 @@ fn project_search_relevant_caps(value: Option<&serde_json::Value>) -> serde_json
     };
     let mut projected = serde_json::Map::new();
     for key in [
+        "searching_present",
         "search",
         "tv_search",
         "movie_search",
+        "music_search",
+        "audio_search",
+        "book_search",
         "categories",
         "limits_default",
         "limits_max",
@@ -2776,6 +2795,22 @@ impl IndexerSearchOutcome {
 pub struct IndexerQueryOutcome {
     pub indexer_id: String,
     pub outcome: IndexerSearchOutcome,
+    /// The source's original page state, when this read exposes it. Absent
+    /// for an unasked source or a path that does not return page metadata.
+    pub page: Option<IndexerSearchPageMetadata>,
+}
+
+/// Source-local continuation and quota observations. These cannot be merged
+/// into one cursor or quota when a response contains more than one indexer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexerSearchPageMetadata {
+    pub caps: Option<crate::IndexerCapsDiagnostic>,
+    pub completion: IndexerSearchCompletion,
+    pub next_cursor: Option<String>,
+    pub api_current: Option<u32>,
+    pub api_max: Option<u32>,
+    pub grab_current: Option<u32>,
+    pub grab_max: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -2796,17 +2831,46 @@ pub struct IndexerSearchResponse {
     pub next_cursor: Option<String>,
 }
 
-/// An operator's raw text search (Prowlarr's manual search): the query as
-/// typed with no facet, ids or structured coordinates, the operator's own
-/// categories (empty sends none) and results left unfiltered by title.
+impl IndexerSearchResponse {
+    pub fn page_metadata(&self) -> IndexerSearchPageMetadata {
+        IndexerSearchPageMetadata {
+            caps: None,
+            completion: self.completion,
+            next_cursor: self.next_cursor.clone(),
+            api_current: self.api_current,
+            api_max: self.api_max,
+            grab_current: self.grab_current,
+            grab_max: self.grab_max,
+        }
+    }
+}
+
+/// A raw provider search: caller-supplied text, exact Nab parameters and
+/// categories, with no acquisition matching or metadata fallback.
 #[derive(Clone, Debug, Default)]
 pub struct RawTextSearchRequest {
     pub query: String,
+    pub nab: Option<scryer_plugin_sdk::PluginNabSearch>,
+    /// Explicit recent-feed paging; an empty background RSS query never opts in.
+    pub recent_paging: bool,
     pub categories: Vec<String>,
     /// Only these enabled indexers; `None` asks every enabled one.
     pub indexer_ids: Option<std::collections::HashSet<String>>,
     /// Page size each indexer is asked for.
     pub limit: Option<u32>,
+    /// Read one provider page from one explicitly selected indexer. Absent
+    /// retains the existing raw-search behavior.
+    pub page: Option<RawTextSearchPage>,
+}
+
+/// Existing provider cursor safety bound, shared by accumulating and coordinated reads.
+pub const INDEXER_PAGE_CURSOR_MAX_BYTES: usize = 4096;
+
+/// A coordinator-owned single-page read. The provider cursor is opaque and
+/// belongs to the selected indexer; `None` requests its first page.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawTextSearchPage {
+    pub cursor: Option<String>,
 }
 
 /// The host's answer, once a paged read from the first page has that page in

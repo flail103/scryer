@@ -86,6 +86,9 @@ const SettingsIndexersContainer = lazy(async () => ({
 const SettingsIndexerSearchContainer = lazy(async () => ({
   default: (await import("@/components/containers/settings/settings-indexer-search-container")).SettingsIndexerSearchContainer,
 }));
+const SettingsIndexerClientsContainer = lazy(async () => ({
+  default: (await import("@/components/containers/settings/settings-indexer-clients-container")).SettingsIndexerClientsContainer,
+}));
 const SettingsMediaServersContainer = lazy(async () => ({
   default: (await import("@/components/containers/settings/settings-media-servers-container")).SettingsMediaServersContainer,
 }));
@@ -165,6 +168,7 @@ const INDEXER_SEARCH_FILTERED_PLUGIN_CONTENT_WIDTH = 1640;
 const INDEXER_SETTINGS_TAB_LABEL_KEYS: Record<IndexerSettingsTab, string> = {
   indexers: "settings.indexers",
   search: "settings.indexerSearch",
+  clients: "settings.indexerClients",
   seedingProfiles: "settings.seedingProfiles",
 };
 
@@ -367,7 +371,7 @@ export const SettingsContainer = memo(function SettingsContainer({
     maintenanceRulesHidden || requestRulesHidden ? "scoring" : rulesSection;
   // Indexer search is in beta rather than experimental: the pane is always
   // offered, and the page header carries the notice.
-  const indexerSettingsTabs = allIndexerSettingsTabs();
+  const indexerSettingsTabs = allIndexerSettingsTabs(experimentalFeaturesEnabled);
   const effectiveIndexerSettingsTab = indexerSettingsTabs.includes(indexerSettingsTab)
     ? indexerSettingsTab
     : "indexers";
@@ -831,6 +835,8 @@ export const SettingsContainer = memo(function SettingsContainer({
                 <SettingsSeedingProfilesContainer />
               ) : effectiveIndexerSettingsTab === "search" ? (
                 <SettingsIndexerSearchContainer />
+              ) : effectiveIndexerSettingsTab === "clients" ? (
+                <SettingsIndexerClientsContainer />
               ) : (
                 <SettingsIndexersContainer
                   indexerSettingsTab={effectiveIndexerSettingsTab}

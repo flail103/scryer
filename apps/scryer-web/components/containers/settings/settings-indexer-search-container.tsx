@@ -25,6 +25,7 @@ import {
   type InteractiveSearchIndexerProgress,
 } from "@/lib/graphql/release-search";
 import type { IndexerRecord, Release } from "@/lib/types";
+import { RAW_SEARCH_REFUSAL_KEYS } from "@/lib/utils/raw-search-error";
 import {
   earliestSearchExpiry,
   expireIndexerSearches,
@@ -107,6 +108,8 @@ export function SettingsIndexerSearchContainer() {
   >([]);
   const [searching, setSearching] = React.useState(false);
   const [hasSearched, setHasSearched] = React.useState(false);
+  const [continuation, setContinuation] = React.useState<string | null>(null);
+  const [deadlineReached, setDeadlineReached] = React.useState(false);
   // Frozen per snapshot so ages and age sorting stay pure across renders.
   const [nowMs, setNowMs] = React.useState(() => Date.now());
 
@@ -169,6 +172,8 @@ export function SettingsIndexerSearchContainer() {
       setSizeRangeGiB(null);
       setSearching(false);
       setHasSearched(false);
+      setContinuation(null);
+      setDeadlineReached(false);
       return true;
     }
     const { isRowLive } = expiry;
@@ -248,7 +253,7 @@ export function SettingsIndexerSearchContainer() {
   );
 
   const runSearch = React.useCallback(
-    async (retryIndexerIds?: string[]) => {
+    async (retryIndexerIds?: string[], nextPage?: string) => {
       const trimmedQuery = query.trim();
       if (!trimmedQuery) {
         return;
@@ -274,6 +279,8 @@ export function SettingsIndexerSearchContainer() {
         setSizeRangeGiB(null);
         publishRowOwners(new Map());
       }
+      setContinuation(null);
+      setDeadlineReached(false);
       setHasSearched(true);
       setSearching(true);
 
@@ -290,9 +297,11 @@ export function SettingsIndexerSearchContainer() {
             categories:
               parsedCategories.length > 0 ? parsedCategories : undefined,
             limit: rawSearchPageSize(advanced.limit),
+            aggregatePageSize: 100,
           },
           {
             signal: controller.signal,
+            continuation: nextPage,
             onUpdate: (snapshot) => {
               if (controller.signal.aborted || searchAbortRef.current !== controller) return;
               // Earlier searches may expire while this one runs; only this
@@ -305,18 +314,34 @@ export function SettingsIndexerSearchContainer() {
               if (controller.signal.aborted) return;
               setExpiresAt(earliestSearchExpiry(deadlinesRef.current));
               setNowMs(Date.now());
-              const nextOwners = new Map(rowOwnersRef.current);
+              setContinuation(snapshot.continuation ?? null);
+              setDeadlineReached(snapshot.deadlineReached ?? false);
+              if (snapshot.failureCode) {
+                setGlobalStatus(t(RAW_SEARCH_REFUSAL_KEYS[snapshot.failureCode] ?? "status.apiError"), { level: "ERROR" });
+              }
+              const liveBase = isRetry ? releases.filter((release) => {
+                const owner = rowOwnersRef.current.get(indexerSearchRowKey(release));
+                return owner !== undefined && deadlinesRef.current.has(owner);
+              }) : [];
+              const nextReleases = isRetry
+                ? mergeIndexerSearchReleases(liveBase, snapshot.releases).slice(0, 200)
+                : snapshot.releases;
+              const retainedKeys = new Set(nextReleases.map(indexerSearchRowKey));
+              const nextOwners = new Map([...rowOwnersRef.current].filter(([key]) => retainedKeys.has(key)));
               for (const release of snapshot.releases) {
-                nextOwners.set(indexerSearchRowKey(release), snapshot.searchId);
+                const key = indexerSearchRowKey(release);
+                if (retainedKeys.has(key)) nextOwners.set(key, snapshot.searchId);
               }
               publishRowOwners(nextOwners);
+              const retainedSearches = new Set(nextOwners.values());
+              retainedSearches.add(snapshot.searchId);
+              for (const id of deadlinesRef.current.keys()) {
+                if (!retainedSearches.has(id)) deadlinesRef.current.delete(id);
+              }
+              setExpiresAt(earliestSearchExpiry(deadlinesRef.current));
               // A retry merges into the rows still live, so rows of a search
               // that expired meanwhile do not come back.
-              setReleases((current) =>
-                isRetry
-                  ? mergeIndexerSearchReleases(current, snapshot.releases)
-                  : snapshot.releases,
-              );
+              setReleases(nextReleases);
               setIndexers(
                 isRetry
                   ? mergeIndexerProgress(baseIndexers, snapshot.indexers)
@@ -346,6 +371,7 @@ export function SettingsIndexerSearchContainer() {
       indexers,
       publishRowOwners,
       query,
+      releases,
       selectedIndexerIds,
       setGlobalStatus,
       t,
@@ -556,6 +582,9 @@ export function SettingsIndexerSearchContainer() {
         onRemoveSavedSearch={handleRemoveSavedSearch}
         onSearch={handleSearch}
         onCancelSearch={handleCancelSearch}
+        onNextPage={() => { if (continuation) void runSearch(undefined, continuation); }}
+        hasNextPage={continuation !== null}
+        deadlineReached={deadlineReached}
         searching={searching}
         hasSearched={hasSearched}
         indexers={indexers}

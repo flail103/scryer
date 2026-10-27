@@ -1952,6 +1952,9 @@ export const startInteractiveReleaseSearchMutation = `mutation StartInteractiveR
   startInteractiveReleaseSearch(input: $input) {
     id
     state
+    continuation
+    deadlineReached
+    failureCode
     results {${RELEASE_SEARCH_RESULT_FIELDS}
     }
     indexers {
@@ -1964,6 +1967,28 @@ export const startInteractiveReleaseSearchMutation = `mutation StartInteractiveR
       failureReason
       skipReason
       skippedUntil
+      rateLimited
+      capsSource
+      capsReason
+      capsRetryAfterSeconds
+    }
+    startedAt
+    completedAt
+  }
+}`;
+
+export const continueInteractiveReleaseSearchMutation = `mutation ContinueInteractiveReleaseSearch($continuation: String!, $aggregatePageSize: Int) {
+  continueInteractiveReleaseSearch(continuation: $continuation, aggregatePageSize: $aggregatePageSize) {
+    id
+    state
+    continuation
+    deadlineReached
+    failureCode
+    results {${RELEASE_SEARCH_RESULT_FIELDS}
+    }
+    indexers {
+      indexerId name priority status resultCount elapsedMs failureReason rateLimited skipReason skippedUntil
+      capsSource capsReason capsRetryAfterSeconds
     }
     startedAt
     completedAt

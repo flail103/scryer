@@ -773,8 +773,10 @@ pub struct SearchReleasesInput {
     pub episode: Option<String>,
     /// Optional limit. A title search lists at most this many results
     /// (default 50, max 200); a `query` search asks each indexer for this many
-    /// (default 100, 1 to 500) and lists everything returned.
+    /// (default 100, 1 to 500). Raw aggregate pages are controlled separately.
     pub limit: Option<i32>,
+    /// Raw aggregate display page size, default and maximum 100.
+    pub aggregate_page_size: Option<i32>,
     /// Raw operator query sent as typed to each indexer, without a catalog title.
     pub query: Option<String>,
     /// Optional indexer configuration identities to restrict the search to.
@@ -1732,6 +1734,12 @@ pub struct InteractiveReleaseSearchIndexerPayload {
     pub elapsed_ms: Option<i32>,
     /// Failure reason, or null when the indexer did not fail.
     pub failure_reason: Option<String>,
+    /// Stable capability provenance code, independent of search completion.
+    pub caps_source: Option<String>,
+    /// Stable reason capability discovery used stale or permissive data.
+    pub caps_reason: Option<String>,
+    /// Provider-specified discovery retry delay, when available.
+    pub caps_retry_after_seconds: Option<i32>,
     /// True when the indexer asked Scryer to slow down rather than failing.
     /// Searching resumes on its own, so this reads as a cooldown, not an error.
     pub rate_limited: bool,
@@ -1756,6 +1764,12 @@ pub struct InteractiveReleaseSearchPayload {
     pub started_at: DateTime<Utc>,
     /// UTC completion time, or null while running.
     pub completed_at: Option<DateTime<Utc>>,
+    /// Opaque continuation of the raw generation; absent when it cannot advance.
+    pub continuation: Option<String>,
+    /// True when a raw response reached its bound while sources were pending.
+    pub deadline_reached: bool,
+    /// Stable raw-search refusal condition, independent of the display sentence.
+    pub failure_code: Option<String>,
 }
 
 #[derive(SimpleObject, Clone)]

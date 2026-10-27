@@ -1,5 +1,89 @@
 //! Stable conditions owned by application policy. Sentences remain display-only.
 
+pub mod indexer_clients {
+    /// The instance has not opted into the experimental client API.
+    pub const EXPERIMENTAL_DISABLED: &str = "INDEXER_CLIENTS_EXPERIMENTAL_DISABLED";
+    /// Client management requires an authenticated interactive session.
+    pub const INTERACTIVE_SESSION_REQUIRED: &str = "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED";
+    /// The acting user does not hold every application permission.
+    pub const ALL_PERMISSIONS_REQUIRED: &str = "INDEXER_CLIENTS_ALL_PERMISSIONS_REQUIRED";
+    /// The submitted client key is malformed or does not verify.
+    pub const KEY_INVALID: &str = "INDEXER_CLIENTS_KEY_INVALID";
+    /// The client repository is unavailable in this runtime.
+    pub const UNAVAILABLE: &str = "INDEXER_CLIENTS_UNAVAILABLE";
+    /// A management target no longer exists.
+    pub const NOT_FOUND: &str = "INDEXER_CLIENTS_NOT_FOUND";
+    /// A concurrent management mutation changed the expected revision.
+    pub const CONFIGURATION_CHANGED: &str = "INDEXER_CLIENTS_CONFIGURATION_CHANGED";
+    /// A label is empty, too long, or contains a control character.
+    pub const NAME_INVALID: &str = "INDEXER_CLIENTS_NAME_INVALID";
+    /// A grant is duplicated, missing, targets a manager, or has an invalid category.
+    pub const GRANT_INVALID: &str = "INDEXER_CLIENTS_GRANT_INVALID";
+    /// The persistent revision counter cannot advance further.
+    pub const REVISION_EXHAUSTED: &str = "INDEXER_CLIENTS_REVISION_EXHAUSTED";
+    /// This client is not granted the requested compatibility protocol.
+    pub const PROTOCOL_FORBIDDEN: &str = "INDEXER_CLIENTS_PROTOCOL_FORBIDDEN";
+    /// No granted source can honor the complete operation and parameter set.
+    pub const SEARCH_UNSUPPORTED: &str = "INDEXER_CLIENTS_SEARCH_UNSUPPORTED";
+    /// A compatibility request contains a non-numeric category identifier.
+    pub const CATEGORY_INVALID: &str = "INDEXER_CLIENTS_CATEGORY_INVALID";
+    /// Source configuration changed while a page was being produced.
+    pub const SOURCE_CHANGED: &str = "INDEXER_CLIENTS_SOURCE_CHANGED";
+    /// Compatibility parameters cannot be parsed without changing their meaning.
+    pub const REQUEST_INVALID: &str = "INDEXER_CLIENTS_REQUEST_INVALID";
+    /// More than one credential transport supplied different key values.
+    pub const CREDENTIALS_AMBIGUOUS: &str = "INDEXER_CLIENTS_CREDENTIALS_AMBIGUOUS";
+    /// The retrieval reference is malformed, unauthenticated or no longer authorized.
+    pub const REFERENCE_INVALID: &str = "INDEXER_CLIENTS_REFERENCE_INVALID";
+    pub const ALL: &[&str] = &[EXPERIMENTAL_DISABLED, INTERACTIVE_SESSION_REQUIRED, ALL_PERMISSIONS_REQUIRED, KEY_INVALID,
+        UNAVAILABLE, NOT_FOUND, CONFIGURATION_CHANGED, NAME_INVALID, GRANT_INVALID, REVISION_EXHAUSTED,
+        PROTOCOL_FORBIDDEN, SEARCH_UNSUPPORTED, CATEGORY_INVALID, SOURCE_CHANGED,
+        REQUEST_INVALID, CREDENTIALS_AMBIGUOUS, REFERENCE_INVALID];
+
+    #[cfg(test)]
+    #[test]
+    fn reasons_are_distinct_and_area_prefixed() {
+        let mut seen = std::collections::HashSet::new();
+        for reason in ALL {
+            assert!(reason.starts_with("INDEXER_CLIENTS_"));
+            assert!(reason.bytes().all(|byte| byte.is_ascii_uppercase() || byte == b'_'));
+            assert!(seen.insert(reason));
+        }
+    }
+}
+
+pub mod raw_search {
+    /// Retaining the complete source page would exceed the shared byte budget.
+    pub const RETAINED_STATE_FULL: &str = "RAW_SEARCH_RETAINED_STATE_FULL";
+    /// The source returned a continuation already consumed by this generation.
+    pub const CURSOR_REPEATED: &str = "RAW_SEARCH_CURSOR_REPEATED";
+    /// The source continuation is empty or exceeds the existing cursor byte bound.
+    pub const CURSOR_INVALID: &str = "RAW_SEARCH_CURSOR_INVALID";
+    /// A requested offset cannot be represented by this server.
+    pub const OFFSET_INVALID: &str = "RAW_SEARCH_OFFSET_INVALID";
+    /// The owner explicitly cancelled this generation.
+    pub const CANCELLED: &str = "RAW_SEARCH_CANCELLED";
+    /// The requested earlier page must be rebuilt from upstream sources.
+    pub const HISTORY_EXPIRED: &str = "RAW_SEARCH_HISTORY_EXPIRED";
+    /// Every eligible source is currently limited by its existing quota rules.
+    pub const ALL_SOURCES_LIMITED: &str = "RAW_SEARCH_ALL_SOURCES_LIMITED";
+    /// No eligible source produced a successful response.
+    pub const NO_SOURCE_SUCCEEDED: &str = "RAW_SEARCH_NO_SOURCE_SUCCEEDED";
+    pub const ALL: &[&str] = &[RETAINED_STATE_FULL, CURSOR_REPEATED, CURSOR_INVALID, OFFSET_INVALID, CANCELLED,
+        HISTORY_EXPIRED, ALL_SOURCES_LIMITED, NO_SOURCE_SUCCEEDED];
+
+    #[cfg(test)]
+    #[test]
+    fn reasons_are_distinct_and_area_prefixed() {
+        let mut seen = std::collections::HashSet::new();
+        for reason in ALL {
+            assert!(reason.starts_with("RAW_SEARCH_"));
+            assert!(reason.bytes().all(|byte| byte.is_ascii_uppercase() || byte == b'_'));
+            assert!(seen.insert(reason));
+        }
+    }
+}
+
 pub mod library {
     /// A library scan is already running.
     pub const SCAN_ALREADY_RUNNING: &str = "LIBRARY_SCAN_ALREADY_RUNNING";
@@ -346,6 +430,11 @@ pub mod catalog {
     pub const TITLE_NOT_FOUND: &str = "TITLE_NOT_FOUND";
     /// Search query is required.
     pub const SEARCH_QUERY_REQUIRED: &str = "CATALOG_SEARCH_QUERY_REQUIRED";
+    /// A raw page read must explicitly select exactly one source.
+    pub const RAW_SEARCH_PAGE_REQUIRES_SINGLE_INDEXER: &str =
+        "CATALOG_RAW_SEARCH_PAGE_REQUIRES_SINGLE_INDEXER";
+    /// The adapter does not implement raw page continuation.
+    pub const RAW_SEARCH_PAGING_UNSUPPORTED: &str = "CATALOG_RAW_SEARCH_PAGING_UNSUPPORTED";
     /// Provide exactly one of title id or query.
     pub const PROVIDE_EXACTLY_ONE_TITLE_ID_QUERY: &str =
         "CATALOG_PROVIDE_EXACTLY_ONE_TITLE_ID_QUERY";
@@ -537,6 +626,8 @@ pub mod catalog {
         TAG_INVALID,
         TITLE_NOT_FOUND,
         SEARCH_QUERY_REQUIRED,
+        RAW_SEARCH_PAGE_REQUIRES_SINGLE_INDEXER,
+        RAW_SEARCH_PAGING_UNSUPPORTED,
         PROVIDE_EXACTLY_ONE_TITLE_ID_QUERY,
         INDEXER_UNKNOWN,
         TOO_MANY_CONCURRENT_INTERACTIVE_SEARCHES,
@@ -3879,6 +3970,34 @@ pub mod media_servers {
         SELECT_EMBY_CONNECT_SERVER,
         SELECTED_EMBY_CONNECT_SERVER_IDENTITY_DOES_NOT_MATCH_REACHABLE_SERVER,
     ];
+}
+
+pub mod indexer_caps {
+    /// Capability discovery failed; the previous snapshot remains usable.
+    pub const REFRESH_FAILED: &str = "INDEXER_CAPS_REFRESH_FAILED";
+    /// The bounded host refresh registry has no admission capacity.
+    pub const REFRESH_BUSY: &str = "INDEXER_CAPS_REFRESH_BUSY";
+    /// Discovery did not provide a usable replacement for missing or stale caps.
+    pub const REFRESH_DEFERRED: &str = "INDEXER_CAPS_REFRESH_DEFERRED";
+    /// Every reason owned by capability resolution.
+    pub const ALL: &[&str] = &[REFRESH_FAILED, REFRESH_BUSY, REFRESH_DEFERRED];
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn reasons_are_distinct_prefixed_and_screaming_snake_case() {
+            let mut unique = std::collections::HashSet::new();
+            for reason in super::ALL {
+                assert!(reason.starts_with("INDEXER_CAPS_"));
+                assert!(
+                    reason
+                        .bytes()
+                        .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+                );
+                assert!(unique.insert(reason));
+            }
+        }
+    }
 }
 
 pub mod integration {
