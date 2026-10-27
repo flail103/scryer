@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Database, KeyRound, Search, Sprout } from "lucide-react";
+import { Database, KeyRound, Search, Upload } from "lucide-react";
 import type { IndexerSettingsTab } from "@/components/root/types";
 
 /// The Indexers page's tabs as both the page tabs and the sidebar subnav draw
@@ -11,5 +11,5 @@ export const INDEXER_SETTINGS_TAB_ITEMS: Record<
   indexers: { labelKey: "settings.indexers", icon: Database, beta: false },
   search: { labelKey: "settings.indexerSearch", icon: Search, beta: true },
   clients: { labelKey: "settings.indexerClients", icon: KeyRound, beta: true },
-  seedingProfiles: { labelKey: "settings.seedingProfiles", icon: Sprout, beta: false },
+  seedingProfiles: { labelKey: "settings.seedingProfiles", icon: Upload, beta: false },
 };
