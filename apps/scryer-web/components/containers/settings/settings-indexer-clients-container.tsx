@@ -435,7 +435,8 @@ export function SettingsIndexerClientsContainer() {
               </TableRow>
               {revealed?.clientId === client.id ? (
                 <TableRow id={selectorId("settings-indexer-client-revealed", client.id)} className={NARROW_ROW}>
-                  <TableCell colSpan={7} className="bg-[var(--scry-warning-bg)] p-3 max-[1279px]:block">
+                  {/* A plain cell: the table row hover styles target table-cell slots and would tint the warning. */}
+                  <td colSpan={7} className="bg-[var(--scry-warning-bg)] p-3 align-middle max-[1279px]:block">
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center gap-2">
                         <ShieldAlert className="h-4 w-4 shrink-0 text-[var(--scry-warning-text)]" aria-hidden="true" />
@@ -466,7 +467,7 @@ export function SettingsIndexerClientsContainer() {
                         {t("label.dismiss")}
                       </Button>
                     </div>
-                  </TableCell>
+                  </td>
                 </TableRow>
               ) : null}
               </Fragment>
