@@ -68,6 +68,35 @@ import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-
 import { dashboardDropRegions, type GridRect } from "@/lib/utils/dashboard-drop-targets";
 
 /**
+ * Behind the grid during a resize: every cell, so the edge being dragged can
+ * be seen snapping to them. One masked layer draws the whole grid, so it costs
+ * the same however many rows there are.
+ */
+function DashboardGridCells({ width, columns }: { width: number; columns: number }) {
+  const [marginX, marginY] = DASHBOARD_MARGIN;
+  const columnWidth = (width - marginX * (columns - 1)) / columns;
+  const stepX = columnWidth + marginX;
+  const stepY = DASHBOARD_ROW_HEIGHT + marginY;
+  const mask = [
+    `linear-gradient(to right, #000 ${columnWidth}px, transparent ${columnWidth}px)`,
+    `linear-gradient(to bottom, #000 ${DASHBOARD_ROW_HEIGHT}px, transparent ${DASHBOARD_ROW_HEIGHT}px)`,
+  ].join(", ");
+  return (
+    <div
+      className="scry-dashboard-grid-cells"
+      aria-hidden="true"
+      style={{
+        bottom: -3 * stepY,
+        maskImage: mask,
+        WebkitMaskImage: mask,
+        maskSize: `${stepX}px ${stepY}px`,
+        WebkitMaskSize: `${stepX}px ${stepY}px`,
+      }}
+    />
+  );
+}
+
+/**
  * Behind the grid during a drag: every spot the dragged panel can land,
  * shaded, so it is plain where a drop will take before the placeholder gets
  * there. Cell geometry follows react-grid-layout's own.
@@ -465,6 +494,9 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             carry over from the breakpoint just left.
           */}
           <div className="relative">
+          {editing && gesture && gesture !== "move" && !stacked ? (
+            <DashboardGridCells width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
+          ) : null}
           {editing && dropTargets ? (
             <DashboardDropTargets regions={dropTargets} width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
           ) : null}

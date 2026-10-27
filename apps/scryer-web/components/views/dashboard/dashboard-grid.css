@@ -50,6 +50,24 @@
   background-attachment: fixed;
 }
 
+/*
+ * The grid's cells while a panel resizes, a few rows past the bottom so a
+ * panel growing downward still has cells to snap to. The two masks intersect,
+ * leaving one tile per cell with the gaps clear.
+ */
+.scry-dashboard-grid-cells {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  pointer-events: none;
+  background: rgba(var(--scry-accent-rgb), 0.08);
+  mask-repeat: repeat;
+  mask-composite: intersect;
+  -webkit-mask-repeat: repeat;
+  -webkit-mask-composite: source-in;
+}
+
 /* Where a dragged or resized panel will land. */
 .scry-dashboard-grid .react-grid-item.react-grid-placeholder {
   background: rgba(var(--scry-accent-rgb), 0.12);
