@@ -458,18 +458,33 @@ export function appendDashboardPanel(
   return [...cloneItems(items), { panelId, x: 0, y: bottom, w, h }];
 }
 
-/** Places a panel where it was dropped, clamped inside the grid. */
+function overlaps(left: DashboardLayoutItem, right: DashboardLayoutItem): boolean {
+  return (
+    left.x < right.x + right.w &&
+    right.x < left.x + left.w &&
+    left.y < right.y + right.h &&
+    right.y < left.y + left.h
+  );
+}
+
+/**
+ * Places a panel where it was dropped, clamped inside the grid. Nothing else
+ * moves: when the drop lands on another panel, the new one goes down its
+ * column to the first rows that are free.
+ */
 export function placeDashboardPanel(
   items: readonly DashboardLayoutItem[],
   panelId: DashboardPanelId,
   breakpoint: DashboardBreakpoint,
   position: { x: number; y: number; w?: number; h?: number },
 ): DashboardLayoutItem[] {
-  const rest = items.filter((entry) => entry.panelId !== panelId);
+  const rest = normalizeDashboardItems(
+    items.filter((entry) => entry.panelId !== panelId),
+    breakpoint,
+  );
   const fallback = dashboardPanelDefaultSize(panelId, breakpoint);
-  return normalizeDashboardItems(
+  const [placed] = normalizeDashboardItems(
     [
-      ...rest,
       {
         panelId,
         x: position.x,
@@ -480,6 +495,17 @@ export function placeDashboardPanel(
     ],
     breakpoint,
   );
+  if (!placed) {
+    return rest;
+  }
+  for (;;) {
+    const blocker = rest.find((entry) => overlaps(entry, placed));
+    if (!blocker) {
+      break;
+    }
+    placed.y = blocker.y + blocker.h;
+  }
+  return [...rest, placed];
 }
 
 export function removeDashboardPanel(

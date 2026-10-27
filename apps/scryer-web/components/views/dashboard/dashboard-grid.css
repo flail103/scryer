@@ -32,16 +32,16 @@
   opacity: 1;
 }
 
-/* Edit mode: the whole panel becomes its own move handle. */
+/*
+ * Edit mode: the whole panel becomes its own move handle, and an opaque bar
+ * over the panel header names it and carries its remove button.
+ */
 .scry-dashboard-grid .scry-dashboard-drag-handle {
   position: absolute;
   inset: 0;
   z-index: 1;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.375rem;
+  flex-direction: column;
   border: 1px dashed rgba(var(--scry-accent-rgb), 0.55);
   border-radius: 0.75rem;
   background: rgba(var(--scry-accent-rgb), 0.04);
@@ -53,18 +53,29 @@
   cursor: grabbing;
 }
 
-.scry-dashboard-grid .scry-dashboard-drag-grip {
-  display: inline-flex;
+.scry-dashboard-grid .scry-dashboard-drag-bar {
+  display: flex;
   min-width: 0;
+  height: 2.375rem;
+  flex-shrink: 0;
   align-items: center;
-  gap: 0.25rem;
-  border-radius: 0.375rem;
-  background: var(--scry-bg);
-  padding: 0.125rem 0.375rem;
-  font-size: 11px;
+  gap: 0.5rem;
+  padding: 0 0.375rem 0 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0.75rem 0.75rem 0 0;
+  background: var(--card);
+  color: var(--scry-muted2);
+}
+
+.scry-dashboard-grid .scry-dashboard-drag-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
   font-weight: 600;
   color: var(--scry-ink2);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .scry-dashboard-grid .react-grid-item.react-draggable-dragging {

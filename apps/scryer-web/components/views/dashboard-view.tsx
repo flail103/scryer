@@ -414,7 +414,7 @@ export function StatsPanel({ overview, tier }: { overview: DashboardOverview | n
     : 0;
 
   return (
-    <div className={cn("grid h-full content-start gap-3", STATS_COLUMNS[tier])}>
+    <div className={cn("grid h-full auto-rows-fr gap-3", STATS_COLUMNS[tier])}>
       <StatTile
         label={t("dashboard.statLibrary")}
         metrics={[

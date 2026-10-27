@@ -77,6 +77,15 @@ import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-
  * mutation per breakpoint that changed; Cancel drops the draft.
  */
 
+/**
+ * Free placement keeps the saved arrangement exactly where the user put it,
+ * but a free drag that pushes neighbours leaves them displaced and can stack
+ * panels on top of each other. Refusing collisions instead means a panel only
+ * lands on empty cells and nothing else moves; the stacked XS column reorders
+ * with vertical compaction.
+ */
+const FREE_PLACEMENT_COMPACTOR = { ...noCompactor, preventCollision: true };
+
 const DRAG_HANDLE_CLASS = "scry-dashboard-drag-handle";
 const NO_DRAG_CLASS = "scry-dashboard-no-drag";
 /** react-grid-layout's id for the placeholder of an item dragged in from outside. */
@@ -310,7 +319,15 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
               {t("dashboard.layout.empty")}
             </p>
           ) : null}
+          {/*
+            One grid per breakpoint. Each breakpoint shows its own panels in its
+            own order, and when the set or order of children changes in the
+            same render as the breakpoint, react-grid-layout writes the old
+            breakpoint's positions into the new one. Remounting on a crossing
+            starts the grid from that breakpoint's layout every time.
+          */}
           <Responsive
+            key={breakpoint}
             className={cn("scry-dashboard-grid", editing && "scry-dashboard-grid-editing")}
             width={width}
             breakpoints={GRID_BREAKPOINTS}
@@ -319,7 +336,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             rowHeight={DASHBOARD_ROW_HEIGHT}
             margin={DASHBOARD_MARGIN}
             containerPadding={CONTAINER_PADDING}
-            compactor={stacked ? verticalCompactor : noCompactor}
+            compactor={stacked ? verticalCompactor : FREE_PLACEMENT_COMPACTOR}
             dragConfig={{
               enabled: editing,
               handle: `.${DRAG_HANDLE_CLASS}`,
@@ -352,19 +369,19 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
                       role="group"
                       aria-label={t("dashboard.layout.movePanel", { name: title })}
                     >
-                      <span className="scry-dashboard-drag-grip" aria-hidden="true">
-                        <GripVertical className="h-4 w-4" />
-                        <span className="truncate">{title}</span>
-                      </span>
-                      <IconButton
-                        appearance="boxed"
-                        tone="delete"
-                        className={NO_DRAG_CLASS}
-                        label={t("dashboard.layout.removePanel", { name: title })}
-                        onClick={() => updateDraft((current) => removeDashboardPanel(current, panelId))}
-                      >
-                        <X className="h-3.5 w-3.5" aria-hidden="true" />
-                      </IconButton>
+                      <div className="scry-dashboard-drag-bar">
+                        <GripVertical className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span className="scry-dashboard-drag-title" aria-hidden="true">{title}</span>
+                        <IconButton
+                          appearance="boxed"
+                          tone="delete"
+                          className={cn(NO_DRAG_CLASS, "h-7 w-7")}
+                          label={t("dashboard.layout.removePanel", { name: title })}
+                          onClick={() => updateDraft((current) => removeDashboardPanel(current, panelId))}
+                        >
+                          <X className="h-3.5 w-3.5" aria-hidden="true" />
+                        </IconButton>
+                      </div>
                     </div>
                   ) : null}
                 </div>

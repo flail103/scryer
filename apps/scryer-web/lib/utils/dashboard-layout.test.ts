@@ -259,6 +259,24 @@ test("adding puts the panel below everything at its default size; dropping puts 
   assert.deepEqual(added.at(-1), row("storage", 0, 28, 6, 10));
   assert.equal(appendDashboardPanel(added, "storage", "LG").length, added.length);
 
+  const dropped = placeDashboardPanel(without, "storage", "LG", { x: 0, y: 18 });
+  assert.deepEqual(dropped.at(-1), row("storage", 0, 18, 6, 10));
+});
+
+test("a drop onto other panels moves only the dropped one, down to the first free rows", () => {
+  const without = removeDashboardPanel(DEFAULT_DASHBOARD_LAYOUTS.LG, "storage");
   const dropped = placeDashboardPanel(without, "storage", "LG", { x: 11, y: 3 });
-  assert.deepEqual(dropped.at(-1), row("storage", 6, 3, 6, 10));
+  // Clamped to x 6, then past manual imports, download clients and active queue.
+  assert.deepEqual(dropped.at(-1), row("storage", 6, 28, 6, 10));
+  assert.deepEqual(dropped.slice(0, -1), without);
+  for (const [index, left] of dropped.entries()) {
+    for (const right of dropped.slice(index + 1)) {
+      const apart =
+        left.x + left.w <= right.x ||
+        right.x + right.w <= left.x ||
+        left.y + left.h <= right.y ||
+        right.y + right.h <= left.y;
+      assert.ok(apart, `${left.panelId} overlaps ${right.panelId}`);
+    }
+  }
 });
