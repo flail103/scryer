@@ -1087,3 +1087,36 @@ async fn page_limits_clamp_and_filter_refills_keep_nonterminal_pages_full() {
         assert!(!page.terminal && !page.exhausted);
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn source_progress_counts_every_delivered_row_not_only_the_page_shown() {
+    let (generation, mut reads) = generation(2, Arc::new(RawSearchBudget::default())).await;
+    let first = request_page(&generation, 0, 2);
+    let (_, older) = read(&mut reads).await;
+    let (_, newer) = read(&mut reads).await;
+    // Fifty newest rows from one source fill the whole first page; the other
+    // source's older rows are retained but not yet shown.
+    newer.send(response(0..50, None)).unwrap();
+    older.send(response(100..130, None)).unwrap();
+    let first = finish(first).await;
+    assert_eq!(titles(&first), vec![0, 1]);
+    let mut delivered = first
+        .sources
+        .iter()
+        .map(|source| source.delivered)
+        .collect::<Vec<_>>();
+    delivered.sort_unstable();
+    assert_eq!(delivered, vec![30, 50]);
+    assert_eq!(
+        titles(&finish(request_page(&generation, 48, 4)).await),
+        vec![48, 49, 100, 101]
+    );
+    let mut delivered = generation
+        .source_progress()
+        .await
+        .iter()
+        .map(|source| source.delivered)
+        .collect::<Vec<_>>();
+    delivered.sort_unstable();
+    assert_eq!(delivered, vec![30, 50]);
+}

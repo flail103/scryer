@@ -215,11 +215,7 @@ fn dedupe_exact_duplicate_releases(results: Vec<IndexerSearchResult>) -> Vec<Ind
 
 /// A listing's publish time, if it parses.
 fn published_instant(result: &IndexerSearchResult) -> Option<DateTime<Utc>> {
-    let value = result.published_at.as_deref()?.trim();
-    DateTime::parse_from_rfc3339(value)
-        .or_else(|_| DateTime::parse_from_rfc2822(value))
-        .ok()
-        .map(|instant| instant.with_timezone(&Utc))
+    scryer_domain::publish_time::parse_publish_time(result.published_at.as_deref()?)
 }
 
 /// Newest listing first; undated listings last. Ties go by indexer name,
@@ -924,14 +920,9 @@ impl AppUseCase {
             else {
                 continue;
             };
-            view.result_count = entry.snapshot.raw_page.as_ref().map_or(0, |page| {
-                page.rows
-                    .iter()
-                    .filter(|row| {
-                        row.result().indexer_id.as_deref() == Some(source.indexer_id.as_str())
-                    })
-                    .count()
-            });
+            // Every row the source has handed the generation so far, whether
+            // or not it has reached the page being shown.
+            view.result_count = source.delivered;
             view.elapsed_ms = source
                 .elapsed_ms
                 .map(|elapsed| elapsed.min(i64::MAX as u64) as i64);

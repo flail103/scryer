@@ -90,6 +90,9 @@ pub struct RawSearchSourceProgress {
     pub refusal_reason: Option<&'static str>,
     pub retry_after: Option<Duration>,
     pub elapsed_ms: Option<u64>,
+    /// Rows this source has handed the generation so far, across every page
+    /// it answered, whether or not they have been merged into an output page.
+    pub delivered: usize,
 }
 
 pub struct RawSearchPage {
@@ -184,6 +187,7 @@ struct SourceState {
     outcome: Option<IndexerSearchOutcome>,
     page: Option<IndexerSearchPageMetadata>,
     refusal_reason: Option<&'static str>,
+    delivered: usize,
 }
 
 struct State {
@@ -296,6 +300,7 @@ impl RawSearchGeneration {
                     outcome: None,
                     page: None,
                     refusal_reason: None,
+                    delivered: 0,
                 })
                 .collect(),
             emitted: VecDeque::new(),
@@ -404,6 +409,7 @@ impl RawSearchGeneration {
                 page: source.page.clone(),
                 refusal_reason: source.refusal_reason,
                 elapsed_ms: source.elapsed_ms,
+                delivered: source.delivered,
             })
             .collect()
     }
@@ -781,6 +787,7 @@ impl RawSearchGeneration {
                     Self::reserve_reclaiming(&self.budget, bytes, self.registry.as_ref()).await
                 {
                     source.position = 0;
+                    source.delivered += response.results.len();
                     source.buffer = (!response.results.is_empty()).then(|| {
                         Arc::new(StoredPage {
                             rows: response.results,
@@ -1026,6 +1033,7 @@ impl RawSearchGeneration {
                 page: source.page.clone(),
                 refusal_reason: source.refusal_reason,
                 elapsed_ms: source.elapsed_ms,
+                delivered: source.delivered,
             })
             .collect::<Vec<_>>();
         let bytes = header_bytes

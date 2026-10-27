@@ -2059,7 +2059,9 @@ fn host_search_response(
                 download_url: result.download_url,
                 source_kind,
                 size_bytes: result.size_bytes,
-                published_at: result.published_at,
+                published_at: result
+                    .published_at
+                    .map(scryer_domain::publish_time::normalize_publish_time),
                 thumbs_up: result.thumbs_up,
                 thumbs_down: result.thumbs_down,
                 indexer_languages: (!result.languages.is_empty()).then_some(result.languages),
