@@ -1710,8 +1710,8 @@ jobs:
           # so each executable is signed where it will actually be shipped and
           # the bundle is sealed around them last, replacing the ad-hoc seal.
           # Hardened runtime and a secure timestamp are preconditions for
-          # notarization; they cost nothing when the image ships unnotarized.
-          codesign --sign "Scryer Media Signing" --identifier media.scryer.app --options runtime --timestamp --force dist/app/Scryer.app/Contents/MacOS/scryer
+          # notarization. Only the server needs the Wasmtime executable-memory exemption.
+          codesign --sign "Scryer Media Signing" --identifier media.scryer.app --options runtime --entitlements packaging/macos/server-entitlements.plist --timestamp --force dist/app/Scryer.app/Contents/MacOS/scryer
           codesign --sign "Scryer Media Signing" --identifier media.scryer.app --options runtime --timestamp --force dist/app/Scryer.app/Contents/MacOS/scryer-tray
           codesign --sign "Scryer Media Signing" --identifier media.scryer.app --options runtime --timestamp --force dist/app/Scryer.app
           codesign --verify --deep --verbose dist/app/Scryer.app
@@ -1796,8 +1796,10 @@ jobs:
       # Proves the round trip the upgrade actually performs: extract the archive
       # somewhere else and check the bundle still verifies. A lost executable
       # bit or a mangled `_CodeSignature` fails here rather than on a user's
-      # machine after their application has already been replaced.
-      - name: Validate app bundle archive
+      # machine after their application has already been replaced. Start the
+      # extracted server too: a valid signature can still forbid Wasmtime code
+      # execution, which the wrapper-only WebKit smoke test cannot detect.
+      - name: Validate app bundle archive and startup
         if: steps.scope.outputs.run == 'true'
         shell: bash
         run: |
@@ -1808,6 +1810,8 @@ jobs:
           test -x "$extracted/Scryer.app/Contents/MacOS/scryer"
           test -x "$extracted/Scryer.app/Contents/MacOS/scryer-tray"
           codesign --verify --deep --strict "$extracted/Scryer.app"
+          python3 packaging/macos/smoke-test-app.py "$extracted/Scryer.app" \
+            2>&1 | tee "${{ matrix.artifact_name }}-startup-smoke.log"
 
       - name: Remove signing keychain
         if: ${{ steps.scope.outputs.run == 'true' && (always() && steps.signing.outputs.signed == 'true') }}
@@ -1876,6 +1880,7 @@ jobs:
             ${{ matrix.artifact_name }}-native-build-env.txt
             ${{ matrix.artifact_name }}-native-linkage.txt
             ${{ matrix.artifact_name }}-webview-smoke.log
+            ${{ matrix.artifact_name }}-startup-smoke.log
             ${{ matrix.artifact_name }}-sccache-stats.txt
             ${{ github.event_name == 'pull_request' && format('{0}/target/cargo-timings/*', github.workspace) || format('{0}/{1}/cargo-timings/*', runner.temp, env.RELEASE_TARGET_NAME) }}
           if-no-files-found: warn

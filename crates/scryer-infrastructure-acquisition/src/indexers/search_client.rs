@@ -23137,6 +23137,39 @@ mod tests {
         results.into_iter().map(|result| result.title).collect()
     }
 
+    #[test]
+    fn exact_title_guard_keeps_parenthetical_dual_names_without_aliases() {
+        let numbering_context = IndexerSearchNumberingContext::default();
+        for query in ["Lantern Verge", "Touka no Sora"] {
+            for (marker, episode) in [("- S01E12", Some(12)), ("(Season 01)", None)] {
+                let expected = format!(
+                    "[Judas] Lantern Verge (Touka no Sora) {marker} [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]"
+                );
+                let wrong_season = expected.replace("01", "02");
+                let context = FilterStrategyContext {
+                    query,
+                    season: Some(1),
+                    episode,
+                    numbering_context: &numbering_context,
+                    tagged_aliases: &[],
+                    title_guard_mode: TitleGuardMode::ExactTitleMatch,
+                    strategy_label: "freetext",
+                    is_rss_request: false,
+                };
+                let kept = surviving_titles(
+                    &[
+                        &expected,
+                        &wrong_season,
+                        "[Judas] Lantern Road (Touka no Umi) S01E12 [1080p]",
+                        "[Judas] Lantern Verge Extra (Touka no Sora Extra) S01E12 [1080p]",
+                    ],
+                    &context,
+                );
+                assert_eq!(kept, vec![expected], "{query}: {marker}");
+            }
+        }
+    }
+
     /// A four-cour anime: TVDB S01E53 is the community's S04E17. Both forms
     /// denote the wanted episode, so both survive the guard, while a numbering
     /// that means a different episode in either layout does not.

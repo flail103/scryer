@@ -9,6 +9,61 @@ use crate::{
 };
 
 #[test]
+fn parenthetical_dual_names_produce_context_free_title_variants() {
+    for (name, expected) in [
+        ("Lantern Verge (Touka no Sora)", "TOUKA NO SORA"),
+        ("Lantern Verge (Lantern Verge)", "LANTERN VERGE"),
+    ] {
+        for marker in ["- S01E12", "(Season 01)"] {
+            let raw = format!(
+                "[Judas] {name} {marker} [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs] (Batch)"
+            );
+            let parsed =
+                crate::best_parse_for_target(&raw, &context(ContextFacetHint::Unknown, ""));
+            for title in ["LANTERN VERGE", expected] {
+                assert!(
+                    parsed
+                        .normalized_title_variants
+                        .iter()
+                        .any(|variant| variant == title),
+                    "missing {title}: {raw}: {:?}",
+                    parsed.normalized_title_variants
+                );
+            }
+            let episode = parsed.episode.expect(&raw);
+            assert_eq!(episode.season, Some(1), "{raw}");
+            assert_eq!(episode.full_season, marker == "(Season 01)", "{raw}");
+        }
+    }
+}
+
+#[test]
+fn parenthetical_title_variants_exclude_years_metadata_and_partial_names() {
+    for (raw, excluded) in [
+        ("Lantern Verge (2016) S01E12 1080p", "2016"),
+        (
+            "Lantern Verge S01E12 [1080p] (Touka no Sora)",
+            "TOUKA NO SORA",
+        ),
+        (
+            "Lantern Verge (Touka no Sora) Beyond Tomorrow S01E12 [1080p]",
+            "TOUKA NO SORA",
+        ),
+        ("Lantern Verge (1080p WEB-DL) S01E12", "WEB DL"),
+    ] {
+        let parsed = crate::best_parse_for_target(raw, &context(ContextFacetHint::Unknown, ""));
+        assert!(
+            !parsed
+                .normalized_title_variants
+                .iter()
+                .any(|variant| variant == excluded),
+            "{raw}: {:?}",
+            parsed.normalized_title_variants
+        );
+    }
+}
+
+#[test]
 fn slash_separated_anime_titles_keep_standard_episode_title_evidence() {
     let mut target = context(ContextFacetHint::Anime, "Battle Through the Heavens");
     target.aliases = vec![

@@ -5223,6 +5223,11 @@ fn extend_title_connector_variants(
         push_side_title_variant(variants, tokens, right);
     }
 
+    if let Some(split_index) = parenthetical_title_split(tokens, title_indices) {
+        push_side_title_variant(variants, tokens, &title_indices[..split_index]);
+        push_side_title_variant(variants, tokens, &title_indices[split_index..]);
+    }
+
     for split_index in subtitle_split_positions(tokens, title_indices) {
         let left = &title_indices[..split_index];
         let right = &title_indices[split_index..];
@@ -5238,6 +5243,37 @@ fn extend_title_connector_variants(
     if let Some(without_part) = remove_part_connector_variant(tokens, title_indices) {
         push_unique_title_variant(variants, without_part);
     }
+}
+
+fn parenthetical_title_split(tokens: &[Token], indices: &[usize]) -> Option<usize> {
+    let split = indices
+        .iter()
+        .position(|index| tokens[*index].separator_before == SeparatorKind::OpenParen)?;
+    let (primary, alternate) = indices.split_at(split);
+    let first = tokens.get(*alternate.first()?)?;
+    let last = tokens.get(*alternate.last()?)?;
+    let group = first.group_id?;
+    if primary.is_empty()
+        || primary
+            .iter()
+            .any(|index| tokens[*index].group_id.is_some())
+        || first.bracket_depth != 1
+        || last.separator_after != SeparatorKind::CloseParen
+        || alternate.iter().any(|index| {
+            tokens[*index].group_id != Some(group) || tokens[*index].bracket_depth != 1
+        })
+        || !alternate.windows(2).all(|pair| pair[1] == pair[0] + 1)
+        || tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| token.group_id == Some(group) && !alternate.contains(&index))
+        || !alternate
+            .iter()
+            .any(|index| tokens[*index].normalized.chars().any(char::is_alphabetic))
+    {
+        return None;
+    }
+    Some(split)
 }
 
 fn push_side_title_variant(variants: &mut Vec<String>, tokens: &[Token], side: &[usize]) {
