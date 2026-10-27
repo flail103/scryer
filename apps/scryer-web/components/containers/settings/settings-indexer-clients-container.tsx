@@ -27,6 +27,8 @@ import {
 import { IndexerCategoryPicker } from "@/components/views/media-content/indexer-category-picker";
 import { SortableHead } from "@/components/views/lists/sortable-head";
 import { FilteredPluginList } from "@/components/views/settings/filtered-plugin-list";
+import { INDEXER_NARROW_CELL_CLASS as NARROW_CELL } from "@/components/views/settings/settings-indexers-section";
+import { cn } from "@/lib/utils";
 import { SETTINGS_REFERENCE_SLOT_ID } from "@/components/containers/settings/settings-container";
 import { useTranslate } from "@/lib/context/translate-context";
 import { useUiDateTimeFormat } from "@/lib/context/ui-settings-context";
@@ -53,6 +55,12 @@ import { withMfaStepUp } from "@/lib/utils/with-mfa-step-up";
 import { getRuntimeBasePath } from "@/lib/runtime-config";
 import { indexerClientEndpointUrl } from "@/lib/utils/indexer-client-endpoint";
 import { sortIndexerClients, type IndexerClientSort, type IndexerClientSortKey } from "@/lib/utils/indexer-client-sort";
+
+/** Below 1279px these tables become one card per row, like the indexers table. */
+const NARROW_TABLE =
+  "max-[1279px]:block max-[1279px]:[&_thead]:hidden max-[1279px]:[&_tbody]:block max-[1279px]:p-2";
+const NARROW_ROW =
+  "max-[1279px]:mb-2 max-[1279px]:block max-[1279px]:overflow-hidden max-[1279px]:rounded-lg max-[1279px]:border max-[1279px]:border-border last:max-[1279px]:mb-0";
 
 const PROTOCOLS: readonly IndexerClientProtocol[] = ["NEWZNAB", "TORZNAB"];
 const PROTOCOL_LABEL_KEYS: Readonly<Record<IndexerClientProtocol, string>> = {
@@ -337,7 +345,7 @@ export function SettingsIndexerClientsContainer() {
       ) : clients.length === 0 ? (
         <p id="settings-indexer-clients-empty" className="p-4 text-[var(--scry-muted3)]">{t("indexerClients.none")}</p>
       ) : (
-        <Table id="settings-indexer-clients-table" overflow="clip" layout="fixed" density="dense">
+        <Table id="settings-indexer-clients-table" overflow="clip" layout="fixed" density="dense" className={NARROW_TABLE}>
           <TableHeader>
             <TableRow>
               {sortHead("name", t("label.name"), "w-[22%]")}
@@ -354,15 +362,16 @@ export function SettingsIndexerClientsContainer() {
               <Fragment key={client.id}>
               <TableRow
                 id={selectorId("settings-indexer-client-row", client.id)}
+                className={NARROW_ROW}
                 data-ui="settings-table-row"
                 data-client-name={client.name}
               >
-                <TableCell className="truncate font-medium text-[var(--scry-ink2)]">{client.name}</TableCell>
-                <TableCell className="text-[var(--scry-muted3)]">
+                <TableCell data-label={t("label.name")} className={cn("truncate font-medium text-[var(--scry-ink2)]", NARROW_CELL)}>{client.name}</TableCell>
+                <TableCell data-label={t("indexerClients.protocols")} className={cn("text-[var(--scry-muted3)]", NARROW_CELL)}>
                   {client.protocols.map((protocol) => t(PROTOCOL_LABEL_KEYS[protocol])).join(" / ")}
                 </TableCell>
-                <TableCell className="text-center text-[var(--scry-muted3)]">{client.grants.length}</TableCell>
-                <TableCell className="text-center">
+                <TableCell data-label={t("indexerClients.grants")} className={cn("text-center text-[var(--scry-muted3)]", NARROW_CELL)}>{client.grants.length}</TableCell>
+                <TableCell data-label={t("label.enabled")} className={cn("text-center", NARROW_CELL)}>
                   <Checkbox
                     id={selectorId("settings-indexer-client-enabled", client.id)}
                     size="large"
@@ -373,12 +382,13 @@ export function SettingsIndexerClientsContainer() {
                     onCheckedChange={(checked) => toggleEnabled(client, checked === true)}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell data-label={t("indexerClients.key")} className={NARROW_CELL}>
                   <Badge tone={client.keyActive ? "positive" : "negative"}>
                     {t(client.keyActive ? "indexerClients.keyActive" : "indexerClients.keyRevoked")}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-[var(--scry-muted3)]">
+                <TableCell data-label={t("indexerClients.lastUsed")} className={cn("text-[var(--scry-muted3)]", NARROW_CELL)}>
+                  <div className="min-w-0">
                   <div className="truncate">
                     {client.lastUsedAt
                       ? <time dateTime={client.lastUsedAt}>{formatUiDateTime(client.lastUsedAt, dateTimeFormat)}</time>
@@ -389,8 +399,9 @@ export function SettingsIndexerClientsContainer() {
                       {indexerClientOutcomeMessage(client.lastOutcome, t)}
                     </div>
                   ) : null}
+                  </div>
                 </TableCell>
-                <TableActionsCell className="w-32">
+                <TableActionsCell data-label={t("label.actions")} className={cn("w-32", NARROW_CELL, "max-[1279px]:w-auto max-[1279px]:border-b-0")}>
                   <div className="flex items-center justify-end gap-1">
                     <IconButton
                       id={selectorId("settings-indexer-client-edit", client.id)}
@@ -423,8 +434,8 @@ export function SettingsIndexerClientsContainer() {
                 </TableActionsCell>
               </TableRow>
               {revealed?.clientId === client.id ? (
-                <TableRow id={selectorId("settings-indexer-client-revealed", client.id)}>
-                  <TableCell colSpan={7} className="bg-[var(--scry-warning-bg)] p-3">
+                <TableRow id={selectorId("settings-indexer-client-revealed", client.id)} className={NARROW_ROW}>
+                  <TableCell colSpan={7} className="bg-[var(--scry-warning-bg)] p-3 max-[1279px]:block">
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center gap-2">
                         <ShieldAlert className="h-4 w-4 shrink-0 text-[var(--scry-warning-text)]" aria-hidden="true" />
@@ -523,7 +534,7 @@ export function SettingsIndexerClientsContainer() {
             <fieldset className="space-y-2">
               <legend className="mb-1 text-sm font-medium">{t("indexerClients.grants")}</legend>
               <div className="rounded border border-border">
-                <Table id="indexer-client-grants" overflow="clip" layout="fixed" density="dense">
+                <Table id="indexer-client-grants" overflow="clip" layout="fixed" density="dense" className={NARROW_TABLE}>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12 text-center">
@@ -554,8 +565,8 @@ export function SettingsIndexerClientsContainer() {
                     {sources.map((source) => {
                       const grant = draft.grants.find((value) => value.indexerId === source.id);
                       return (
-                        <TableRow key={source.id} id={selectorId("indexer-client-grant-row", source.id)}>
-                          <TableCell className="text-center">
+                        <TableRow key={source.id} id={selectorId("indexer-client-grant-row", source.id)} className={NARROW_ROW} data-ui="settings-table-row">
+                          <TableCell data-label={t("indexerClients.granted")} className={cn("text-center", NARROW_CELL)}>
                             <Checkbox
                               id={`indexer-client-grant-${source.id}`}
                               aria-label={source.name}
@@ -564,11 +575,14 @@ export function SettingsIndexerClientsContainer() {
                               onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : undefined)}
                             />
                           </TableCell>
-                          <TableCell className="truncate font-medium text-[var(--scry-ink2)]">{source.name}</TableCell>
-                          <TableCell className="truncate text-[var(--scry-muted3)]" title={source.baseUrl ?? undefined}>
+                          <TableCell data-label={t("indexerClients.grantIndexer")} className={cn("truncate font-medium text-[var(--scry-ink2)]", NARROW_CELL)}>{source.name}</TableCell>
+                          <TableCell data-label={t("settings.baseUrl")} className={cn("truncate text-[var(--scry-muted3)]", NARROW_CELL)} title={source.baseUrl ?? undefined}>
                             {source.baseUrl}
                           </TableCell>
-                          <TableCell className="text-center">
+                          <TableCell
+                            data-label={t("indexerClients.grantAllCategories")}
+                            className={cn("text-center", NARROW_CELL, !grant && "max-[1279px]:hidden")}
+                          >
                             {grant ? (
                               <Checkbox
                                 id={`indexer-client-all-categories-${source.id}`}
@@ -579,7 +593,10 @@ export function SettingsIndexerClientsContainer() {
                               />
                             ) : null}
                           </TableCell>
-                          <TableCell className="py-1">
+                          <TableCell
+                            data-label={t("indexerClients.categories")}
+                            className={cn("py-1", NARROW_CELL, "max-[1279px]:border-b-0", !(grant && grant.categories !== null) && "max-[1279px]:hidden")}
+                          >
                             {grant && grant.categories !== null ? (
                               <div className="space-y-1">
                                 <IndexerCategoryPicker

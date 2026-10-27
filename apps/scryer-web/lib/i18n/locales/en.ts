@@ -2639,6 +2639,7 @@ const en: LocaleDictionary = {
   "indexerClients.allCategories": "Allow all categories on this indexer",
   "indexerClients.grantAll": "Grant every indexer",
   "indexerClients.grantIndexer": "Indexer",
+  "indexerClients.granted": "Granted",
   "indexerClients.grantAllCategories": "All categories",
   "indexerClients.enableRequiresKey": "Rotate the key before enabling this client.",
   "indexerClients.error.enableRequiresKey": "This client's key was revoked. Rotate the key before enabling it.",
