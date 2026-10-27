@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useClient } from "urql";
 import { Ban, CheckCircle2, Clipboard, Edit, KeyRound, Lock, Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import { AddNewButton } from "@/components/common/add-new-button";
@@ -24,6 +25,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { IndexerCategoryPicker } from "@/components/views/media-content/indexer-category-picker";
+import { FilteredPluginList } from "@/components/views/settings/filtered-plugin-list";
+import { SETTINGS_REFERENCE_SLOT_ID } from "@/components/containers/settings/settings-container";
 import { useTranslate } from "@/lib/context/translate-context";
 import { useUiDateTimeFormat } from "@/lib/context/ui-settings-context";
 import { useAuth, type AuthUser } from "@/lib/hooks/use-auth";
@@ -122,6 +125,9 @@ export function SettingsIndexerClientsContainer() {
     }
   }, [api, t]);
   useEffect(() => { void load(); }, [load]);
+  const [pluginsTarget, setPluginsTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPluginsTarget(document.getElementById(SETTINGS_REFERENCE_SLOT_ID)); }, []);
+  const refreshAfterPluginChange = useCallback(async () => { await load(); }, [load]);
 
   const requestMfa = useCallback(() => new Promise<string | null>((resolve) => {
     if (!mounted.current) { resolve(null); return; }
@@ -189,6 +195,9 @@ export function SettingsIndexerClientsContainer() {
     { id: client.id, expectedRevision: client.revision, input: { ...configurationOf(client), enabled } });
 
   return <div id="settings-indexer-clients" className="flex flex-col gap-4 text-sm">
+    {pluginsTarget
+      ? createPortal(<FilteredPluginList family="INDEXER" refreshProviderOptions={refreshAfterPluginChange} />, pluginsTarget)
+      : null}
     <p className="text-[var(--scry-muted3)]">{t("indexerClients.description")}</p>
 
     {error ? (
@@ -234,8 +243,8 @@ export function SettingsIndexerClientsContainer() {
       </div>
     ) : null}
 
-    <Card id="settings-indexer-clients-table-card" className="p-0">
-      <CardHeader className="mb-0 flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+    <div id="settings-indexer-clients-table-card" className="rounded border border-border">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
         <CardTitle className="text-base">{t("indexerClients.existing")}</CardTitle>
         <IconButton
           id="settings-indexer-clients-refresh"
@@ -245,7 +254,7 @@ export function SettingsIndexerClientsContainer() {
         >
           {loading ? <LoadingMark className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
         </IconButton>
-      </CardHeader>
+      </div>
       {accessRefusal && clients === null ? (
         <div id="settings-indexer-clients-access" className="flex items-start gap-2 p-4 text-[var(--scry-muted3)]">
           <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -346,7 +355,7 @@ export function SettingsIndexerClientsContainer() {
           </TableBody>
         </Table>
       )}
-    </Card>
+    </div>
 
     {clients !== null && editorOpen ? (
       <Card aria-busy={busy}>
@@ -405,14 +414,16 @@ export function SettingsIndexerClientsContainer() {
             </fieldset>
             <fieldset className="space-y-3">
               <legend className="mb-1 text-sm font-medium">{t("indexerClients.grants")}</legend>
-              <p className="text-[var(--scry-muted3)]">{t("indexerClients.grantsHelp")}</p>
               {sources.map((source) => {
                 const grant = draft.grants.find((value) => value.indexerId === source.id);
                 return (
                   <div key={source.id} className="space-y-3 rounded-[12px] border border-[var(--scry-line2)] bg-[var(--scry-card2)] p-3">
                     <CheckboxField
                       id={`indexer-client-grant-${source.id}`}
-                      label={source.name}
+                      label={<>
+                        {source.name}
+                        {source.baseUrl ? <span className="ml-2 font-normal text-[var(--scry-muted3)]">{source.baseUrl}</span> : null}
+                      </>}
                       checked={!!grant}
                       disabled={busy}
                       onCheckedChange={(checked) => setGrant(source.id, checked === true ? null : undefined)}

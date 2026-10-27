@@ -2635,7 +2635,6 @@ const en: LocaleDictionary = {
   "indexerClients.name": "Client name",
   "indexerClients.protocols": "Allowed protocols",
   "indexerClients.grants": "Granted indexers",
-  "indexerClients.grantsHelp": "Select individual indexers, including managed children. New indexers are never granted automatically.",
   "indexerClients.allCategories": "Allow all categories on this indexer",
   "indexerClients.categories": "Allowed categories",
   "indexerClients.noCategories": "No categories selected: this indexer will return no results to the client.",
