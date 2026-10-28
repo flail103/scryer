@@ -23,7 +23,12 @@ const draft = {
 };
 
 test("preview requires a title, release name, and an episode for episodic titles", () => {
-  const movie = { titleId: "title", episodeId: null, releaseName: "x", sizeGib: "" };
+  const movie = {
+    titleId: "title",
+    episodeId: null,
+    releaseName: "x",
+    sizeGib: "",
+  };
   assert.equal(canTestRuleSet(movie, false), true);
   assert.equal(canTestRuleSet(movie, true), false);
   assert.equal(
@@ -33,17 +38,57 @@ test("preview requires a title, release name, and an episode for episodic titles
 });
 
 test("preview becomes stale for either draft or input changes", () => {
-  const selection = { titleId: "title", episodeId: null, releaseName: "release", sizeGib: "" };
+  const selection = {
+    titleId: "title",
+    episodeId: null,
+    releaseName: "release",
+    sizeGib: "",
+  };
   const baseline = ruleSetTestFingerprint(draft, selection, null, null, null);
-  assert.notEqual(baseline, ruleSetTestFingerprint({ ...draft, enabled: false }, selection, null, null, null));
-  assert.notEqual(baseline, ruleSetTestFingerprint(draft, { ...selection, sizeGib: "2" }, null, null, null));
+  assert.notEqual(
+    baseline,
+    ruleSetTestFingerprint(
+      { ...draft, enabled: false },
+      selection,
+      null,
+      null,
+      null,
+    ),
+  );
+  assert.notEqual(
+    baseline,
+    ruleSetTestFingerprint(
+      draft,
+      { ...selection, sizeGib: "2" },
+      null,
+      null,
+      null,
+    ),
+  );
 });
 
 test("saved previews are distinct from draft previews and retain the selected rule identity", () => {
-  const selection = { titleId: "title", episodeId: null, releaseName: "release", sizeGib: "" };
-  const saved = ruleSetTestFingerprint(null, selection, null, null, "installed-rule");
-  assert.notEqual(saved, ruleSetTestFingerprint(draft, selection, null, null, null));
-  assert.notEqual(saved, ruleSetTestFingerprint(null, selection, null, null, "other-rule"));
+  const selection = {
+    titleId: "title",
+    episodeId: null,
+    releaseName: "release",
+    sizeGib: "",
+  };
+  const saved = ruleSetTestFingerprint(
+    null,
+    selection,
+    null,
+    null,
+    "installed-rule",
+  );
+  assert.notEqual(
+    saved,
+    ruleSetTestFingerprint(draft, selection, null, null, null),
+  );
+  assert.notEqual(
+    saved,
+    ruleSetTestFingerprint(null, selection, null, null, "other-rule"),
+  );
 });
 
 test("saved preview requests contain only the installed rule identity and selection", () => {
@@ -74,7 +119,12 @@ test("delayed preview response is discarded after committed inputs change", asyn
   const requestFingerprint = "before";
   let committedFingerprint = requestFingerprint;
   const response = delayed.then(() =>
-    shouldApplyRuleSetTestResponse(1, 1, requestFingerprint, committedFingerprint),
+    shouldApplyRuleSetTestResponse(
+      1,
+      1,
+      requestFingerprint,
+      committedFingerprint,
+    ),
   );
   committedFingerprint = "after";
   release();
@@ -128,9 +178,18 @@ test("size conversion preserves unknown values and rejects unsafe bytes", () => 
 });
 
 test("preview operation asks for structured evaluation errors", () => {
-  assert.match(testRuleSetMutation, /errors \{\s+code\s+message\s+ruleSetId\s+\}/);
-  assert.match(testRuleSetMutation, /entries \{\s+code\s+delta\s+blocked\s+kind\s+\}/);
-  assert.match(testRuleSetMutation, /releaseGroup[\s\S]*videoCodec[\s\S]*audioLanguages/);
+  assert.match(
+    testRuleSetMutation,
+    /errors \{\s+code\s+message\s+ruleSetId\s+\}/,
+  );
+  assert.match(
+    testRuleSetMutation,
+    /entries \{\s+code\s+delta\s+blocked\s+kind\s+\}/,
+  );
+  assert.match(
+    testRuleSetMutation,
+    /releaseGroup[\s\S]*videoCodec[\s\S]*audioLanguages/,
+  );
 });
 
 test("a stored file needs only a title and a file, never an episode", () => {
@@ -238,7 +297,10 @@ test("listing facts parse into mutation input", () => {
 });
 
 test("malformed listing facts report their i18n error", () => {
-  const bad = (field: keyof typeof EMPTY_RULE_SET_TEST_LISTING, value: string) =>
+  const bad = (
+    field: keyof typeof EMPTY_RULE_SET_TEST_LISTING,
+    value: string,
+  ) =>
     listingInputFromDraft({ ...EMPTY_RULE_SET_TEST_LISTING, [field]: value });
   for (const value of [
     "yesterday",
@@ -279,7 +341,10 @@ test("listing changes make a previous result stale", () => {
     ruleSetTestFingerprint(draft, selection, null, null, null),
     ruleSetTestFingerprint(
       draft,
-      { ...selection, listing: { ...EMPTY_RULE_SET_TEST_LISTING, thumbsUp: "1" } },
+      {
+        ...selection,
+        listing: { ...EMPTY_RULE_SET_TEST_LISTING, thumbsUp: "1" },
+      },
       null,
       null,
       null,
@@ -297,9 +362,24 @@ test("preview operation echoes the scored release and its listing facts", () => 
 
 test("stored-file options list each file once and follow the selected episode", () => {
   const rows = [
-    { id: "disc", episodeId: "ep-1", filePath: "/library/Serial/disc.iso", grabbedReleaseTitle: null },
-    { id: "disc", episodeId: "ep-2", filePath: "/library/Serial/disc.iso", grabbedReleaseTitle: null },
-    { id: "single", episodeId: "ep-2", filePath: "C:\\library\\Serial\\e2.mkv", grabbedReleaseTitle: "Synthetic.Serial.S01E02" },
+    {
+      id: "disc",
+      episodeId: "ep-1",
+      filePath: "/library/Serial/disc.iso",
+      grabbedReleaseTitle: null,
+    },
+    {
+      id: "disc",
+      episodeId: "ep-2",
+      filePath: "/library/Serial/disc.iso",
+      grabbedReleaseTitle: null,
+    },
+    {
+      id: "single",
+      episodeId: "ep-2",
+      filePath: "C:\\library\\Serial\\e2.mkv",
+      grabbedReleaseTitle: "Synthetic.Serial.S01E02",
+    },
     { id: "unbound", episodeId: null, filePath: "/library/Serial/extra.mkv" },
   ];
   assert.deepEqual(storedFileOptions(rows, null), [

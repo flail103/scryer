@@ -231,7 +231,10 @@ async function loadUserFromBypass(options?: { clearToken?: boolean }) {
   }
 }
 
-function rememberAuthBootstrapSession(token: string | null, user: AuthUser | null) {
+function rememberAuthBootstrapSession(
+  token: string | null,
+  user: AuthUser | null,
+) {
   authBootstrapPromise = null;
   authBootstrapSnapshot = {
     token,
@@ -242,7 +245,8 @@ function rememberAuthBootstrapSession(token: string | null, user: AuthUser | nul
     effectiveFormLoginEnabled:
       authBootstrapSnapshot?.effectiveFormLoginEnabled ?? null,
     passkeyEnabled: authBootstrapSnapshot?.passkeyEnabled ?? false,
-    defaultPersistSession: authBootstrapSnapshot?.defaultPersistSession ?? false,
+    defaultPersistSession:
+      authBootstrapSnapshot?.defaultPersistSession ?? false,
     mfaRequirePasswordLogin:
       authBootstrapSnapshot?.mfaRequirePasswordLogin ?? false,
     mfaRequireConfigStepUp:
@@ -379,11 +383,7 @@ async function computeAuthBootstrapSnapshot(): Promise<AuthBootstrapSnapshot> {
   let user: AuthUser | null = null;
   if (runtimeState == null || runtimeState?.skipLoginForLocalIps === true) {
     user = await loadUserFromBypass();
-    if (
-      !user &&
-      runtimeState?.skipLoginForLocalIps === true &&
-      currentToken
-    ) {
+    if (!user && runtimeState?.skipLoginForLocalIps === true && currentToken) {
       user = await loadUserFromBypass({ clearToken: true });
     }
   }
@@ -494,7 +494,11 @@ export type AuthState = {
 /** Extract AuthUser from a JWT payload, or null if the token is invalid/expired. */
 function userFromToken(token: string): AuthUser | null {
   const payload = decodeJwtPayload(token);
-  if (!payload || isTokenExpired(payload) || isRestrictedAuthScope(payload.authScope)) {
+  if (
+    !payload ||
+    isTokenExpired(payload) ||
+    isRestrictedAuthScope(payload.authScope)
+  ) {
     return null;
   }
   const authorization = normalizeJwtPermissionClaims(
@@ -510,15 +514,19 @@ function userFromToken(token: string): AuthUser | null {
 
 function isMfaEnrollmentToken(token: string): boolean {
   const payload = decodeJwtPayload(token);
-  return Boolean(payload && !isTokenExpired(payload) && payload.authScope === "mfa_enrollment");
+  return Boolean(
+    payload &&
+    !isTokenExpired(payload) &&
+    payload.authScope === "mfa_enrollment",
+  );
 }
 
 function isPasswordChangeRequiredToken(token: string): boolean {
   const payload = decodeJwtPayload(token);
   return Boolean(
     payload &&
-      !isTokenExpired(payload) &&
-      payload.authScope === "password_change_required",
+    !isTokenExpired(payload) &&
+    payload.authScope === "password_change_required",
   );
 }
 
@@ -535,14 +543,17 @@ export function useAuth(): AuthState {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [effectiveFormLoginEnabled, setEffectiveFormLoginEnabled] = useState<boolean | null>(null);
+  const [effectiveFormLoginEnabled, setEffectiveFormLoginEnabled] = useState<
+    boolean | null
+  >(null);
   const [passkeyEnabled, setPasskeyEnabled] = useState(false);
   const [defaultPersistSession, setDefaultPersistSession] = useState(false);
   const [mfaRequirePasswordLogin, setMfaRequirePasswordLogin] = useState(false);
   const [mfaRequireConfigStepUp, setMfaRequireConfigStepUp] = useState<
     boolean | null
   >(null);
-  const [mfaRequireJellyfinLogin, setTotpRequireJellyfinLogin] = useState(false);
+  const [mfaRequireJellyfinLogin, setTotpRequireJellyfinLogin] =
+    useState(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -572,52 +583,51 @@ export function useAuth(): AuthState {
     };
   }, []);
 
-  const login = useCallback(async (
-    username: string,
-    password: string,
-    options?: AuthLoginOptions,
-  ) => {
-    const { data, error } = await backendClient.mutation(loginMutation, {
-      input: {
-        username,
-        password,
-        totpCode: options?.totpCode ?? null,
-        persistSession: options?.persistSession,
-      },
-    }).toPromise();
-    if (error || !data?.login) {
-      throw error ?? new Error("Login failed");
-    }
-    const newToken = data.login.token;
-    const nextUser = normalizeAuthUser(data.login.user) ?? userFromToken(newToken);
+  const login = useCallback(
+    async (username: string, password: string, options?: AuthLoginOptions) => {
+      const { data, error } = await backendClient
+        .mutation(loginMutation, {
+          input: {
+            username,
+            password,
+            totpCode: options?.totpCode ?? null,
+            persistSession: options?.persistSession,
+          },
+        })
+        .toPromise();
+      if (error || !data?.login) {
+        throw error ?? new Error("Login failed");
+      }
+      const newToken = data.login.token;
+      const nextUser =
+        normalizeAuthUser(data.login.user) ?? userFromToken(newToken);
 
-    const persistSession = data.login.persistSession === true;
-    applyAuthenticatedSession(
-      newToken,
-      nextUser,
-      setToken,
-      setUser,
-      setPasswordChangeRequired,
-      persistSession,
-    );
-    rememberAuthBootstrapSession(newToken, nextUser);
+      const persistSession = data.login.persistSession === true;
+      applyAuthenticatedSession(
+        newToken,
+        nextUser,
+        setToken,
+        setUser,
+        setPasswordChangeRequired,
+        persistSession,
+      );
+      rememberAuthBootstrapSession(newToken, nextUser);
 
-    return {
-      token: newToken,
-      user: nextUser,
-      mfaEnrollmentRequired: data.login.mfaEnrollmentRequired === true,
-      passwordChangeRequired: data.login.passwordChangeRequired === true,
-      persistSession,
-    };
-  }, []);
+      return {
+        token: newToken,
+        user: nextUser,
+        mfaEnrollmentRequired: data.login.mfaEnrollmentRequired === true,
+        passwordChangeRequired: data.login.passwordChangeRequired === true,
+        persistSession,
+      };
+    },
+    [],
+  );
 
   const adoptSession = useCallback(
-    (
-      nextToken: string,
-      nextUser: AuthUser | null,
-      persistSession = false,
-    ) => {
-      const normalizedUser = normalizeAuthUser(nextUser) ?? userFromToken(nextToken);
+    (nextToken: string, nextUser: AuthUser | null, persistSession = false) => {
+      const normalizedUser =
+        normalizeAuthUser(nextUser) ?? userFromToken(nextToken);
       applyAuthenticatedSession(
         nextToken,
         normalizedUser,

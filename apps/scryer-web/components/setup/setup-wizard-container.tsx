@@ -183,7 +183,11 @@ export function SetupWizardContainer({
   }, [client]);
 
   useEffect(() => {
-    if (wizardPath !== "restore" || !restoreAvailabilityChecked || canRestoreSetup) {
+    if (
+      wizardPath !== "restore" ||
+      !restoreAvailabilityChecked ||
+      canRestoreSetup
+    ) {
       return;
     }
 
@@ -314,8 +318,7 @@ export function SetupWizardContainer({
       setDcTypeOptions(
         buildDownloadClientTypeOptions(
           (data?.downloadClientProviderTypes as
-            | ProviderTypeInfo[]
-            | undefined) ?? [],
+            ProviderTypeInfo[] | undefined) ?? [],
         ).filter((option) => !isHostlessDownloadClientType(option.value)),
       );
 
@@ -339,12 +342,7 @@ export function SetupWizardContainer({
       );
       setIdxProviderOptions(FALLBACK_PROVIDER_OPTIONS);
     }
-  }, [
-    client,
-    setDcLocalPathStyle,
-    setDcTypeOptions,
-    setIdxProviderOptions,
-  ]);
+  }, [client, setDcLocalPathStyle, setDcTypeOptions, setIdxProviderOptions]);
 
   const {
     plugins,
@@ -358,11 +356,13 @@ export function SetupWizardContainer({
     installPlugin,
     uninstallPlugin,
   } = usePluginManagement({ client, t, refreshProviderOptions });
-  const { rulePacks, rulePacksLoading, setRulePackEnabled } = useSetupRulePacks({
-    client,
-    active: wizardPath === "fresh" && currentStep === 3,
-    t,
-  });
+  const { rulePacks, rulePacksLoading, setRulePackEnabled } = useSetupRulePacks(
+    {
+      client,
+      active: wizardPath === "fresh" && currentStep === 3,
+      t,
+    },
+  );
 
   // ── Step labels per path ────────────────────────────────────────────
   const stepLabels =
@@ -461,7 +461,10 @@ export function SetupWizardContainer({
     (field: SetupMediaPathField, edit: (roots: SetupRoot[]) => SetupRoot[]) => {
       mediaRootsEdited.current = true;
       setMediaPathValidationUnavailable(false);
-      setMediaRoots((current) => ({ ...current, [field]: edit(current[field]) }));
+      setMediaRoots((current) => ({
+        ...current,
+        [field]: edit(current[field]),
+      }));
     },
     [],
   );
@@ -475,11 +478,7 @@ export function SetupWizardContainer({
         roots: mediaRoots,
         validatePath: async (path) => {
           const { error } = await client
-            .query(
-              browsePathQuery,
-              { path },
-              { requestPolicy: "network-only" },
-            )
+            .query(browsePathQuery, { path }, { requestPolicy: "network-only" })
             .toPromise();
           return error;
         },
@@ -498,10 +497,9 @@ export function SetupWizardContainer({
               .toPromise();
             if (error) throw error;
             // Saved, so going back and pressing Next again changes nothing.
-            libraries[save.field] =
-              setupMediaLibraries(data?.updateLibrary ? [data.updateLibrary] : [])[
-                save.field
-              ] ?? { id: save.libraryId, roots: save.roots };
+            libraries[save.field] = setupMediaLibraries(
+              data?.updateLibrary ? [data.updateLibrary] : [],
+            )[save.field] ?? { id: save.libraryId, roots: save.roots };
           }
           savingField = null;
         },
@@ -515,7 +513,11 @@ export function SetupWizardContainer({
         },
       });
     } catch (err) {
-      const message = userFacingGraphQlErrorMessage(err, t("error.fallback.failedToSave"), t);
+      const message = userFacingGraphQlErrorMessage(
+        err,
+        t("error.fallback.failedToSave"),
+        t,
+      );
       setMediaPathsError(
         savingField
           ? `${t(SETUP_MEDIA_PATH_LABEL_KEYS[savingField])}: ${message}`
@@ -571,9 +573,9 @@ export function SetupWizardContainer({
       ? "max-w-4xl"
       : isPluginsStep
         ? "max-w-6xl"
-      : isPersonaStep
-        ? "max-w-3xl"
-        : "max-w-2xl";
+        : isPersonaStep
+          ? "max-w-3xl"
+          : "max-w-2xl";
 
   return (
     <div
@@ -585,7 +587,9 @@ export function SetupWizardContainer({
       )}
       style={
         intro === "playing"
-          ? ({ "--setup-intro-flight-delay": `${introFlightDelayMs}ms` } as React.CSSProperties)
+          ? ({
+              "--setup-intro-flight-delay": `${introFlightDelayMs}ms`,
+            } as React.CSSProperties)
           : undefined
       }
     >
@@ -654,7 +658,9 @@ export function SetupWizardContainer({
             editMediaRoots(field, (roots) => addSetupRoot(roots, path))
           }
           onReplaceRoot={(field, index, path) =>
-            editMediaRoots(field, (roots) => replaceSetupRoot(roots, index, path))
+            editMediaRoots(field, (roots) =>
+              replaceSetupRoot(roots, index, path),
+            )
           }
           onRemoveRoot={(field, index) =>
             editMediaRoots(field, (roots) => removeSetupRoot(roots, index))
@@ -758,10 +764,7 @@ export function SetupWizardContainer({
       {/* ════════════════════════════════════════════════════════════════ */}
 
       {currentStep === 1 && wizardPath === "restore" && canRestoreSetup && (
-        <SetupRestoreView
-          t={t}
-          onBack={() => goToStep(0)}
-        />
+        <SetupRestoreView t={t} onBack={() => goToStep(0)} />
       )}
 
       {wizardPath === "import" && currentStep >= 1 && (

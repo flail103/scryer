@@ -39,9 +39,7 @@ import {
 } from "@/components/ui/select";
 import { useTranslate } from "@/lib/context/translate-context";
 import { useUiDateTimeFormat } from "@/lib/context/ui-settings-context";
-import type {
-  InteractiveSearchIndexerProgress,
-} from "@/lib/graphql/release-search";
+import type { InteractiveSearchIndexerProgress } from "@/lib/graphql/release-search";
 import type { Release } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatUiDateTime } from "@/lib/utils/date-format";
@@ -136,8 +134,8 @@ export type SettingsIndexerSearchSectionProps = {
 };
 
 const SORT_COLUMNS = ["release", "indexer", "size", "age", "peers"] as const;
-const SORT_KEYS: IndexerSearchSortKey[] = SORT_COLUMNS.flatMap((column) =>
-  [`${column}-asc`, `${column}-desc`] as IndexerSearchSortKey[],
+const SORT_KEYS: IndexerSearchSortKey[] = SORT_COLUMNS.flatMap(
+  (column) => [`${column}-asc`, `${column}-desc`] as IndexerSearchSortKey[],
 );
 
 const HEALTH_DOT_CLASS: Record<IndexerHealthTone, string> = {
@@ -219,7 +217,9 @@ function ProtocolBadge({ release }: { release: Release }) {
   );
 }
 
-function useReleaseBadges(release: Release): { text: string; tone: BadgeTone }[] {
+function useReleaseBadges(
+  release: Release,
+): { text: string; tone: BadgeTone }[] {
   const t = useTranslate();
   const badges: { text: string; tone: BadgeTone }[] = [];
   const parsed = release.parsedRelease;
@@ -496,7 +496,10 @@ function QueryCard({
             ) : (
               <ul className="space-y-1">
                 {savedSearchLabels.map((label, index) => (
-                  <li key={`${index}:${label}`} className="flex items-center gap-1">
+                  <li
+                    key={`${index}:${label}`}
+                    className="flex items-center gap-1"
+                  >
                     <button
                       id={selectorId("indexer-search-saved-apply", label)}
                       type="button"
@@ -567,7 +570,9 @@ function QueryCard({
             max={RAW_SEARCH_MAX_PAGE_SIZE}
             placeholder={String(RAW_SEARCH_DEFAULT_PAGE_SIZE)}
             value={advanced.limit}
-            onChange={(value) => onAdvancedChange({ ...advanced, limit: value })}
+            onChange={(value) =>
+              onAdvancedChange({ ...advanced, limit: value })
+            }
           />
         </div>
       ) : null}
@@ -589,7 +594,9 @@ function indexerChipTitle(
       return t("indexerSearch.skipReason.indexerDisabled");
     case "TEMPORARILY_DISABLED":
       return until
-        ? t("indexerSearch.skipReason.temporarilyDisabledUntil", { time: until })
+        ? t("indexerSearch.skipReason.temporarilyDisabledUntil", {
+            time: until,
+          })
         : t("indexerSearch.skipReason.temporarilyDisabled");
     case "BACKED_OFF":
       return until
@@ -673,7 +680,14 @@ function HealthLine({
               key={entry.indexerId}
               id={selectorId("indexer-search-health", entry.name)}
               type="button"
-              title={[indexerChipTitle(entry, t, dateTimeFormat), indexerCapsDiagnostic(entry, t)].filter(Boolean).join(" · ") || undefined}
+              title={
+                [
+                  indexerChipTitle(entry, t, dateTimeFormat),
+                  indexerCapsDiagnostic(entry, t),
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
               aria-pressed={active}
               onClick={() => onToggleFacet(facetKey)}
               className={cn(
@@ -690,16 +704,18 @@ function HealthLine({
               {entry.name}
               <span className={cn("tabular-nums", HEALTH_COUNT_CLASS[tone])}>
                 {tone === "partial"
-                  ? t("indexerSearch.health.partial", { count: entry.resultCount })
+                  ? t("indexerSearch.health.partial", {
+                      count: entry.resultCount,
+                    })
                   : tone === "cooling"
-                  ? t("indexerSearch.health.coolingDown")
-                  : tone === "failed"
-                  ? t("indexerSearch.health.failed")
-                  : tone === "skipped"
-                    ? t("indexerSearch.health.skipped")
-                    : tone === "pending"
-                      ? "…"
-                      : entry.resultCount}
+                    ? t("indexerSearch.health.coolingDown")
+                    : tone === "failed"
+                      ? t("indexerSearch.health.failed")
+                      : tone === "skipped"
+                        ? t("indexerSearch.health.skipped")
+                        : tone === "pending"
+                          ? "…"
+                          : entry.resultCount}
               </span>
             </button>
           );
@@ -777,7 +793,11 @@ function RefineRail({
                   )}
                 >
                   <Checkbox
-                    id={selectorId("indexer-search-facet", group.key, item.value)}
+                    id={selectorId(
+                      "indexer-search-facet",
+                      group.key,
+                      item.value,
+                    )}
                     size="compact"
                     className="size-[15px]"
                     checked={checked}
@@ -868,7 +888,10 @@ function torrentDetailFields(
       value: String(release.leechers),
     });
   }
-  if (release.downloadVolumeFactor != null || release.uploadVolumeFactor != null) {
+  if (
+    release.downloadVolumeFactor != null ||
+    release.uploadVolumeFactor != null
+  ) {
     fields.push({
       key: "volumeFactors",
       label: t("indexerSearch.detail.volumeFactors"),
@@ -890,7 +913,9 @@ function torrentDetailFields(
       value:
         minutes > 0 && minutes % 1440 === 0
           ? t("indexerSearch.age.days", { count: minutes / 1440 })
-          : t("indexerSearch.age.hours", { count: Math.round(minutes / 6) / 10 }),
+          : t("indexerSearch.age.hours", {
+              count: Math.round(minutes / 6) / 10,
+            }),
     });
   }
   return fields;
@@ -991,7 +1016,8 @@ function ReleaseRow({
 
   return (
     <div role="rowgroup">
-      <div role="row"
+      <div
+        role="row"
         id={indexerSearchResultRowId(release)}
         data-ui="indexer-search-row"
         className={cn(
@@ -1001,13 +1027,15 @@ function ReleaseRow({
             "border-l-[var(--scry-accent)] bg-[rgba(var(--scry-accent-rgb),0.07)]",
         )}
       >
-        <div role="cell"><Checkbox
-          id={indexerSearchResultSelectId(release)}
-          size="table"
-          aria-label={t("indexerSearch.row.select")}
-          checked={selected}
-          onCheckedChange={() => onToggleRow(release)}
-        /></div>
+        <div role="cell">
+          <Checkbox
+            id={indexerSearchResultSelectId(release)}
+            size="table"
+            aria-label={t("indexerSearch.row.select")}
+            checked={selected}
+            onCheckedChange={() => onToggleRow(release)}
+          />
+        </div>
         <div role="cell" className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <ProtocolBadge release={release} />
@@ -1031,13 +1059,22 @@ function ReleaseRow({
             </div>
           ) : null}
         </div>
-        <div role="cell" className="min-w-0 truncate text-[12.5px] text-[var(--scry-text2)]">
+        <div
+          role="cell"
+          className="min-w-0 truncate text-[12.5px] text-[var(--scry-text2)]"
+        >
           {release.source ?? "—"}
         </div>
-        <span role="cell" className="text-right text-[13px] font-semibold tabular-nums text-[var(--scry-ink3)]">
+        <span
+          role="cell"
+          className="text-right text-[13px] font-semibold tabular-nums text-[var(--scry-ink3)]"
+        >
           {formatReleaseSize(release.sizeBytes)}
         </span>
-        <span role="cell" className="text-right text-[12.5px] tabular-nums text-[var(--scry-muted2)]">
+        <span
+          role="cell"
+          className="text-right text-[12.5px] tabular-nums text-[var(--scry-muted2)]"
+        >
           {age ? t(age.unitKey, { count: age.value }) : "—"}
         </span>
         <span
@@ -1098,7 +1135,13 @@ function ReleaseRow({
           </IconButton>
         </div>
       </div>
-      {expanded ? <div role="row"><div role="cell" aria-colspan={7}><ReleaseDetail release={release} /></div></div> : null}
+      {expanded ? (
+        <div role="row">
+          <div role="cell" aria-colspan={7}>
+            <ReleaseDetail release={release} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1191,7 +1234,8 @@ export function SettingsIndexerSearchSection(
               <SelectContent>
                 {SORT_KEYS.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {t(`indexerSearch.column.${option.split("-")[0]}`)} {option.endsWith("-desc") ? "↓" : "↑"}
+                    {t(`indexerSearch.column.${option.split("-")[0]}`)}{" "}
+                    {option.endsWith("-desc") ? "↓" : "↑"}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1208,7 +1252,8 @@ export function SettingsIndexerSearchSection(
 
           <div className="w-full min-w-0 max-w-full overflow-x-auto">
             <div role="table" className="min-w-[1020px]">
-              <div role="row"
+              <div
+                role="row"
                 className={cn(
                   RESULT_GRID_CLASS,
                   "border-b border-[var(--scry-border)] py-2.5 text-[10.5px] font-bold uppercase tracking-[0.06em] text-[var(--scry-faint2)]",
@@ -1219,17 +1264,40 @@ export function SettingsIndexerSearchSection(
                   const active = sort.startsWith(`${column}-`);
                   const descending = sort.endsWith("-desc");
                   return (
-                    <div key={column} role="columnheader"
-                      aria-sort={active ? descending ? "descending" : "ascending" : "none"}
-                      className={column === "release" || column === "indexer" ? "" : "text-right"}>
-                      <button type="button" className="hover:text-foreground"
-                        onClick={() => onSortChange(`${column}-${active && !descending ? "desc" : "asc"}`)}>
-                        {t(`indexerSearch.column.${column}`)} {active ? descending ? "↓" : "↑" : "↕"}
+                    <div
+                      key={column}
+                      role="columnheader"
+                      aria-sort={
+                        active
+                          ? descending
+                            ? "descending"
+                            : "ascending"
+                          : "none"
+                      }
+                      className={
+                        column === "release" || column === "indexer"
+                          ? ""
+                          : "text-right"
+                      }
+                    >
+                      <button
+                        type="button"
+                        className="hover:text-foreground"
+                        onClick={() =>
+                          onSortChange(
+                            `${column}-${active && !descending ? "desc" : "asc"}`,
+                          )
+                        }
+                      >
+                        {t(`indexerSearch.column.${column}`)}{" "}
+                        {active ? (descending ? "↓" : "↑") : "↕"}
                       </button>
                     </div>
                   );
                 })}
-                <span role="columnheader" className="text-right">{t("label.actions")}</span>
+                <span role="columnheader" className="text-right">
+                  {t("label.actions")}
+                </span>
               </div>
               {rows.map((release) => {
                 const key = indexerSearchRowKey(release);
@@ -1285,7 +1353,8 @@ export function SettingsIndexerSearchSection(
                   count: selectedReleases.length,
                 })}
               </strong>
-              {hasSelection && ` · ${formatReleaseSize(totalReleaseBytes(selectedReleases))}`}
+              {hasSelection &&
+                ` · ${formatReleaseSize(totalReleaseBytes(selectedReleases))}`}
             </span>
             <div className="min-w-2 flex-1" />
             <Button

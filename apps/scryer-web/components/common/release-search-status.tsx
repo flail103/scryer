@@ -61,11 +61,15 @@ export function ReleaseSearchSummary({
         data-search-state={presentation.showProgress ? "searching" : "done"}
       >
         {presentation.showProgress ? (
-          <LoadingMark className="h-3 w-3 shrink-0" label={t("label.searching")} />
+          <LoadingMark
+            className="h-3 w-3 shrink-0"
+            label={t("label.searching")}
+          />
         ) : null}
         <span className="truncate">{description}</span>
       </p>
-      {presentation.showFinalSummary && presentation.failedIndexerNames.length > 0 ? (
+      {presentation.showFinalSummary &&
+      presentation.failedIndexerNames.length > 0 ? (
         <p className="mt-0.5 truncate text-[11.5px] text-[var(--scry-danger-text)]">
           {t("title.contextReleaseSearchIndexerFailures", {
             count: presentation.failedIndexerNames.length,
@@ -73,16 +77,23 @@ export function ReleaseSearchSummary({
           })}
         </p>
       ) : null}
-      {presentation.showFinalSummary && presentation.skippedIndexers.length > 0 ? (
+      {presentation.showFinalSummary &&
+      presentation.skippedIndexers.length > 0 ? (
         <p
           className="mt-0.5 truncate text-[11.5px] text-[var(--scry-faint)]"
           title={presentation.skippedIndexers
-            .map((indexer) => (indexer.reason ? `${indexer.name}: ${indexer.reason}` : indexer.name))
+            .map((indexer) =>
+              indexer.reason
+                ? `${indexer.name}: ${indexer.reason}`
+                : indexer.name,
+            )
             .join("\n")}
         >
           {t("title.contextReleaseSearchIndexerSkipped", {
             count: presentation.skippedIndexers.length,
-            names: presentation.skippedIndexers.map((indexer) => indexer.name).join(", "),
+            names: presentation.skippedIndexers
+              .map((indexer) => indexer.name)
+              .join(", "),
           })}
         </p>
       ) : null}

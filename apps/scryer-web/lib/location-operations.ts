@@ -84,10 +84,7 @@ export type LocationConfirmationRequirement = "SIMPLE" | "TYPED";
  * and the identities do not.
  */
 export type LocationDestinationIdentityMatch =
-  | "UNIQUE"
-  | "NONE"
-  | "AMBIGUOUS"
-  | "SAME_NAME_NO_IDENTITY";
+  "UNIQUE" | "NONE" | "AMBIGUOUS" | "SAME_NAME_NO_IDENTITY";
 
 export type LocationClassifiedTitle = {
   titleId: string;
@@ -131,7 +128,8 @@ export type LocationClassifiedTitle = {
    * needs in order to tell them apart (FR-055). Preferred over the bare id
    * list; the ids remain the fallback for a payload that predates it.
    */
-  ambiguousDestinationCandidates?: LocationAmbiguousDestinationCandidate[] | null;
+  ambiguousDestinationCandidates?:
+    LocationAmbiguousDestinationCandidate[] | null;
 };
 
 /** One destination title an ambiguous identity points at, as the payload sends it. */
@@ -272,7 +270,11 @@ export type LocationMergePreview = {
 };
 
 export type LocationOperationPreview = {
-  folders?: { titleId: string; source: string | null; destination: string | null }[];
+  folders?: {
+    titleId: string;
+    source: string | null;
+    destination: string | null;
+  }[];
   planFingerprint: string;
   operationType: LocationOperationType;
   mode: LocationExecutionMode;
@@ -533,7 +535,9 @@ export function orderedPlanSections(
     return index === -1 ? PLAN_KIND_ORDER.length : index;
   };
   return sections
-    .filter((section) => toCount(section.itemsTotal) > 0 || section.items.length > 0)
+    .filter(
+      (section) => toCount(section.itemsTotal) > 0 || section.items.length > 0,
+    )
     .sort((left, right) => rank(left.kind) - rank(right.kind));
 }
 
@@ -589,9 +593,11 @@ export function classifiedTitlePlacement(
   } = {},
 ): ClassifiedTitlePlacement {
   const planned = context.planFolders?.get(entry.titleId);
-  const rootPath = (rootId: string) => context.rootPathById?.get(rootId) ?? null;
+  const rootPath = (rootId: string) =>
+    context.rootPathById?.get(rootId) ?? null;
   return {
-    source: entry.sourceFolderPath ?? planned?.source ?? rootPath(entry.sourceRootId),
+    source:
+      entry.sourceFolderPath ?? planned?.source ?? rootPath(entry.sourceRootId),
     destination: planned?.destination ?? rootPath(entry.destinationRootId),
   };
 }
@@ -832,7 +838,8 @@ export function transferStatement(
   }
   return {
     destinationLibraryId: entry.destinationLibraryId,
-    destinationLibraryName: resolveLibraryName?.(entry.destinationLibraryId) ?? null,
+    destinationLibraryName:
+      resolveLibraryName?.(entry.destinationLibraryId) ?? null,
   };
 }
 
@@ -1005,7 +1012,6 @@ export function mergeSummaryPresentation(
   };
 }
 
-
 /**
  * Whether the previewed plan may be confirmed. The backend refuses a blocked
  * plan — and one the destination has no room for — anyway; the dialog mirrors
@@ -1131,7 +1137,9 @@ export function blockingTitleRows(
 }
 
 /** Terminal operations neither progress nor resume. */
-export function isTerminalOperationState(state: LocationOperationState): boolean {
+export function isTerminalOperationState(
+  state: LocationOperationState,
+): boolean {
   return (
     state === "COMPLETED" ||
     state === "COMPLETED_WITH_WARNINGS" ||
@@ -1157,7 +1165,9 @@ export function canCancelOperation(
   if (!operation) {
     return false;
   }
-  return !isTerminalOperationState(operation.state) && !operation.cancelRequested;
+  return (
+    !isTerminalOperationState(operation.state) && !operation.cancelRequested
+  );
 }
 
 /**
@@ -1351,7 +1361,10 @@ export function startRefusalCodeFromError(
 }
 
 /** The stable refusal carried by the public boundary, independent of wording. */
-export function recognizeStartRefusal(error: unknown, _message?: string | null): LocationRefusalCode | null {
+export function recognizeStartRefusal(
+  error: unknown,
+  _message?: string | null,
+): LocationRefusalCode | null {
   return startRefusalCodeFromError(error);
 }
 
@@ -1510,7 +1523,9 @@ export function assetListingIsEmpty(
 
 /** Translation key for one asset line's prose. */
 export function assetLineTextKey(kind: LocationAssetLine["kind"]): string {
-  return kind === "RENAME" ? "move.assetRenamedAs" : "move.assetDeduplicatedAgainst";
+  return kind === "RENAME"
+    ? "move.assetRenamedAs"
+    : "move.assetDeduplicatedAgainst";
 }
 
 /** Translation key for a classification group heading. */
@@ -1633,10 +1648,14 @@ export function isCrossLibraryDestination(
  * Destination choices precede the transfer method. Only the managed branch
  * discovers files; the manual branch displays catalog folder instructions.
  */
-export type MoveWizardStep = "kind" | "destination" | "method" | "manual" | "plan";
+export type MoveWizardStep =
+  "kind" | "destination" | "method" | "manual" | "plan";
 
 /** No discovery request exists until the operator chooses the managed branch. */
-export function moveWizardRequestMode(open: boolean, step: MoveWizardStep): RequestableMoveMode | null {
+export function moveWizardRequestMode(
+  open: boolean,
+  step: MoveWizardStep,
+): RequestableMoveMode | null {
   if (!open) return null;
   if (step === "manual") return "USER_MOVED_FILES";
   return step === "plan" ? "MOVE_WITH_SCRYER" : null;

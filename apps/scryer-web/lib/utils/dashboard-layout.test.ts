@@ -37,7 +37,13 @@ const PAGE_ORDER = [
   "active-queue",
 ];
 
-const row = (panelId: string, x: number, y: number, w: number, h: number) => ({ panelId, x, y, w, h });
+const row = (panelId: string, x: number, y: number, w: number, h: number) => ({
+  panelId,
+  x,
+  y,
+  w,
+  h,
+});
 
 test("LG default: three across, then two pairs, as min-[1501px] laid it out", () => {
   assert.deepEqual(DEFAULT_DASHBOARD_LAYOUTS.LG, [
@@ -91,7 +97,10 @@ test("XS default: one column, page order", () => {
   ]);
 });
 
-function overlaps(left: DashboardLayoutItem, right: DashboardLayoutItem): boolean {
+function overlaps(
+  left: DashboardLayoutItem,
+  right: DashboardLayoutItem,
+): boolean {
   return (
     left.x < right.x + right.w &&
     right.x < left.x + left.w &&
@@ -110,12 +119,22 @@ test("every default holds every panel once, in page order, inside the grid, with
       `${breakpoint} order`,
     );
     for (const entry of items) {
-      assert.ok(entry.x >= 0 && entry.y >= 0, `${breakpoint} ${entry.panelId} position`);
-      assert.ok(entry.x + entry.w <= columns, `${breakpoint} ${entry.panelId} fits`);
+      assert.ok(
+        entry.x >= 0 && entry.y >= 0,
+        `${breakpoint} ${entry.panelId} position`,
+      );
+      assert.ok(
+        entry.x + entry.w <= columns,
+        `${breakpoint} ${entry.panelId} fits`,
+      );
     }
     items.forEach((left, index) => {
       for (const right of items.slice(index + 1)) {
-        assert.equal(overlaps(left, right), false, `${breakpoint} ${left.panelId} / ${right.panelId}`);
+        assert.equal(
+          overlaps(left, right),
+          false,
+          `${breakpoint} ${left.panelId} / ${right.panelId}`,
+        );
       }
     });
   }
@@ -147,17 +166,31 @@ test("panel ids are stable kebab-case the server accepts, and every default is a
   for (const panelId of DASHBOARD_PANEL_IDS) {
     assert.ok(isWellFormedPanelId(panelId), panelId);
     const spec = DASHBOARD_PANELS[panelId];
-    assert.ok(spec.titleKey.length > 0 && spec.descriptionKey.length > 0, panelId);
+    assert.ok(
+      spec.titleKey.length > 0 && spec.descriptionKey.length > 0,
+      panelId,
+    );
     for (const breakpoint of DASHBOARD_BREAKPOINTS) {
-      const placed = DEFAULT_DASHBOARD_LAYOUTS[breakpoint].find((entry) => entry.panelId === panelId);
+      const placed = DEFAULT_DASHBOARD_LAYOUTS[breakpoint].find(
+        (entry) => entry.panelId === panelId,
+      );
       assert.ok(placed, `${breakpoint} ${panelId} placed`);
       const min = spec.min[breakpoint];
-      assert.ok(min.w <= DASHBOARD_COLUMNS[breakpoint], `${breakpoint} ${panelId} min fits`);
-      assert.ok(placed.w >= min.w && placed.h >= min.h, `${breakpoint} ${panelId} default ≥ min`);
+      assert.ok(
+        min.w <= DASHBOARD_COLUMNS[breakpoint],
+        `${breakpoint} ${panelId} min fits`,
+      );
+      assert.ok(
+        placed.w >= min.w && placed.h >= min.h,
+        `${breakpoint} ${panelId} default ≥ min`,
+      );
     }
   }
   for (const breakpoint of DASHBOARD_BREAKPOINTS) {
-    assert.ok(DASHBOARD_COLUMNS[breakpoint] >= 1 && DASHBOARD_COLUMNS[breakpoint] <= DASHBOARD_MAX_COLUMNS);
+    assert.ok(
+      DASHBOARD_COLUMNS[breakpoint] >= 1 &&
+        DASHBOARD_COLUMNS[breakpoint] <= DASHBOARD_MAX_COLUMNS,
+    );
   }
   assert.ok(DASHBOARD_PANEL_IDS.length <= DASHBOARD_MAX_ITEMS);
 });
@@ -165,9 +198,15 @@ test("panel ids are stable kebab-case the server accepts, and every default is a
 test("tiers follow size: smaller is compact, wider and taller is expanded", () => {
   assert.equal(dashboardPanelTier("requests", "LG", { w: 3, h: 7 }), "compact");
   assert.equal(dashboardPanelTier("requests", "LG", { w: 4, h: 7 }), "regular");
-  assert.equal(dashboardPanelTier("requests", "LG", { w: 8, h: 9 }), "expanded");
+  assert.equal(
+    dashboardPanelTier("requests", "LG", { w: 8, h: 9 }),
+    "expanded",
+  );
   assert.equal(dashboardPanelTier("requests", "LG", { w: 8, h: 4 }), "compact");
-  assert.equal(dashboardPanelTier("indexers", "MD", { w: 12, h: 9 }), "expanded");
+  assert.equal(
+    dashboardPanelTier("indexers", "MD", { w: 12, h: 9 }),
+    "expanded",
+  );
   assert.equal(dashboardPanelTier("stats", "LG", { w: 6, h: 2 }), "regular");
   assert.equal(dashboardPanelTier("stats", "LG", { w: 4, h: 2 }), "compact");
 });
@@ -193,7 +232,10 @@ test("a saved layout replaces the default for its breakpoint only", () => {
       items: [row("storage", 0, 0, 12, 10), row("stats", 0, 10, 12, 2)],
     },
   ]);
-  assert.deepEqual(layouts.LG, [row("storage", 0, 0, 12, 10), row("stats", 0, 10, 12, 2)]);
+  assert.deepEqual(layouts.LG, [
+    row("storage", 0, 0, 12, 10),
+    row("stats", 0, 10, 12, 2),
+  ]);
   assert.deepEqual(layouts.MD, DEFAULT_DASHBOARD_LAYOUTS.MD);
   assert.deepEqual(layouts.SM, DEFAULT_DASHBOARD_LAYOUTS.SM);
   assert.deepEqual(layouts.XS, DEFAULT_DASHBOARD_LAYOUTS.XS);
@@ -212,15 +254,18 @@ test("loading drops unknown and repeated panels and leaves missing ones off", ()
 });
 
 test("loading clamps into the grid and up to the minimum, and rescales another column count", () => {
-  assert.deepEqual(normalizeDashboardItems([row("requests", 10, -2, 6, 1)], "LG"), [
-    row("requests", 6, 0, 6, 5),
-  ]);
-  assert.deepEqual(normalizeDashboardItems([row("storage", 12, 0, 12, 10)], "LG", 24), [
-    row("storage", 6, 0, 6, 10),
-  ]);
-  assert.deepEqual(normalizeDashboardItems([row("requests", 0, 0, 4, 7)], "XS"), [
-    row("requests", 0, 0, 1, 7),
-  ]);
+  assert.deepEqual(
+    normalizeDashboardItems([row("requests", 10, -2, 6, 1)], "LG"),
+    [row("requests", 6, 0, 6, 5)],
+  );
+  assert.deepEqual(
+    normalizeDashboardItems([row("storage", 12, 0, 12, 10)], "LG", 24),
+    [row("storage", 6, 0, 6, 10)],
+  );
+  assert.deepEqual(
+    normalizeDashboardItems([row("requests", 0, 0, 4, 7)], "XS"),
+    [row("requests", 0, 0, 1, 7)],
+  );
 });
 
 test("only breakpoints the draft changed are saved", () => {
@@ -241,11 +286,17 @@ test("the save payload stays inside every server limit", () => {
       row("requests", 99, 3, 99, 0),
     ]);
     assert.equal(input.columns, DASHBOARD_COLUMNS[breakpoint]);
-    assert.equal(new Set(input.items.map((entry) => entry.panelId)).size, input.items.length);
+    assert.equal(
+      new Set(input.items.map((entry) => entry.panelId)).size,
+      input.items.length,
+    );
     for (const entry of input.items) {
       assert.ok(Number.isInteger(entry.x) && Number.isInteger(entry.y));
       assert.ok(entry.x >= 0 && entry.y >= 0 && entry.w >= 1 && entry.h >= 1);
-      assert.ok(entry.x + entry.w <= input.columns, `${breakpoint} ${entry.panelId}`);
+      assert.ok(
+        entry.x + entry.w <= input.columns,
+        `${breakpoint} ${entry.panelId}`,
+      );
     }
   }
 });
@@ -254,15 +305,24 @@ test("adding puts the panel below everything at its default size; dropping puts 
   const without = removeDashboardPanel(DEFAULT_DASHBOARD_LAYOUTS.LG, "storage");
   const added = appendDashboardPanel(without, "storage", "LG");
   assert.deepEqual(added.at(-1), row("storage", 0, 28, 6, 10));
-  assert.equal(appendDashboardPanel(added, "storage", "LG").length, added.length);
+  assert.equal(
+    appendDashboardPanel(added, "storage", "LG").length,
+    added.length,
+  );
 
-  const dropped = placeDashboardPanel(without, "storage", "LG", { x: 0, y: 18 });
+  const dropped = placeDashboardPanel(without, "storage", "LG", {
+    x: 0,
+    y: 18,
+  });
   assert.deepEqual(dropped.at(-1), row("storage", 0, 18, 6, 10));
 });
 
 test("a drop onto other panels moves only the dropped one, down to the first free rows", () => {
   const without = removeDashboardPanel(DEFAULT_DASHBOARD_LAYOUTS.LG, "storage");
-  const dropped = placeDashboardPanel(without, "storage", "LG", { x: 11, y: 3 });
+  const dropped = placeDashboardPanel(without, "storage", "LG", {
+    x: 11,
+    y: 3,
+  });
   // Clamped to x 6, then past manual imports, download clients and active queue.
   assert.deepEqual(dropped.at(-1), row("storage", 6, 28, 6, 10));
   assert.deepEqual(dropped.slice(0, -1), without);

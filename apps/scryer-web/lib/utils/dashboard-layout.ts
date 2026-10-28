@@ -29,10 +29,18 @@ export type DashboardBreakpoint = UiDashboardBreakpoint;
 export type DashboardTier = "compact" | "regular" | "expanded";
 export type DashboardGridSize = { w: number; h: number };
 export type DashboardLayoutItem = UiDashboardLayoutItem;
-export type DashboardLayouts = Record<DashboardBreakpoint, DashboardLayoutItem[]>;
+export type DashboardLayouts = Record<
+  DashboardBreakpoint,
+  DashboardLayoutItem[]
+>;
 
 /** Smallest to largest. */
-export const DASHBOARD_BREAKPOINTS: readonly DashboardBreakpoint[] = ["XS", "SM", "MD", "LG"];
+export const DASHBOARD_BREAKPOINTS: readonly DashboardBreakpoint[] = [
+  "XS",
+  "SM",
+  "MD",
+  "LG",
+];
 
 /**
  * Smallest viewport width, in CSS pixels, at which each breakpoint applies.
@@ -41,7 +49,9 @@ export const DASHBOARD_BREAKPOINTS: readonly DashboardBreakpoint[] = ["XS", "SM"
  * so every viewport gets the arrangement it had before. The grid still sizes
  * its columns from the dashboard's own measured width.
  */
-export const DASHBOARD_BREAKPOINT_MIN_WIDTH: Readonly<Record<DashboardBreakpoint, number>> = {
+export const DASHBOARD_BREAKPOINT_MIN_WIDTH: Readonly<
+  Record<DashboardBreakpoint, number>
+> = {
   XS: 0,
   SM: 701,
   MD: 1241,
@@ -53,12 +63,13 @@ export const DASHBOARD_BREAKPOINT_MIN_WIDTH: Readonly<Record<DashboardBreakpoint
  * three-across rows at MD and LG; SM stacks full-width panels but keeps six
  * columns so a user can still pair panels; XS is a single column.
  */
-export const DASHBOARD_COLUMNS: Readonly<Record<DashboardBreakpoint, number>> = {
-  XS: 1,
-  SM: 6,
-  MD: 12,
-  LG: 12,
-};
+export const DASHBOARD_COLUMNS: Readonly<Record<DashboardBreakpoint, number>> =
+  {
+    XS: 1,
+    SM: 6,
+    MD: 12,
+    LG: 12,
+  };
 
 /** Pixel height of one grid row; with the margin, one row step is 32px. */
 export const DASHBOARD_ROW_HEIGHT = 20;
@@ -123,7 +134,9 @@ const TABLE_TIERS: PerBreakpoint<DashboardTierThresholds> = {
   LG: { regular: size(5, 4), expanded: size(8, 4) },
 };
 
-export const DASHBOARD_PANELS: Readonly<Record<DashboardPanelId, DashboardPanelSpec>> = {
+export const DASHBOARD_PANELS: Readonly<
+  Record<DashboardPanelId, DashboardPanelSpec>
+> = {
   // Compact stacks the tiles, regular sets them two across and expanded three
   // across. XS only ever stacks; SM tops out at two across, as before.
   stats: {
@@ -187,7 +200,13 @@ export const DASHBOARD_PANELS: Readonly<Record<DashboardPanelId, DashboardPanelS
   },
 };
 
-const item = (panelId: DashboardPanelId, x: number, y: number, w: number, h: number): DashboardLayoutItem => ({
+const item = (
+  panelId: DashboardPanelId,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): DashboardLayoutItem => ({
   panelId,
   x,
   y,
@@ -267,7 +286,9 @@ export function isWellFormedPanelId(value: string): boolean {
 }
 
 /** The breakpoint for a viewport width, as the old `min-[…px]` queries chose it. */
-export function dashboardBreakpointForWidth(width: number): DashboardBreakpoint {
+export function dashboardBreakpointForWidth(
+  width: number,
+): DashboardBreakpoint {
   let matching: DashboardBreakpoint = "XS";
   for (const breakpoint of DASHBOARD_BREAKPOINTS) {
     if (width >= DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint]) {
@@ -277,8 +298,13 @@ export function dashboardBreakpointForWidth(width: number): DashboardBreakpoint 
   return matching;
 }
 
-function fits(current: DashboardGridSize, threshold: DashboardGridSize | null): boolean {
-  return threshold !== null && current.w >= threshold.w && current.h >= threshold.h;
+function fits(
+  current: DashboardGridSize,
+  threshold: DashboardGridSize | null,
+): boolean {
+  return (
+    threshold !== null && current.w >= threshold.w && current.h >= threshold.h
+  );
 }
 
 /** How much a panel shows at its current size. */
@@ -302,7 +328,9 @@ export function dashboardPanelDefaultSize(
   panelId: DashboardPanelId,
   breakpoint: DashboardBreakpoint,
 ): DashboardGridSize {
-  const placed = DEFAULT_DASHBOARD_LAYOUTS[breakpoint].find((entry) => entry.panelId === panelId);
+  const placed = DEFAULT_DASHBOARD_LAYOUTS[breakpoint].find(
+    (entry) => entry.panelId === panelId,
+  );
   if (placed) {
     return { w: placed.w, h: placed.h };
   }
@@ -318,7 +346,9 @@ export function dashboardPanelMinSize(
   return { w: Math.min(min.w, DASHBOARD_COLUMNS[breakpoint]), h: min.h };
 }
 
-function cloneItems(items: readonly DashboardLayoutItem[]): DashboardLayoutItem[] {
+function cloneItems(
+  items: readonly DashboardLayoutItem[],
+): DashboardLayoutItem[] {
   return items.map((entry) => ({ ...entry }));
 }
 
@@ -369,7 +399,9 @@ export function normalizeDashboardItems(
  * What renders at each breakpoint: the saved layout where there is one, the
  * default everywhere else.
  */
-export function effectiveDashboardLayouts(saved: readonly UiDashboardLayout[]): DashboardLayouts {
+export function effectiveDashboardLayouts(
+  saved: readonly UiDashboardLayout[],
+): DashboardLayouts {
   const layouts = defaultDashboardLayouts();
   for (const layout of saved) {
     if (!DASHBOARD_BREAKPOINTS.includes(layout.breakpoint)) {
@@ -385,10 +417,14 @@ export function effectiveDashboardLayouts(saved: readonly UiDashboardLayout[]): 
 }
 
 /** Reading order: top to bottom, then left to right. */
-function sortItems(items: readonly DashboardLayoutItem[]): DashboardLayoutItem[] {
+function sortItems(
+  items: readonly DashboardLayoutItem[],
+): DashboardLayoutItem[] {
   return [...items].sort(
     (left, right) =>
-      left.y - right.y || left.x - right.x || left.panelId.localeCompare(right.panelId),
+      left.y - right.y ||
+      left.x - right.x ||
+      left.panelId.localeCompare(right.panelId),
   );
 }
 
@@ -432,7 +468,10 @@ export function dashboardLayoutInput(
   return {
     breakpoint,
     columns: DASHBOARD_COLUMNS[breakpoint],
-    items: sortItems(normalizeDashboardItems(items, breakpoint)).slice(0, DASHBOARD_MAX_ITEMS),
+    items: sortItems(normalizeDashboardItems(items, breakpoint)).slice(
+      0,
+      DASHBOARD_MAX_ITEMS,
+    ),
   };
 }
 
@@ -445,12 +484,18 @@ export function appendDashboardPanel(
   if (items.some((entry) => entry.panelId === panelId)) {
     return cloneItems(items);
   }
-  const bottom = items.reduce((lowest, entry) => Math.max(lowest, entry.y + entry.h), 0);
+  const bottom = items.reduce(
+    (lowest, entry) => Math.max(lowest, entry.y + entry.h),
+    0,
+  );
   const { w, h } = dashboardPanelDefaultSize(panelId, breakpoint);
   return [...cloneItems(items), { panelId, x: 0, y: bottom, w, h }];
 }
 
-function overlaps(left: DashboardLayoutItem, right: DashboardLayoutItem): boolean {
+function overlaps(
+  left: DashboardLayoutItem,
+  right: DashboardLayoutItem,
+): boolean {
   return (
     left.x < right.x + right.w &&
     right.x < left.x + left.w &&

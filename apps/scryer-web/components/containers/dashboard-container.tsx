@@ -41,7 +41,10 @@ import type {
   DownloadQueueItem,
 } from "@/lib/types";
 import { isBreakingVersionChange } from "@/lib/utils/dashboard";
-import { createDashboardRefresh, initialDashboardPanelStates } from "@/lib/utils/dashboard-refresh";
+import {
+  createDashboardRefresh,
+  initialDashboardPanelStates,
+} from "@/lib/utils/dashboard-refresh";
 import { isHistoryQueueState } from "@/lib/utils/download-queue";
 
 /**
@@ -74,36 +77,49 @@ export function DashboardContainer() {
   const setGlobalStatus = useGlobalStatus();
   const t = useTranslate();
 
-  const [overview, setOverview] = React.useState<DashboardOverview | null>(null);
+  const [overview, setOverview] = React.useState<DashboardOverview | null>(
+    null,
+  );
   const [requests, setRequests] = React.useState<DashboardRequest[]>([]);
   const [requestLibraries, setRequestLibraries] = React.useState<
     DashboardRequestLibrary[]
   >([]);
-  const [importActivity, setImportActivity] = React.useState<DownloadQueueItem[]>(
-    [],
-  );
+  const [importActivity, setImportActivity] = React.useState<
+    DownloadQueueItem[]
+  >([]);
   const [importActivityTotal, setImportActivityTotal] = React.useState(0);
-  const [recentImports, setRecentImports] = React.useState<DashboardImportedItem[]>(
-    [],
-  );
+  const [recentImports, setRecentImports] = React.useState<
+    DashboardImportedItem[]
+  >([]);
   const [queueItems, setQueueItems] = React.useState<DownloadQueueItem[]>([]);
   const [queueTotal, setQueueTotal] = React.useState(0);
-  const [storageRoots, setStorageRoots] = React.useState<DashboardStorageRoot[]>([]);
+  const [storageRoots, setStorageRoots] = React.useState<
+    DashboardStorageRoot[]
+  >([]);
   const [panels, setPanels] = React.useState(initialDashboardPanelStates);
   const [editingLayout, setEditingLayout] = React.useState(false);
-  const refresh = React.useMemo(() => createDashboardRefresh((key, patch) => {
-    setPanels((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
-  }), []);
+  const refresh = React.useMemo(
+    () =>
+      createDashboardRefresh((key, patch) => {
+        setPanels((current) => ({
+          ...current,
+          [key]: { ...current[key], ...patch },
+        }));
+      }),
+    [],
+  );
   React.useEffect(() => {
     refresh.activate();
     return () => refresh.dispose();
   }, [client, refresh]);
-  const [actionRequestId, setActionRequestId] = React.useState<string | null>(null);
-  const [deleteConfirmItem, setDeleteConfirmItem] =
-    React.useState<DownloadQueueItem | null>(null);
-  const [importActionItemId, setImportActionItemId] = React.useState<string | null>(
+  const [actionRequestId, setActionRequestId] = React.useState<string | null>(
     null,
   );
+  const [deleteConfirmItem, setDeleteConfirmItem] =
+    React.useState<DownloadQueueItem | null>(null);
+  const [importActionItemId, setImportActionItemId] = React.useState<
+    string | null
+  >(null);
   const [deleteInProgress, setDeleteInProgress] = React.useState(false);
   const [, executeMarkTrackedDownloadFailed] = useMutation(
     markTrackedDownloadFailedMutation,
@@ -360,16 +376,30 @@ export function DashboardContainer() {
           },
         });
         if (result.error) {
-          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("queue.markFailedFailed"), t), { level: "ERROR" });
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("queue.markFailedFailed"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
           return;
         }
-        setGlobalStatus(t("queue.markFailedSearchSuccess"), { level: "SUCCESS" });
+        setGlobalStatus(t("queue.markFailedSearchSuccess"), {
+          level: "SUCCESS",
+        });
         refreshAfterImportAction();
       } finally {
         setImportActionItemId(null);
       }
     },
-    [executeMarkTrackedDownloadFailed, refreshAfterImportAction, setGlobalStatus, t],
+    [
+      executeMarkTrackedDownloadFailed,
+      refreshAfterImportAction,
+      setGlobalStatus,
+      t,
+    ],
   );
 
   const removeFromClient = React.useCallback(async () => {
@@ -388,7 +418,14 @@ export function DashboardContainer() {
         },
       });
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("queue.deleteFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("queue.deleteFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       setGlobalStatus(t("queue.deleteQueued"), { level: "SUCCESS" });
@@ -407,10 +444,21 @@ export function DashboardContainer() {
 
   const refreshAll = React.useCallback(async () => {
     await Promise.all([
-      refreshOverview(), refreshStorage(), refreshRequests(),
-      refreshImportActivity(), refreshRecentImports(), refreshQueue(),
+      refreshOverview(),
+      refreshStorage(),
+      refreshRequests(),
+      refreshImportActivity(),
+      refreshRecentImports(),
+      refreshQueue(),
     ]);
-  }, [refreshOverview, refreshStorage, refreshRequests, refreshImportActivity, refreshRecentImports, refreshQueue]);
+  }, [
+    refreshOverview,
+    refreshStorage,
+    refreshRequests,
+    refreshImportActivity,
+    refreshRecentImports,
+    refreshQueue,
+  ]);
 
   React.useEffect(() => {
     void refreshAll();
@@ -430,9 +478,13 @@ export function DashboardContainer() {
       if (!(event instanceof CustomEvent)) {
         return;
       }
-      const source = (event as CustomEvent<NavigationBadgesRefreshDetail>).detail
-        ?.source;
-      if (!document.hidden && (source === "poll" || source === "focus") && Date.now() - lastPulse > 2000) {
+      const source = (event as CustomEvent<NavigationBadgesRefreshDetail>)
+        .detail?.source;
+      if (
+        !document.hidden &&
+        (source === "poll" || source === "focus") &&
+        Date.now() - lastPulse > 2000
+      ) {
         lastPulse = Date.now();
         void refreshAll();
       }
@@ -449,7 +501,10 @@ export function DashboardContainer() {
       if (actionRequestId) {
         return;
       }
-      const qualityProfileId = resolveApprovalProfileId(request, requestLibraries);
+      const qualityProfileId = resolveApprovalProfileId(
+        request,
+        requestLibraries,
+      );
       if (!qualityProfileId) {
         // Approving needs a profile and the dashboard has no picker, so send the
         // operator to the requests page rather than guessing.
@@ -511,7 +566,14 @@ export function DashboardContainer() {
         setActionRequestId(null);
       }
     },
-    [actionRequestId, client, refreshAfterRequestAction, reportError, setGlobalStatus, t],
+    [
+      actionRequestId,
+      client,
+      refreshAfterRequestAction,
+      reportError,
+      setGlobalStatus,
+      t,
+    ],
   );
 
   const updatePlugin = React.useCallback(
@@ -596,7 +658,8 @@ export function DashboardContainer() {
 }
 
 function sumFacetCounts(
-  counts: { movie?: number; series?: number; anime?: number } | null | undefined,
+  counts:
+    { movie?: number; series?: number; anime?: number } | null | undefined,
 ): number {
   return (counts?.movie ?? 0) + (counts?.series ?? 0) + (counts?.anime ?? 0);
 }

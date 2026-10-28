@@ -1,8 +1,18 @@
 import { graphQlRuleValidationResult } from "@/lib/utils/rego-diagnostics";
 import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
-import { hasGraphQlErrorCode, hasGraphQlErrorReason } from "@/lib/graphql/error-message";
+import {
+  hasGraphQlErrorCode,
+  hasGraphQlErrorReason,
+} from "@/lib/graphql/error-message";
 import { useRegoValidation } from "@/lib/hooks/use-rego-validation";
-import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { RuleSetTestPanel } from "@/components/containers/settings/rule-set-test-panel";
 import { SettingsRulesSection } from "@/components/views/settings/settings-rules-section";
@@ -20,7 +30,11 @@ import type { RuleSetRecord, RuleSetDraft } from "@/lib/types/rule-sets";
 import { copyRuleSetDraft, createRuleSetInput } from "@/lib/utils/rule-sets";
 import { conflictingFrenchPack } from "@/lib/utils/trash-packs";
 import { resolveRuleDetailRequest } from "@/lib/utils/rule-detail-request";
-import { ruleSetQuery, ruleSetsQuery, trackedRulePacksQuery } from "@/lib/graphql/queries";
+import {
+  ruleSetQuery,
+  ruleSetsQuery,
+  trackedRulePacksQuery,
+} from "@/lib/graphql/queries";
 import {
   copyTrackedRulePackRuleMutation,
   createRuleSetMutation,
@@ -37,7 +51,8 @@ import {
 const RULE_SET_INITIAL_DRAFT: RuleSetDraft = {
   name: "",
   description: "",
-  regoSource: 'import rego.v1\n\nscore_entry["size_guard"] := scryer.block_score() if {\n    scryer.size_gib(input.release.size_bytes) > 100\n}\n',
+  regoSource:
+    'import rego.v1\n\nscore_entry["size_guard"] := scryer.block_score() if {\n    scryer.size_gib(input.release.size_bytes) > 100\n}\n',
   enabled: true,
   priority: 0,
   appliedFacets: [],
@@ -61,7 +76,10 @@ type PendingRuleEditorAction =
   | { type: "import"; draft: ArrCustomFormatDraft }
   | null;
 
-export function SettingsRulesContainer({ canManageCatalogSettings, canManageSystemSettings }: {
+export function SettingsRulesContainer({
+  canManageCatalogSettings,
+  canManageSystemSettings,
+}: {
   canManageCatalogSettings: boolean;
   canManageSystemSettings: boolean;
 }) {
@@ -71,23 +89,42 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
   const canManageTrackedPacks =
     canManageCatalogSettings && canManageSystemSettings;
   const [ruleSetRecords, setRuleSetRecords] = useState<RuleSetRecord[]>([]);
-  const [trackedRulePacks, setTrackedRulePacks] = useState<TrackedRulePackRecord[]>([]);
+  const [trackedRulePacks, setTrackedRulePacks] = useState<
+    TrackedRulePackRecord[]
+  >([]);
   const [trackedRulePacksLoaded, setTrackedRulePacksLoaded] = useState(false);
-  const [mutatingRuleSetId, setMutatingRuleSetId] = useState<string | null>(null);
-  const [mutatingRulePackId, setMutatingRulePackId] = useState<string | null>(null);
+  const [mutatingRuleSetId, setMutatingRuleSetId] = useState<string | null>(
+    null,
+  );
+  const [mutatingRulePackId, setMutatingRulePackId] = useState<string | null>(
+    null,
+  );
   const [editingRuleSetId, setEditingRuleSetId] = useState<string | null>(null);
-  const [copyingTrackedRuleSetId, setCopyingTrackedRuleSetId] = useState<string | null>(null);
+  const [copyingTrackedRuleSetId, setCopyingTrackedRuleSetId] = useState<
+    string | null
+  >(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [pendingDeleteRuleSet, setPendingDeleteRuleSet] = useState<RuleSetRecord | null>(null);
+  const [pendingDeleteRuleSet, setPendingDeleteRuleSet] =
+    useState<RuleSetRecord | null>(null);
   const [pendingEditorAction, setPendingEditorAction] =
     useState<PendingRuleEditorAction>(null);
-  const [ruleSetDraft, setRuleSetDraft] = useState<RuleSetDraft>(() => ({ ...RULE_SET_INITIAL_DRAFT }));
-  const [ruleSetDraftBaseline, setRuleSetDraftBaseline] = useState<RuleSetDraft>(() => ({
+  const [ruleSetDraft, setRuleSetDraft] = useState<RuleSetDraft>(() => ({
     ...RULE_SET_INITIAL_DRAFT,
   }));
+  const [ruleSetDraftBaseline, setRuleSetDraftBaseline] =
+    useState<RuleSetDraft>(() => ({
+      ...RULE_SET_INITIAL_DRAFT,
+    }));
   const { validating, validationResult, setValidationResult, validateDraft } =
-    useRegoValidation("release", ruleSetDraft.regoSource, editingRuleSetId, isEditorOpen);
-  const [translationDiagnostics, setTranslationDiagnostics] = useState<string[]>([]);
+    useRegoValidation(
+      "release",
+      ruleSetDraft.regoSource,
+      editingRuleSetId,
+      isEditorOpen,
+    );
+  const [translationDiagnostics, setTranslationDiagnostics] = useState<
+    string[]
+  >([]);
   const [focusImportedEditor, setFocusImportedEditor] = useState(false);
   const detailRequestRef = useRef(0);
 
@@ -106,9 +143,15 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
   const isRuleDraftDirty =
     JSON.stringify(ruleSetDraft) !== JSON.stringify(ruleSetDraftBaseline);
 
-  const editorStateRef = useRef({ isOpen: isEditorOpen, isDirty: isRuleDraftDirty });
+  const editorStateRef = useRef({
+    isOpen: isEditorOpen,
+    isDirty: isRuleDraftDirty,
+  });
   useLayoutEffect(() => {
-    editorStateRef.current = { isOpen: isEditorOpen, isDirty: isRuleDraftDirty };
+    editorStateRef.current = {
+      isOpen: isEditorOpen,
+      isDirty: isRuleDraftDirty,
+    };
   }, [isEditorOpen, isRuleDraftDirty]);
 
   const openCreateRuleEditor = useCallback(() => {
@@ -164,18 +207,21 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
     [setValidationResult],
   );
 
-  const openTrackedRuleCopyEditor = useCallback((record: RuleSetRecord) => {
-    detailRequestRef.current += 1;
-    const nextDraft = copyRuleSetDraft(record);
-    setEditingRuleSetId(null);
-    setCopyingTrackedRuleSetId(record.id);
-    setRuleSetDraft(nextDraft);
-    setRuleSetDraftBaseline(nextDraft);
-    setValidationResult(null);
-    setTranslationDiagnostics([]);
-    setFocusImportedEditor(false);
-    setIsEditorOpen(true);
-  }, [setValidationResult]);
+  const openTrackedRuleCopyEditor = useCallback(
+    (record: RuleSetRecord) => {
+      detailRequestRef.current += 1;
+      const nextDraft = copyRuleSetDraft(record);
+      setEditingRuleSetId(null);
+      setCopyingTrackedRuleSetId(record.id);
+      setRuleSetDraft(nextDraft);
+      setRuleSetDraftBaseline(nextDraft);
+      setValidationResult(null);
+      setTranslationDiagnostics([]);
+      setFocusImportedEditor(false);
+      setIsEditorOpen(true);
+    },
+    [setValidationResult],
+  );
 
   const openTemplateRuleEditor = useCallback(
     (template: {
@@ -204,37 +250,48 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
     [setValidationResult],
   );
 
-  const openImportedRuleEditor = useCallback((imported: ArrCustomFormatDraft) => {
-    detailRequestRef.current += 1;
-    const nextDraft = {
-      ...RULE_SET_INITIAL_DRAFT,
-      name: imported.name.trim() || t("settings.arrImportDraftName"),
-      description: imported.description,
-      regoSource: imported.regoSource,
-      appliedFacets: imported.appliedFacets,
-    };
-    setEditingRuleSetId(null);
-    setCopyingTrackedRuleSetId(null);
-    setRuleSetDraft(nextDraft);
-    setRuleSetDraftBaseline(nextDraft);
-    setValidationResult(null);
-    setTranslationDiagnostics(imported.translationDiagnostics);
-    setFocusImportedEditor(true);
-    setIsEditorOpen(true);
-  }, [setValidationResult, t]);
+  const openImportedRuleEditor = useCallback(
+    (imported: ArrCustomFormatDraft) => {
+      detailRequestRef.current += 1;
+      const nextDraft = {
+        ...RULE_SET_INITIAL_DRAFT,
+        name: imported.name.trim() || t("settings.arrImportDraftName"),
+        description: imported.description,
+        regoSource: imported.regoSource,
+        appliedFacets: imported.appliedFacets,
+      };
+      setEditingRuleSetId(null);
+      setCopyingTrackedRuleSetId(null);
+      setRuleSetDraft(nextDraft);
+      setRuleSetDraftBaseline(nextDraft);
+      setValidationResult(null);
+      setTranslationDiagnostics(imported.translationDiagnostics);
+      setFocusImportedEditor(true);
+      setIsEditorOpen(true);
+    },
+    [setValidationResult, t],
+  );
 
-  const loadRuleSetDetail = useCallback(async (id: string, request: number): Promise<RuleSetRecord | null> => {
-    try {
-      const { data, error } = await client.query(ruleSetQuery, { id }).toPromise();
-      if (error) throw error;
-      return data.ruleSet as RuleSetRecord | null;
-    } catch (error) {
-      if (request === detailRequestRef.current) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+  const loadRuleSetDetail = useCallback(
+    async (id: string, request: number): Promise<RuleSetRecord | null> => {
+      try {
+        const { data, error } = await client
+          .query(ruleSetQuery, { id })
+          .toPromise();
+        if (error) throw error;
+        return data.ruleSet as RuleSetRecord | null;
+      } catch (error) {
+        if (request === detailRequestRef.current) {
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+            { level: "ERROR" },
+          );
+        }
+        return null;
       }
-      return null;
-    }
-  }, [client, setGlobalStatus, t]);
+    },
+    [client, setGlobalStatus, t],
+  );
 
   const requestCreateRuleEditor = useCallback(() => {
     if (!isEditorOpen || !isRuleDraftDirty) {
@@ -248,7 +305,12 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
   const requestEditRuleSet = useCallback(
     async (record: RuleSetRecord) => {
       const request = ++detailRequestRef.current;
-      const result = await resolveRuleDetailRequest(request, () => detailRequestRef.current, () => loadRuleSetDetail(record.id, request), () => editorStateRef.current);
+      const result = await resolveRuleDetailRequest(
+        request,
+        () => detailRequestRef.current,
+        () => loadRuleSetDetail(record.id, request),
+        () => editorStateRef.current,
+      );
       if (result.type === "ignore") return;
       if (result.type === "open") {
         openEditRuleEditor(result.detail);
@@ -262,7 +324,12 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
   const requestCopyRuleSet = useCallback(
     async (record: RuleSetRecord) => {
       const request = ++detailRequestRef.current;
-      const result = await resolveRuleDetailRequest(request, () => detailRequestRef.current, () => loadRuleSetDetail(record.id, request), () => editorStateRef.current);
+      const result = await resolveRuleDetailRequest(
+        request,
+        () => detailRequestRef.current,
+        () => loadRuleSetDetail(record.id, request),
+        () => editorStateRef.current,
+      );
       if (result.type === "ignore") return;
       if (result.type === "open") {
         openCopyRuleEditor(result.detail);
@@ -273,17 +340,25 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
     [loadRuleSetDetail, openCopyRuleEditor],
   );
 
-  const requestTrackedRuleCopy = useCallback(async (member: TrackedRulePackMember) => {
-    if (!member.ruleSetId) return;
-    const request = ++detailRequestRef.current;
-    const result = await resolveRuleDetailRequest(request, () => detailRequestRef.current, () => loadRuleSetDetail(member.ruleSetId, request), () => editorStateRef.current);
-    if (result.type === "ignore") return;
-    if (result.type === "open") {
-      openTrackedRuleCopyEditor(result.detail);
-    } else {
-      setPendingEditorAction({ type: "tracked-copy", record: result.detail });
-    }
-  }, [loadRuleSetDetail, openTrackedRuleCopyEditor]);
+  const requestTrackedRuleCopy = useCallback(
+    async (member: TrackedRulePackMember) => {
+      if (!member.ruleSetId) return;
+      const request = ++detailRequestRef.current;
+      const result = await resolveRuleDetailRequest(
+        request,
+        () => detailRequestRef.current,
+        () => loadRuleSetDetail(member.ruleSetId, request),
+        () => editorStateRef.current,
+      );
+      if (result.type === "ignore") return;
+      if (result.type === "open") {
+        openTrackedRuleCopyEditor(result.detail);
+      } else {
+        setPendingEditorAction({ type: "tracked-copy", record: result.detail });
+      }
+    },
+    [loadRuleSetDetail, openTrackedRuleCopyEditor],
+  );
 
   const requestCloseRuleEditor = useCallback(() => {
     if (!isEditorOpen) return;
@@ -330,18 +405,26 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       if (error) throw error;
       setRuleSetRecords(data.ruleSets || []);
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     }
   }, [client, setGlobalStatus, t]);
 
   const refreshTrackedRulePacks = useCallback(async () => {
     try {
-      const { data, error } = await client.query(trackedRulePacksQuery, {}).toPromise();
+      const { data, error } = await client
+        .query(trackedRulePacksQuery, {})
+        .toPromise();
       if (error) throw error;
       setTrackedRulePacks(data.trackedRulePacks || []);
       setTrackedRulePacksLoaded(true);
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     }
   }, [client, setGlobalStatus, t]);
 
@@ -366,12 +449,11 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
             enabledTemplateIds: members
               .filter((member) => !member.removed && member.enabled)
               .map((member) => member.templateId),
-            priorities: members
-              .flatMap((member) => (
-                !member.removed && member.priority !== null
-                  ? [{ templateId: member.templateId, priority: member.priority }]
-                  : []
-              )),
+            priorities: members.flatMap((member) =>
+              !member.removed && member.priority !== null
+                ? [{ templateId: member.templateId, priority: member.priority }]
+                : [],
+            ),
             autoUpdate: changes.autoUpdate ?? pack.autoUpdate,
             expectedRevision: pack.revision,
           })
@@ -380,7 +462,10 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
         return true;
       } catch (error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
         return false;
       } finally {
         setMutatingRulePackId(null);
@@ -400,7 +485,10 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
       } finally {
         setMutatingRulePackId(null);
       }
@@ -409,17 +497,25 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
   );
 
   const previewTrackedRulePackUpdate = useCallback(
-    async (pack: TrackedRulePackRecord): Promise<TrackedRulePackPreview | null> => {
+    async (
+      pack: TrackedRulePackRecord,
+    ): Promise<TrackedRulePackPreview | null> => {
       setMutatingRulePackId(pack.packId);
       try {
         const { data, error } = await client
-          .mutation(previewTrackedRulePackUpdateMutation, { packId: pack.packId })
+          .mutation(previewTrackedRulePackUpdateMutation, {
+            packId: pack.packId,
+          })
           .toPromise();
         if (error) throw error;
         return data.previewTrackedRulePackUpdate;
       } catch (error) {
         const message = userFacingGraphQlErrorMessage(error, "", t);
-        const alreadyCurrent = hasGraphQlErrorReason(error, "RULE_PACK_UP_TO_DATE", "VALIDATION_ERROR");
+        const alreadyCurrent = hasGraphQlErrorReason(
+          error,
+          "RULE_PACK_UP_TO_DATE",
+          "VALIDATION_ERROR",
+        );
         setGlobalStatus(
           alreadyCurrent
             ? t("error.rulePackUpToDate")
@@ -449,7 +545,10 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
       } finally {
         setMutatingRulePackId(null);
       }
@@ -470,7 +569,10 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         if (error) throw error;
         await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
       } catch (error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
       } finally {
         setMutatingRulePackId(null);
       }
@@ -484,9 +586,11 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       return updateTrackedRulePackSettings(
         pack,
         {
-          members: pack.members.map((current) => current.templateId === member.templateId
-            ? { ...current, enabled: !current.enabled }
-            : current),
+          members: pack.members.map((current) =>
+            current.templateId === member.templateId
+              ? { ...current, enabled: !current.enabled }
+              : current,
+          ),
         },
         member.ruleSetId,
       );
@@ -527,7 +631,10 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         );
         await refreshRuleSets();
       } catch (error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
       } finally {
         setMutatingRuleSetId(null);
       }
@@ -544,13 +651,18 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
         .mutation(deleteRuleSetMutation, { id: record.id })
         .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("status.ruleDeleted", { name: record.name }), { level: "SUCCESS" });
+      setGlobalStatus(t("status.ruleDeleted", { name: record.name }), {
+        level: "SUCCESS",
+      });
       await refreshRuleSets();
       if (editingRuleSetId === record.id) {
         closeRuleSetEditor();
       }
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingRuleSetId(null);
       setPendingDeleteRuleSet(null);
@@ -585,7 +697,6 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
     openTemplateRuleEditor,
     pendingEditorAction,
   ]);
-
 
   const submitRuleSet = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -661,30 +772,46 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
       closeRuleSetEditor();
       await Promise.all([refreshRuleSets(), refreshTrackedRulePacks()]);
     } catch (error) {
-      const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
+      const message = userFacingGraphQlErrorMessage(
+        error,
+        t("status.failedToUpdate"),
+        t,
+      );
       if (hasGraphQlErrorCode(error, "VALIDATION_ERROR")) {
         setValidationResult(graphQlRuleValidationResult(error, message));
         return;
       }
-      setGlobalStatus(message || t("status.failedToUpdate"), { level: "ERROR" });
+      setGlobalStatus(message || t("status.failedToUpdate"), {
+        level: "ERROR",
+      });
     } finally {
       setMutatingRuleSetId(null);
     }
   };
 
   const trackedRuleSetIds = new Set(
-    trackedRulePacks.flatMap((pack) => pack.members.map((member) => member.ruleSetId).filter((id): id is string => Boolean(id))),
+    trackedRulePacks.flatMap((pack) =>
+      pack.members
+        .map((member) => member.ruleSetId)
+        .filter((id): id is string => Boolean(id)),
+    ),
   );
-  const editableRuleSetRecords = (trackedRulePacksLoaded ? ruleSetRecords : []).filter(
-    (record) => !trackedRuleSetIds.has(record.id),
-  );
+  const editableRuleSetRecords = (
+    trackedRulePacksLoaded ? ruleSetRecords : []
+  ).filter((record) => !trackedRuleSetIds.has(record.id));
 
   return (
     <>
       <SettingsRulesSection
         canManageTrackedPacks={canManageTrackedPacks}
         isEditorOpen={isEditorOpen}
-        editorMode={copyingTrackedRuleSetId ? "copy" : editingRuleSetId ? "edit" : "create"}
+        editorMode={
+          copyingTrackedRuleSetId
+            ? "copy"
+            : editingRuleSetId
+              ? "edit"
+              : "create"
+        }
         editingRuleSetId={editingRuleSetId}
         ruleSetDraft={ruleSetDraft}
         setRuleSetDraft={setRuleSetDraft}
@@ -722,7 +849,9 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
             mutatingRuleSetId={mutatingRuleSetId}
             onPreviewUpdate={previewTrackedRulePackUpdate}
             onApplyUpdate={applyTrackedRulePackUpdate}
-            onSetAutoUpdate={(pack, enabled) => updateTrackedRulePackSettings(pack, { autoUpdate: enabled })}
+            onSetAutoUpdate={(pack, enabled) =>
+              updateTrackedRulePackSettings(pack, { autoUpdate: enabled })
+            }
             onUninstall={uninstallTrackedRulePack}
             onToggleMember={toggleTrackedRulePackMember}
             onCopyMember={(member) => void requestTrackedRuleCopy(member)}
@@ -754,13 +883,13 @@ export function SettingsRulesContainer({ canManageCatalogSettings, canManageSyst
             ? t("settings.ruleCreateNew")
             : pendingEditorAction?.type === "copy"
               ? t("settings.ruleCopyAsCustom")
-            : pendingEditorAction?.type === "template"
-              ? t("settings.ruleApplyTemplate")
-              : pendingEditorAction?.type === "import"
-                ? t("settings.arrImportApply")
-              : pendingEditorAction?.type === "edit"
-                ? t("label.edit")
-                : t("label.discard")
+              : pendingEditorAction?.type === "template"
+                ? t("settings.ruleApplyTemplate")
+                : pendingEditorAction?.type === "import"
+                  ? t("settings.arrImportApply")
+                  : pendingEditorAction?.type === "edit"
+                    ? t("label.edit")
+                    : t("label.discard")
         }
         cancelLabel={t("label.cancel")}
         isBusy={mutatingRuleSetId !== null}

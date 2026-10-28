@@ -1,45 +1,55 @@
-import * as React from "react"
-import { Clock3 } from "lucide-react"
+import * as React from "react";
+import { Clock3 } from "lucide-react";
 
-import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-const HOURS = Array.from({ length: 24 }, (_, index) => index.toString().padStart(2, "0"))
-const MINUTES = Array.from({ length: 60 }, (_, index) => index.toString().padStart(2, "0"))
+const HOURS = Array.from({ length: 24 }, (_, index) =>
+  index.toString().padStart(2, "0"),
+);
+const MINUTES = Array.from({ length: 60 }, (_, index) =>
+  index.toString().padStart(2, "0"),
+);
 
 type TimePickerProps = {
-  id?: string
-  value: string
-  onChange: (value: string) => void
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
   /** Called when the picker closes, after any changes made while it was open. */
-  onClose?: () => void
-  disabled?: boolean
-  className?: string
-  hourLabel?: string
-  minuteLabel?: string
-}
+  onClose?: () => void;
+  disabled?: boolean;
+  className?: string;
+  hourLabel?: string;
+  minuteLabel?: string;
+};
 
 function normalizeTimeValue(value: string): { hour: string; minute: string } {
-  const [rawHour, rawMinute] = value.trim().split(":")
-  const parsedHour = Number.parseInt(rawHour ?? "", 10)
-  const parsedMinute = Number.parseInt(rawMinute ?? "", 10)
+  const [rawHour, rawMinute] = value.trim().split(":");
+  const parsedHour = Number.parseInt(rawHour ?? "", 10);
+  const parsedMinute = Number.parseInt(rawMinute ?? "", 10);
 
-  const hour = Number.isFinite(parsedHour) && parsedHour >= 0 && parsedHour <= 23
-    ? parsedHour.toString().padStart(2, "0")
-    : "00"
-  const minute = Number.isFinite(parsedMinute) && parsedMinute >= 0 && parsedMinute <= 59
-    ? parsedMinute.toString().padStart(2, "0")
-    : "00"
+  const hour =
+    Number.isFinite(parsedHour) && parsedHour >= 0 && parsedHour <= 23
+      ? parsedHour.toString().padStart(2, "0")
+      : "00";
+  const minute =
+    Number.isFinite(parsedMinute) && parsedMinute >= 0 && parsedMinute <= 59
+      ? parsedMinute.toString().padStart(2, "0")
+      : "00";
 
-  return { hour, minute }
+  return { hour, minute };
 }
 
 export function TimePicker({
@@ -52,17 +62,23 @@ export function TimePicker({
   hourLabel = "Hour",
   minuteLabel = "Minute",
 }: TimePickerProps) {
-  const { hour, minute } = React.useMemo(() => normalizeTimeValue(value), [value])
+  const { hour, minute } = React.useMemo(
+    () => normalizeTimeValue(value),
+    [value],
+  );
 
-  const updateValue = React.useCallback((nextHour: string, nextMinute: string) => {
-    onChange(`${nextHour}:${nextMinute}`)
-  }, [onChange])
+  const updateValue = React.useCallback(
+    (nextHour: string, nextMinute: string) => {
+      onChange(`${nextHour}:${nextMinute}`);
+    },
+    [onChange],
+  );
 
   return (
     <Popover
       onOpenChange={(open) => {
         if (!open) {
-          onClose?.()
+          onClose?.();
         }
       }}
     >
@@ -77,7 +93,9 @@ export function TimePicker({
             className,
           )}
         >
-          <span>{hour}:{minute}</span>
+          <span>
+            {hour}:{minute}
+          </span>
           <Clock3 className="size-4 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -105,7 +123,9 @@ export function TimePicker({
             </Select>
           </div>
 
-          <div className="pb-2 text-lg font-medium text-muted-foreground">:</div>
+          <div className="pb-2 text-lg font-medium text-muted-foreground">
+            :
+          </div>
 
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -131,5 +151,5 @@ export function TimePicker({
         </div>
       </PopoverContent>
     </Popover>
-  )
+  );
 }

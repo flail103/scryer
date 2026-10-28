@@ -1,7 +1,14 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useClient } from "urql";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { File, Folder, FolderOpen, FolderPlus, ChevronRight, ArrowUp } from "lucide-react";
+import {
+  File,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ChevronRight,
+  ArrowUp,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,8 +34,7 @@ interface DirectoryEntry {
 }
 
 type BrowserRow =
-  | { kind: "parent"; path: string }
-  | { kind: "entry"; entry: DirectoryEntry };
+  { kind: "parent"; path: string } | { kind: "entry"; entry: DirectoryEntry };
 
 // Rows are uniform by construction: a 2rem icon tile, py-2 padding, a hairline
 // border and the mb-1 gap. A fixed pitch keeps the scrollbar honest without
@@ -102,7 +108,10 @@ export function FolderBrowserDialog({
       setLoading(true);
       setError(null);
       const { data, error: gqlError } = await client
-        .query(browsePathQuery, { path: nextPath, includeFiles: canSelectFiles })
+        .query(browsePathQuery, {
+          path: nextPath,
+          includeFiles: canSelectFiles,
+        })
         .toPromise();
       if (request !== browseRequest.current) {
         return;
@@ -138,7 +147,8 @@ export function FolderBrowserDialog({
     row.scrollLeft = row.scrollWidth;
   }, [open, currentPath]);
 
-  const parentPath = currentPath === "/" ? null : currentPath.replace(/\/[^/]+\/?$/, "") || "/";
+  const parentPath =
+    currentPath === "/" ? null : currentPath.replace(/\/[^/]+\/?$/, "") || "/";
 
   const pathSegments = currentPath.split("/").filter(Boolean);
   const canSelect = !loading && error === null && browsedPath === currentPath;
@@ -151,7 +161,10 @@ export function FolderBrowserDialog({
     setCreatingFolder(true);
     setNewFolderError(null);
     const { data, error: gqlError } = await client
-      .mutation(createFolderMutation, { parentPath: browsedPath, name: newFolderName })
+      .mutation(createFolderMutation, {
+        parentPath: browsedPath,
+        name: newFolderName,
+      })
       .toPromise();
     if (request !== createRequest.current) {
       return;
@@ -160,7 +173,11 @@ export function FolderBrowserDialog({
     const created = data?.createFolder as DirectoryEntry | undefined;
     if (gqlError || !created) {
       setNewFolderError(
-        userFacingGraphQlErrorMessage(gqlError, t("folderBrowser.newFolderFailed"), t),
+        userFacingGraphQlErrorMessage(
+          gqlError,
+          t("folderBrowser.newFolderFailed"),
+          t,
+        ),
       );
       return;
     }
@@ -249,7 +266,10 @@ export function FolderBrowserDialog({
                 const segPath = "/" + pathSegments.slice(0, i + 1).join("/");
                 const isLast = i === pathSegments.length - 1;
                 return (
-                  <span key={segPath} className="flex shrink-0 items-center gap-1">
+                  <span
+                    key={segPath}
+                    className="flex shrink-0 items-center gap-1"
+                  >
                     <ChevronRight className="h-3 w-3 shrink-0 text-[var(--scry-muted3)]" />
                     <button
                       type="button"
@@ -307,8 +327,12 @@ export function FolderBrowserDialog({
                   }}
                 >
                   <FolderPlus className="h-4 w-4" />
-                  <span className="hidden sm:inline">{t("folderBrowser.newFolder")}</span>
-                  <span className="sr-only sm:hidden">{t("folderBrowser.newFolder")}</span>
+                  <span className="hidden sm:inline">
+                    {t("folderBrowser.newFolder")}
+                  </span>
+                  <span className="sr-only sm:hidden">
+                    {t("folderBrowser.newFolder")}
+                  </span>
                 </Button>
               ) : null}
             </div>
@@ -324,7 +348,9 @@ export function FolderBrowserDialog({
                     aria-label={t("folderBrowser.newFolderName")}
                     aria-invalid={newFolderError !== null}
                     aria-describedby={
-                      newFolderError !== null ? "folder-browser-new-folder-error" : undefined
+                      newFolderError !== null
+                        ? "folder-browser-new-folder-error"
+                        : undefined
                     }
                     placeholder={t("folderBrowser.newFolderName")}
                     value={newFolderName}
@@ -346,10 +372,14 @@ export function FolderBrowserDialog({
                     type="button"
                     size="sm"
                     className="h-10 shrink-0"
-                    disabled={creatingFolder || newFolderName.trim().length === 0}
+                    disabled={
+                      creatingFolder || newFolderName.trim().length === 0
+                    }
                     onClick={() => void createFolder()}
                   >
-                    {creatingFolder ? <LoadingMark className="h-4 w-4" /> : null}
+                    {creatingFolder ? (
+                      <LoadingMark className="h-4 w-4" />
+                    ) : null}
                     {t("folderBrowser.create")}
                   </Button>
                   <Button

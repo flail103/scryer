@@ -22,7 +22,10 @@ import { cancelLibraryScanMutation } from "@/lib/graphql/mutations";
 import { librariesQuery } from "@/lib/graphql/queries";
 import { facetById } from "@/lib/facets/registry";
 import type { Facet } from "@/lib/types/titles";
-import type { LibraryScanPhaseProgress, LibraryScanProgress } from "@/lib/types";
+import type {
+  LibraryScanPhaseProgress,
+  LibraryScanProgress,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { LoadingMark } from "@/components/common/loading-mark";
 
@@ -66,11 +69,7 @@ const FACET_CONFIG: Record<Facet, FacetConfig> = {
 const DEFAULT_AUTO_DISMISS_MS = 5_000;
 
 type ToastVisualState =
-  | "scanning"
-  | "success"
-  | "issues"
-  | "failed"
-  | "canceled";
+  "scanning" | "success" | "issues" | "failed" | "canceled";
 type PhaseStatus = "done" | "active" | "pending";
 
 function facetLabel(facet: Facet, t: Translate): string {
@@ -343,13 +342,17 @@ export function LibraryScanToast({
   autoDismissMs?: number;
 }) {
   const client = useClient();
-  const [{ data: libraryData }] = useQuery<{ libraries: { id: string; name: string }[] }>({
+  const [{ data: libraryData }] = useQuery<{
+    libraries: { id: string; name: string }[];
+  }>({
     query: librariesQuery,
     variables: { facet: session.facet },
     requestPolicy: "cache-and-network",
     pause: !session.libraryId,
   });
-  const libraryName = libraryData?.libraries.find((library) => library.id === session.libraryId)?.name;
+  const libraryName = libraryData?.libraries.find(
+    (library) => library.id === session.libraryId,
+  )?.name;
   const facet = FACET_CONFIG[session.facet] ?? FACET_CONFIG.MOVIE;
   const FacetIcon = facet.Icon;
   const terminal = isTerminal(session.status);
@@ -361,9 +364,9 @@ export function LibraryScanToast({
       ? "failed"
       : session.status === "CANCELED"
         ? "canceled"
-        // The Import review route resolves unmatched files; a non-blocking
-        // scan warning with nothing to resolve must still complete normally.
-        : unmatched > 0
+        : // The Import review route resolves unmatched files; a non-blocking
+          // scan warning with nothing to resolve must still complete normally.
+          unmatched > 0
           ? "issues"
           : "success";
 
@@ -444,7 +447,11 @@ export function LibraryScanToast({
     } catch (error) {
       setCancelPending(false);
       toast.error(
-        userFacingGraphQlErrorMessage(error, t("settings.libraryScanCancelFailed"), t),
+        userFacingGraphQlErrorMessage(
+          error,
+          t("settings.libraryScanCancelFailed"),
+          t,
+        ),
       );
     }
   }, [cancelPending, client, session.sessionId, t]);
@@ -582,7 +589,9 @@ export function LibraryScanToast({
     terminal,
   )
     ? "done"
-    : mediaAnalysisDone > 0 || mediaAnalysisTotal > 0 || titleMatchStatus === "done"
+    : mediaAnalysisDone > 0 ||
+        mediaAnalysisTotal > 0 ||
+        titleMatchStatus === "done"
       ? "active"
       : "pending";
 
@@ -723,7 +732,10 @@ export function LibraryScanToast({
           }}
           aria-hidden="true"
         />
-        <Timer className="relative z-[1] h-[13px] w-[13px]" aria-hidden="true" />
+        <Timer
+          className="relative z-[1] h-[13px] w-[13px]"
+          aria-hidden="true"
+        />
         <span className="relative z-[1]">{t("label.dismiss")}</span>
       </button>
     ) : (

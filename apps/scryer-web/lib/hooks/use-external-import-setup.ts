@@ -100,10 +100,7 @@ export interface ImportLibraryDraft {
 }
 
 export type ScoringPersonaValue =
-  | "BALANCED"
-  | "AUDIOPHILE"
-  | "EFFICIENT"
-  | "COMPATIBLE";
+  "BALANCED" | "AUDIOPHILE" | "EFFICIENT" | "COMPATIBLE";
 
 export const SCORING_PERSONA_VALUES: readonly ScoringPersonaValue[] = [
   "BALANCED",
@@ -182,7 +179,10 @@ function arrKindOf(kind: ImportInstanceKind): ImportArrKind | null {
   return kind === "SONARR" || kind === "RADARR" ? kind : null;
 }
 
-function gqlError(error: unknown, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string {
+function gqlError(
+  error: unknown,
+  translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2],
+): string {
   return userFacingGraphQlErrorMessage(error, "", translate);
 }
 
@@ -198,7 +198,8 @@ const IMPORT_WIZARD_STORAGE_KEY = "scryer:import-wizard:v1";
 // Session the backend writes the merged monitored-status snapshot under.
 // It is a fixed id (see EXTERNAL_IMPORT_MONITOR_APPLY_SESSION_ID server-side),
 // and it is what a hinted library scan reads its import hints from.
-const EXTERNAL_IMPORT_MONITOR_APPLY_SESSION_ID = "external-import-monitor-apply";
+const EXTERNAL_IMPORT_MONITOR_APPLY_SESSION_ID =
+  "external-import-monitor-apply";
 
 interface PersistedImportWizardState {
   instances: ImportInstance[]; // apiKey stripped — restored from the server draft
@@ -259,7 +260,10 @@ interface UseExternalImportSetupArgs {
   t: NonNullable<Parameters<typeof userFacingGraphQlErrorMessage>[2]>;
 }
 
-export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs) {
+export function useExternalImportSetup({
+  client,
+  t,
+}: UseExternalImportSetupArgs) {
   // Snapshot of any persisted state, read once on mount to hydrate the wizard.
   const initial = useMemo(loadPersistedImportWizardState, []);
 
@@ -290,7 +294,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   );
 
   const instancesByKind = useCallback(
-    (kind: ImportInstanceKind) => instances.filter((inst) => inst.kind === kind),
+    (kind: ImportInstanceKind) =>
+      instances.filter((inst) => inst.kind === kind),
     [instances],
   );
 
@@ -333,7 +338,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     (id: string) => {
       setInstances((prev) => {
         const target = prev.find((inst) => inst.id === id);
-        if (target?.warmupSessionId) cancelInstanceWarmup(target.warmupSessionId);
+        if (target?.warmupSessionId)
+          cancelInstanceWarmup(target.warmupSessionId);
         return prev.filter((inst) => inst.id !== id);
       });
     },
@@ -369,7 +375,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   );
 
   const connectionReady = (inst: ImportInstance): boolean =>
-    /^https?:\/\/.+/.test(inst.baseUrl.trim()) && inst.apiKey.trim().length >= 6;
+    /^https?:\/\/.+/.test(inst.baseUrl.trim()) &&
+    inst.apiKey.trim().length >= 6;
 
   /**
    * Fire-on-blur verification. Validates connectivity via the lightweight probe,
@@ -404,8 +411,7 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
         .toPromise();
 
       const validation = data?.validateExternalImportConnection as
-        | ExternalImportConnectionValidation
-        | undefined;
+        ExternalImportConnectionValidation | undefined;
       if (error || !validation) {
         patchInstance(id, {
           status: "error",
@@ -442,49 +448,54 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
           },
         )
         .toPromise();
-      const sessionId = (arrKind
-        ? warmupData?.startExternalImportArrSourceWarmup?.sessionId
-        : warmupData?.startExternalImportProwlarrWarmup?.sessionId) as
-        | string
-        | undefined;
+      const sessionId = (
+        arrKind
+          ? warmupData?.startExternalImportArrSourceWarmup?.sessionId
+          : warmupData?.startExternalImportProwlarrWarmup?.sessionId
+      ) as string | undefined;
       if (!arrKind && !sessionId) {
         patchInstance(id, {
           status: "error",
           error:
             gqlError(warmupError, t) ||
-            t("error.fallback.connectionSucceededButProwlarrDiscoveryCouldNotStart"),
+            t(
+              "error.fallback.connectionSucceededButProwlarrDiscoveryCouldNotStart",
+            ),
         });
         return;
       }
       if (sessionId) {
-          // Reconcile the freshly-started session against the latest state,
-          // cancelling any session that is now orphaned. Orphans starve the
-          // backend's scarce episode-warmup slots and leave the live warmup
-          // stuck at "loading episodes". Two orphan sources are handled here:
-          //   1. The instance was removed, or its connection changed while the
-          //      warmup was starting → the new session is for a stale config.
-          //   2. The instance already had a different session (a racing
-          //      re-verify the backend didn't dedup) → supersede the old one.
-          let toCancel: string | null = null;
-          setInstances((prev) => {
-            const current = prev.find((entry) => entry.id === id);
-            if (
-              !current ||
-              current.baseUrl.trim() !== connection.baseUrl ||
-              current.apiKey.trim() !== connection.apiKey
-            ) {
-              toCancel = sessionId;
-              return prev;
-            }
-            if (current.warmupSessionId && current.warmupSessionId !== sessionId) {
-              toCancel = current.warmupSessionId;
-            }
-            return prev.map((entry) =>
-              entry.id === id ? { ...entry, warmupSessionId: sessionId } : entry,
-            );
-          });
-          if (toCancel) cancelInstanceWarmup(toCancel);
-        }
+        // Reconcile the freshly-started session against the latest state,
+        // cancelling any session that is now orphaned. Orphans starve the
+        // backend's scarce episode-warmup slots and leave the live warmup
+        // stuck at "loading episodes". Two orphan sources are handled here:
+        //   1. The instance was removed, or its connection changed while the
+        //      warmup was starting → the new session is for a stale config.
+        //   2. The instance already had a different session (a racing
+        //      re-verify the backend didn't dedup) → supersede the old one.
+        let toCancel: string | null = null;
+        setInstances((prev) => {
+          const current = prev.find((entry) => entry.id === id);
+          if (
+            !current ||
+            current.baseUrl.trim() !== connection.baseUrl ||
+            current.apiKey.trim() !== connection.apiKey
+          ) {
+            toCancel = sessionId;
+            return prev;
+          }
+          if (
+            current.warmupSessionId &&
+            current.warmupSessionId !== sessionId
+          ) {
+            toCancel = current.warmupSessionId;
+          }
+          return prev.map((entry) =>
+            entry.id === id ? { ...entry, warmupSessionId: sessionId } : entry,
+          );
+        });
+        if (toCancel) cancelInstanceWarmup(toCancel);
+      }
     },
     [client, instances, patchInstance, cancelInstanceWarmup, t],
   );
@@ -508,7 +519,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   );
 
   const prowlarrConnectionInput = useMemo(() => {
-    if (!prowlarrInstance || prowlarrInstance.status !== "connected") return null;
+    if (!prowlarrInstance || prowlarrInstance.status !== "connected")
+      return null;
     return {
       baseUrl: prowlarrInstance.baseUrl.trim(),
       apiKey: prowlarrInstance.apiKey.trim(),
@@ -552,7 +564,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
       .toPromise();
     setPreviewing(false);
     if (error || !data?.previewExternalImport) {
-      const message = gqlError(error, t) || t("error.fallback.failedToLoadPreview");
+      const message =
+        gqlError(error, t) || t("error.fallback.failedToLoadPreview");
       setPreviewError(message);
       if (isLostWarmupSessionError(error)) setWarmupSessionLost(true);
       return;
@@ -584,7 +597,9 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
         .toPromise();
       if (stopped) return;
       if (error || !data?.externalImportWarmupStatus) {
-        const message = gqlError(error, t) || t("error.fallback.failedToLoadProwlarrDiscoveryStatus");
+        const message =
+          gqlError(error, t) ||
+          t("error.fallback.failedToLoadProwlarrDiscoveryStatus");
         setPreviewError(message);
         if (isLostWarmupSessionError(error)) {
           setWarmupSessionLost(true);
@@ -601,7 +616,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
       setProwlarrWarmupProgress(progress);
       if (progress.status === "COMPLETED") {
         void loadPreview();
-      } else if (progress.status === "QUEUED" || progress.status === "RUNNING") {
+      } else if (
+        progress.status === "QUEUED" ||
+        progress.status === "RUNNING"
+      ) {
         timer = setTimeout(poll, basePollMs);
       }
     };
@@ -623,10 +641,12 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
       })
       .toPromise();
     const sessionId = data?.startExternalImportProwlarrWarmup?.sessionId as
-      | string
-      | undefined;
+      string | undefined;
     if (error || !sessionId) {
-      setPreviewError(gqlError(error, t) || t("error.fallback.failedToRestartProwlarrDiscovery"));
+      setPreviewError(
+        gqlError(error, t) ||
+          t("error.fallback.failedToRestartProwlarrDiscovery"),
+      );
       return;
     }
     setInstances((prev) =>
@@ -651,8 +671,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   const [invalidAssignedRootIds, setInvalidAssignedRootIds] = useState<
     string[]
   >([]);
-  const [validatedAssignedRootPathSnapshotKey, setValidatedAssignedRootPathSnapshotKey] =
-    useState<string | null>(null);
+  const [
+    validatedAssignedRootPathSnapshotKey,
+    setValidatedAssignedRootPathSnapshotKey,
+  ] = useState<string | null>(null);
 
   const detectedRoots = useMemo<ImportRoot[]>(() => {
     if (!preview) return [];
@@ -670,7 +692,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
         kind: folder.kind,
         sourceKey: folder.sourceKey,
         sourceWarmupSessionId: folder.sourceWarmupSessionId,
-        instanceLabel: shortInstanceLabel("", source?.baseUrl ?? folder.sourceKey),
+        instanceLabel: shortInstanceLabel(
+          "",
+          source?.baseUrl ?? folder.sourceKey,
+        ),
         arrRootPath: folder.arrRootPath,
         remap: remaps[id] ?? null,
         manual: false,
@@ -694,7 +719,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   );
 
   const rootsForLibrary = useCallback(
-    (libraryId: string) => roots.filter((root) => assign[root.id] === libraryId),
+    (libraryId: string) =>
+      roots.filter((root) => assign[root.id] === libraryId),
     [roots, assign],
   );
 
@@ -776,15 +802,18 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     };
   }, [assignedRootPathValidationSnapshot, client]);
 
-  const setRootRemap = useCallback((rootId: string, scryerPath: string | null) => {
-    setRemaps((prev) => {
-      const next = { ...prev };
-      const value = (scryerPath ?? "").trim();
-      if (!value) delete next[rootId];
-      else next[rootId] = value;
-      return next;
-    });
-  }, []);
+  const setRootRemap = useCallback(
+    (rootId: string, scryerPath: string | null) => {
+      setRemaps((prev) => {
+        const next = { ...prev };
+        const value = (scryerPath ?? "").trim();
+        if (!value) delete next[rootId];
+        else next[rootId] = value;
+        return next;
+      });
+    },
+    [],
+  );
 
   // Manual roots are added via the folder browser (no free typing), so the path
   // is supplied up front.
@@ -878,9 +907,7 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   const setLibraryQualityProfile = useCallback(
     (id: string, qualityProfileId: string | null) => {
       setLibraries((prev) =>
-        prev.map((lib) =>
-          lib.id === id ? { ...lib, qualityProfileId } : lib,
-        ),
+        prev.map((lib) => (lib.id === id ? { ...lib, qualityProfileId } : lib)),
       );
     },
     [],
@@ -905,9 +932,9 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   );
 
   // ── Quality profiles ───────────────────────────────────────────────────────
-  const [qualityProfiles, setQualityProfiles] = useState<QualityProfileOption[]>(
-    [],
-  );
+  const [qualityProfiles, setQualityProfiles] = useState<
+    QualityProfileOption[]
+  >([]);
   useEffect(() => {
     let cancelled = false;
     void client
@@ -1087,7 +1114,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
           .toPromise()
           .then(({ data }) => {
             if (
-              data?.saveExternalImportSetupSecretDraft?.overwroteAnotherUserDraft
+              data?.saveExternalImportSetupSecretDraft
+                ?.overwroteAnotherUserDraft
             ) {
               setSecretDraftOverwroteOther(true);
               setSecretDraftOwnedByOther(false);
@@ -1227,7 +1255,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     idxApiKeyOverrides,
     executeResult,
     prowlarrWarmupReady,
-    prowlarrWarmupProgress, t,
+    prowlarrWarmupProgress,
+    t,
   ]);
 
   // ── Aggregate warmup progress (gates Summary) ──────────────────────────────
@@ -1260,14 +1289,14 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
       )
       .toPromise();
     const progress = data?.externalImportAggregateWarmupProgress as
-      | ExternalImportAggregateWarmupProgress
-      | undefined;
+      ExternalImportAggregateWarmupProgress | undefined;
     if (progress) {
       setAggregateProgress(progress);
       setAggregateProgressError(null);
       setWarmupSessionLost(false);
     } else if (error) {
-      const message = gqlError(error, t) || t("error.fallback.failedToLoadWarmupProgress");
+      const message =
+        gqlError(error, t) || t("error.fallback.failedToLoadWarmupProgress");
       setAggregateProgressError(message);
       if (isLostWarmupSessionError(error)) setWarmupSessionLost(true);
     }
@@ -1309,9 +1338,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
             input: { kind: arrKind, connection },
           })
           .toPromise();
-        const sessionId = data?.startExternalImportArrSourceWarmup?.sessionId as
-          | string
-          | undefined;
+        const sessionId = data?.startExternalImportArrSourceWarmup
+          ?.sessionId as string | undefined;
         if (!sessionId) return false;
         let toCancel: string | null = null;
         setInstances((prev) => {
@@ -1320,7 +1348,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
             toCancel = sessionId;
             return prev;
           }
-          if (current.warmupSessionId && current.warmupSessionId !== sessionId) {
+          if (
+            current.warmupSessionId &&
+            current.warmupSessionId !== sessionId
+          ) {
             toCancel = current.warmupSessionId;
           }
           return prev.map((entry) =>
@@ -1383,7 +1414,9 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
   } => {
     const librariesToCreate = libraries
       .map((draft) => {
-        const assignedRoots = roots.filter((root) => assign[root.id] === draft.id);
+        const assignedRoots = roots.filter(
+          (root) => assign[root.id] === draft.id,
+        );
         const rootPaths = Array.from(
           new Set(assignedRoots.map((root) => effectiveRootPath(root).trim())),
         ).filter(Boolean);
@@ -1421,7 +1454,9 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
       .mutation(completeSetupMutation, {})
       .toPromise();
     if (completeErr || !completeData?.completeSetup?.completed) {
-      setFinalizeError(gqlError(completeErr, t) || t("error.fallback.failedToCompleteSetup"));
+      setFinalizeError(
+        gqlError(completeErr, t) || t("error.fallback.failedToCompleteSetup"),
+      );
       setFinalizing(false);
       return;
     }
@@ -1459,41 +1494,45 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     let stopped = false;
     setFinalizing(true);
     void (async () => {
-      const { ok, error } = await pollExternalImportFinalize(finalizeSessionId, {
-        fetchStatus: async (sessionId) => {
-          const { data, error: queryError } = await client
-            .query(
-              externalImportWarmupStatusQuery,
-              { sessionId },
-              { requestPolicy: "network-only" },
-            )
-            .toPromise();
-          const status = data?.externalImportWarmupStatus as
-            | ExternalImportMonitorWarmupProgress
-            | undefined;
-          if (!status) {
+      const { ok, error } = await pollExternalImportFinalize(
+        finalizeSessionId,
+        {
+          fetchStatus: async (sessionId) => {
+            const { data, error: queryError } = await client
+              .query(
+                externalImportWarmupStatusQuery,
+                { sessionId },
+                { requestPolicy: "network-only" },
+              )
+              .toPromise();
+            const status = data?.externalImportWarmupStatus as
+              ExternalImportMonitorWarmupProgress | undefined;
+            if (!status) {
+              return {
+                sample: null,
+                error:
+                  gqlError(queryError, t) ||
+                  t("error.fallback.failedToLoadImportProgress"),
+                sessionGone: isLostWarmupSessionError(queryError),
+              };
+            }
             return {
-              sample: null,
-              error: gqlError(queryError, t) || t("error.fallback.failedToLoadImportProgress"),
-              sessionGone: isLostWarmupSessionError(queryError),
+              sample: {
+                status: status.status,
+                completed: status.snapshotBuildProgress.completed,
+                total: status.snapshotBuildProgress.total,
+                errorMessage: status.errorMessage,
+              },
+              error: null,
             };
-          }
-          return {
-            sample: {
-              status: status.status,
-              completed: status.snapshotBuildProgress.completed,
-              total: status.snapshotBuildProgress.total,
-              errorMessage: status.errorMessage,
-            },
-            error: null,
-          };
+          },
+          onSample: (sample) => {
+            if (!stopped) setFinalizeProgress(sample);
+          },
+          wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          isStopped: () => stopped,
         },
-        onSample: (sample) => {
-          if (!stopped) setFinalizeProgress(sample);
-        },
-        wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-        isStopped: () => stopped,
-      });
+      );
       if (stopped) return;
       if (ok) {
         await completeFinalizedImport();
@@ -1527,7 +1566,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     const fail = (message: string) => ({ ok: false, error: message });
     {
       const normPath = (p: string) =>
-        p.trim().replace(/[\\/]+$/, "").toLowerCase();
+        p
+          .trim()
+          .replace(/[\\/]+$/, "")
+          .toLowerCase();
 
       // Safety net: the backend requires a mapping for every source root it
       // warmed (configured root folders AND the folders titles actually live in).
@@ -1651,7 +1693,10 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
           }
         | undefined;
       if (finalizeErr || !finalized?.finalizeSessionId) {
-        return fail(gqlError(finalizeErr, t) || t("error.fallback.failedToFinalizeImport"));
+        return fail(
+          gqlError(finalizeErr, t) ||
+            t("error.fallback.failedToFinalizeImport"),
+        );
       }
       if (finalized.progress) {
         setFinalizeProgress({
@@ -1673,7 +1718,8 @@ export function useExternalImportSetup({ client, t }: UseExternalImportSetupArgs
     detectedRoots,
     assign,
     libraries,
-    connectedArrSessionIds, t,
+    connectedArrSessionIds,
+    t,
   ]);
 
   const finalizeImport = useCallback(
@@ -1947,7 +1993,8 @@ function defaultLibraryDrafts(): ImportLibraryDraft[] {
     return {
       id,
       facet,
-      name: facet === "MOVIE" ? "Movies" : facet === "SERIES" ? "Series" : "Anime",
+      name:
+        facet === "MOVIE" ? "Movies" : facet === "SERIES" ? "Series" : "Anime",
       qualityProfileId: null,
       scoringPersona: "BALANCED",
       existingLibraryId: id,

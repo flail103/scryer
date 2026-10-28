@@ -5708,7 +5708,7 @@ export const listExclusionTitleQuery = `query ListExclusionTitle($id: ID!) {
   }
 }`;
 
-export const listProvidersQuery =`query ListProviders {
+export const listProvidersQuery = `query ListProviders {
   listProviders {
     providerType
     name

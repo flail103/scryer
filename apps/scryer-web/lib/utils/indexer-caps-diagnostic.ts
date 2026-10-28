@@ -15,18 +15,36 @@ const REASON_KEYS: Readonly<Record<string, string>> = {
 };
 
 export function indexerCapsDiagnostic(
-  entry: { capsSource?: string | null; capsReason?: string | null; capsRetryAfterSeconds?: number | null },
+  entry: {
+    capsSource?: string | null;
+    capsReason?: string | null;
+    capsRetryAfterSeconds?: number | null;
+  },
   t: (key: string, values?: Record<string, string | number>) => string,
 ): string | undefined {
   if (!entry.capsSource) return undefined;
-  const parts = [t(Object.hasOwn(SOURCE_KEYS, entry.capsSource)
-    ? SOURCE_KEYS[entry.capsSource as IndexerCapsSource] : "indexerSearch.caps.unknown")];
+  const parts = [
+    t(
+      Object.hasOwn(SOURCE_KEYS, entry.capsSource)
+        ? SOURCE_KEYS[entry.capsSource as IndexerCapsSource]
+        : "indexerSearch.caps.unknown",
+    ),
+  ];
   if (entry.capsReason) {
-    parts.push(t(Object.hasOwn(REASON_KEYS, entry.capsReason)
-      ? REASON_KEYS[entry.capsReason]! : "indexerSearch.caps.refreshUnavailable"));
+    parts.push(
+      t(
+        Object.hasOwn(REASON_KEYS, entry.capsReason)
+          ? REASON_KEYS[entry.capsReason]!
+          : "indexerSearch.caps.refreshUnavailable",
+      ),
+    );
   }
   if (entry.capsRetryAfterSeconds != null && entry.capsRetryAfterSeconds >= 0) {
-    parts.push(t("indexerSearch.caps.retryAfter", { seconds: entry.capsRetryAfterSeconds }));
+    parts.push(
+      t("indexerSearch.caps.retryAfter", {
+        seconds: entry.capsRetryAfterSeconds,
+      }),
+    );
   }
   return parts.join(" · ");
 }

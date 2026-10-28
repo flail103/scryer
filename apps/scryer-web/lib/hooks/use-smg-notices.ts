@@ -43,8 +43,7 @@ function readSmgNoticeSessionCache(): SmgNoticeSessionCache | null {
     }
     return {
       refreshedAt: parsed.refreshedAt,
-      versionCompatibilityNotice:
-        parsed.versionCompatibilityNotice ?? null,
+      versionCompatibilityNotice: parsed.versionCompatibilityNotice ?? null,
       scryerUpdateNotice: parsed.scryerUpdateNotice ?? null,
     };
   } catch {
@@ -102,9 +101,7 @@ export function useSmgNotices({
       if (typeof window === "undefined") {
         return "";
       }
-      return (
-        window.localStorage.getItem(SMG_SCRYER_UPDATE_DISMISSED_KEY) ?? ""
-      );
+      return window.localStorage.getItem(SMG_SCRYER_UPDATE_DISMISSED_KEY) ?? "";
     },
   );
 
@@ -152,8 +149,7 @@ export function useSmgNotices({
       if (!force) {
         const sessionCache = readSmgNoticeSessionCache();
         if (sessionCache) {
-          lastRoutineSmgNoticeRefreshAtRef.current =
-            sessionCache.refreshedAt;
+          lastRoutineSmgNoticeRefreshAtRef.current = sessionCache.refreshedAt;
           setSmgVersionCompatibilityNotice(
             sessionCache.versionCompatibilityNotice,
           );
@@ -169,10 +165,11 @@ export function useSmgNotices({
         return;
       }
       lastRoutineSmgNoticeRefreshAtRef.current = now;
-      const [versionCompatibilityNotice, scryerUpdateNotice] = await Promise.all([
-        refreshSmgVersionCompatibilityNotice(),
-        refreshSmgScryerUpdateNotice(),
-      ]);
+      const [versionCompatibilityNotice, scryerUpdateNotice] =
+        await Promise.all([
+          refreshSmgVersionCompatibilityNotice(),
+          refreshSmgScryerUpdateNotice(),
+        ]);
       writeSmgNoticeSessionCache({
         refreshedAt: now,
         versionCompatibilityNotice,

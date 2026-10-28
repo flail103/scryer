@@ -31,7 +31,10 @@ type PluginInstallProgressSubscriptionResult = {
   };
 };
 
-function extractPluginMutationErrorMessage(error: unknown, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string | null {
+function extractPluginMutationErrorMessage(
+  error: unknown,
+  translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2],
+): string | null {
   return userFacingGraphQlErrorMessage(error, "", translate) || null;
 }
 
@@ -193,7 +196,11 @@ export function usePluginManagement({
         ]);
       } catch (error) {
         setPluginsError(
-          userFacingGraphQlErrorMessage(error, translateRef.current("status.failedToLoad"), translateRef.current),
+          userFacingGraphQlErrorMessage(
+            error,
+            translateRef.current("status.failedToLoad"),
+            translateRef.current,
+          ),
         );
       } finally {
         pluginsLoadedRef.current = true;
@@ -292,7 +299,11 @@ export function usePluginManagement({
                   }
                 } catch (error) {
                   setPluginsError(
-                    userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+                    userFacingGraphQlErrorMessage(
+                      error,
+                      t("status.failedToLoad"),
+                      t,
+                    ),
                   );
                 } finally {
                   clearPluginProgress(plugin.id);
@@ -335,8 +346,17 @@ export function usePluginManagement({
             }
             clearPluginProgress(plugin.id);
             endPluginMutation(plugin.id);
-            void Promise.all([loadPlugins(false), refreshProviderOptions()]).catch((error) => {
-              setPluginsError(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t));
+            void Promise.all([
+              loadPlugins(false),
+              refreshProviderOptions(),
+            ]).catch((error) => {
+              setPluginsError(
+                userFacingGraphQlErrorMessage(
+                  error,
+                  t("status.failedToLoad"),
+                  t,
+                ),
+              );
             });
           },
         },

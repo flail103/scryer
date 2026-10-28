@@ -15,8 +15,7 @@ export function isProwlarrDiscoveryReady(
   status: ExternalImportMonitorWarmupStatus | null,
 ): boolean {
   return (
-    !hasConnectedProwlarr ||
-    (Boolean(sessionId) && status === "COMPLETED")
+    !hasConnectedProwlarr || (Boolean(sessionId) && status === "COMPLETED")
   );
 }
 
@@ -59,9 +58,11 @@ export interface FinalizeStatusSample {
 
 export interface FinalizePollDeps {
   /** Read the tracked apply session; `null` means the read itself failed. */
-  fetchStatus: (
-    sessionId: string,
-  ) => Promise<{ sample: FinalizeStatusSample | null; error: string | null; sessionGone?: boolean }>;
+  fetchStatus: (sessionId: string) => Promise<{
+    sample: FinalizeStatusSample | null;
+    error: string | null;
+    sessionGone?: boolean;
+  }>;
   /** Called for every successful read so the view can redraw. */
   onSample: (sample: FinalizeStatusSample) => void;
   /** Injected so tests don't wait on real timers. */
@@ -119,7 +120,11 @@ export async function pollExternalImportFinalize(
  * wizard's Finish button disabled with nothing on screen to explain it.
  */
 export async function runFinalizeStart(
-  start: () => Promise<{ ok: boolean; error: string | null; sessionGone?: boolean }>,
+  start: () => Promise<{
+    ok: boolean;
+    error: string | null;
+    sessionGone?: boolean;
+  }>,
   onFailure: (message: string) => void,
 ): Promise<{ ok: boolean; error: string | null; sessionGone?: boolean }> {
   try {
@@ -130,7 +135,7 @@ export async function runFinalizeStart(
     return outcome;
   } catch (error) {
     const message =
-      (userFacingGraphQlErrorMessage(error, String(error))) ||
+      userFacingGraphQlErrorMessage(error, String(error)) ||
       "Failed to finalize import";
     onFailure(message);
     return { ok: false, error: message };

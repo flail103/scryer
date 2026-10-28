@@ -37,10 +37,7 @@ export default function SetupPage() {
   return (
     <ScryerGraphqlProvider language={uiLanguage}>
       <div className="min-h-screen bg-fixed text-[var(--scry-body)] [background-image:var(--scry-shell-bg)]">
-        <SetupWizardContainer
-          t={t}
-          isReentry={isReentry}
-        />
+        <SetupWizardContainer t={t} isReentry={isReentry} />
       </div>
     </ScryerGraphqlProvider>
   );

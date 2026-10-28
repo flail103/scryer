@@ -11,5 +11,9 @@ export const INDEXER_SETTINGS_TAB_ITEMS: Record<
   indexers: { labelKey: "settings.indexers", icon: Database, beta: false },
   search: { labelKey: "settings.indexerSearch", icon: Search, beta: true },
   clients: { labelKey: "settings.indexerClients", icon: KeyRound, beta: true },
-  seedingProfiles: { labelKey: "settings.seedingProfiles", icon: Upload, beta: false },
+  seedingProfiles: {
+    labelKey: "settings.seedingProfiles",
+    icon: Upload,
+    beta: false,
+  },
 };

@@ -66,12 +66,8 @@ export function useLocationOperationStart(options: {
   const client = useClient();
   const t = useTranslate();
   const moveProgress = useOptionalLocationMoveProgress();
-  const {
-    failedMessage,
-    recognizeOwnRefusal,
-    onNeedsFreshPreview,
-    onStarted,
-  } = options;
+  const { failedMessage, recognizeOwnRefusal, onNeedsFreshPreview, onStarted } =
+    options;
 
   const [starting, setStarting] = React.useState(false);
   const [startError, setStartError] = React.useState<string | null>(null);
@@ -92,8 +88,7 @@ export function useLocationOperationStart(options: {
           throw error;
         }
         const started = data?.startLocationOperation as
-          | { operation: { id: string } }
-          | undefined;
+          { operation: { id: string } } | undefined;
         if (!started?.operation?.id) {
           throw new Error(failedMessage);
         }

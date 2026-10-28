@@ -49,8 +49,7 @@ export type MaintenanceActionStepParameters = {
 };
 
 export type MaintenanceSearchCondition =
-  | "UNCONDITIONAL"
-  | "PREVIOUS_PROFILE_CHANGED";
+  "UNCONDITIONAL" | "PREVIOUS_PROFILE_CHANGED";
 
 export type MaintenanceActionStep = {
   id: string;
@@ -135,7 +134,8 @@ export type MaintenanceActionStepDescriptor = {
   supportedSubjects: MaintenanceSubjectScope[];
   riskClass: MaintenanceRiskClass;
   effectClasses: string[];
-  parameterSchema: "none" | "unmonitor" | "change_quality_profile" | "search" | "tags";
+  parameterSchema:
+    "none" | "unmonitor" | "change_quality_profile" | "search" | "tags";
   requires: string[];
   terminal: boolean;
   completionPolicy: "accepted" | "completed";

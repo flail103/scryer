@@ -28,7 +28,10 @@ test("a refused restore request is explained from its reason, not its sentence",
     reason: "RESTORE_MAINTENANCE_ACTIVE",
   });
 
-  assert.equal(restoreRefusalKey(error), "setup.restoreRefusal.maintenanceActive");
+  assert.equal(
+    restoreRefusalKey(error),
+    "setup.restoreRefusal.maintenanceActive",
+  );
   assert.equal(
     restoreErrorMessage(error, t, "Failed"),
     dictionary["setup.restoreRefusal.maintenanceActive"],
@@ -36,7 +39,10 @@ test("a refused restore request is explained from its reason, not its sentence",
 });
 
 test("a failed attempt's reason is translated", () => {
-  const error = restoreJobError({ reason: "RESTORE_DEADLINE_EXCEEDED", message: null }, "Failed");
+  const error = restoreJobError(
+    { reason: "RESTORE_DEADLINE_EXCEEDED", message: null },
+    "Failed",
+  );
 
   assert.equal(
     restoreErrorMessage(error, t, "Failed"),
@@ -46,7 +52,10 @@ test("a failed attempt's reason is translated", () => {
 
 test("a failed attempt with an unknown reason shows the server's sentence", () => {
   const error = restoreJobError(
-    { reason: "SECURITY_BACKUP_SYNTHETIC_REFUSAL", message: "validation: synthetic sentence" },
+    {
+      reason: "SECURITY_BACKUP_SYNTHETIC_REFUSAL",
+      message: "validation: synthetic sentence",
+    },
     "Failed",
   );
 

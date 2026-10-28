@@ -3323,10 +3323,7 @@ export const assignTrackedDownloadTitleMutation = `mutation AssignTrackedDownloa
  * readiness; the modal only renders the answer.
  */
 export type SubtitleSearchStatus =
-  | "READY"
-  | "NO_PROVIDERS"
-  | "PROVIDER_UNAVAILABLE"
-  | "DISABLED";
+  "READY" | "NO_PROVIDERS" | "PROVIDER_UNAVAILABLE" | "DISABLED";
 
 export type SubtitleSearchPayload = {
   status: SubtitleSearchStatus;

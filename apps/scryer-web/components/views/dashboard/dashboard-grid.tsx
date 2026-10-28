@@ -12,7 +12,11 @@ import {
   type Layout,
   type LayoutItem,
 } from "react-grid-layout";
-import { useBeforeUnload, useBlocker, type BlockerFunction } from "react-router";
+import {
+  useBeforeUnload,
+  useBlocker,
+  type BlockerFunction,
+} from "react-router";
 import { useClient } from "urql";
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -84,7 +88,13 @@ import {
 const GRID_CROSSHAIR_ARM = 4;
 const DASHBOARD_ROW_STEP = DASHBOARD_ROW_HEIGHT + DASHBOARD_MARGIN[1];
 
-function DashboardGridCells({ width, columns }: { width: number; columns: number }) {
+function DashboardGridCells({
+  width,
+  columns,
+}: {
+  width: number;
+  columns: number;
+}) {
   const patternId = `scry-grid-corners-${React.useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [marginX, marginY] = DASHBOARD_MARGIN;
   const columnWidth = (width - marginX * (columns - 1)) / columns;
@@ -143,13 +153,21 @@ function DashboardDropTargets({
   return (
     <div className="scry-dashboard-drop-targets" aria-hidden="true">
       {regions.map((region) => {
-        const left = Math.max(0, region.x * (columnWidth + marginX) - marginX / 2);
+        const left = Math.max(
+          0,
+          region.x * (columnWidth + marginX) - marginX / 2,
+        );
         const right = Math.min(
           width,
           (region.x + region.w) * (columnWidth + marginX) - marginX / 2,
         );
-        const top = Math.max(0, region.y * (DASHBOARD_ROW_HEIGHT + marginY) - marginY / 2);
-        const bottom = (region.y + region.h) * (DASHBOARD_ROW_HEIGHT + marginY) - marginY / 2;
+        const top = Math.max(
+          0,
+          region.y * (DASHBOARD_ROW_HEIGHT + marginY) - marginY / 2,
+        );
+        const bottom =
+          (region.y + region.h) * (DASHBOARD_ROW_HEIGHT + marginY) -
+          marginY / 2;
         return (
           <div
             key={`${region.x}:${region.y}`}
@@ -202,7 +220,9 @@ function snapToOpenCompactor(draggedId: string, cellAspect: number): Compactor {
       if (spot.x === dragged.x && spot.y === dragged.y) {
         return layout;
       }
-      return layout.map((item) => (item === dragged ? { ...item, ...spot } : item));
+      return layout.map((item) =>
+        item === dragged ? { ...item, ...spot } : item,
+      );
     },
   };
 }
@@ -218,9 +238,13 @@ type GridGesture = ResizeAxis | "move";
 /** Which handle a resize started from, read off the handle's class. */
 function resizeAxisFromEvent(event: Event): ResizeAxis {
   const handle =
-    event.target instanceof Element ? event.target.closest(".react-resizable-handle") : null;
+    event.target instanceof Element
+      ? event.target.closest(".react-resizable-handle")
+      : null;
   return (
-    RESIZE_AXES.find((axis) => handle?.classList.contains(`react-resizable-handle-${axis}`)) ?? "se"
+    RESIZE_AXES.find((axis) =>
+      handle?.classList.contains(`react-resizable-handle-${axis}`),
+    ) ?? "se"
   );
 }
 /** react-grid-layout's id for the placeholder of an item dragged in from outside. */
@@ -230,7 +254,10 @@ const CONTAINER_PADDING: readonly [number, number] = [0, 0];
 
 const BREAKPOINT_QUERIES = DASHBOARD_BREAKPOINTS.filter(
   (breakpoint) => DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint] > 0,
-).map((breakpoint) => `(min-width: ${DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint]}px)`);
+).map(
+  (breakpoint) =>
+    `(min-width: ${DASHBOARD_BREAKPOINT_MIN_WIDTH[breakpoint]}px)`,
+);
 
 function subscribeToViewport(onChange: () => void): () => void {
   const lists = BREAKPOINT_QUERIES.map((query) => window.matchMedia(query));
@@ -263,27 +290,52 @@ type DashboardGridProps = {
   onEditingChange: (editing: boolean) => void;
 };
 
-function toGridLayout(items: readonly DashboardLayoutItem[], breakpoint: DashboardBreakpoint): LayoutItem[] {
+function toGridLayout(
+  items: readonly DashboardLayoutItem[],
+  breakpoint: DashboardBreakpoint,
+): LayoutItem[] {
   return items.map((entry) => {
     const min = isDashboardPanelId(entry.panelId)
       ? dashboardPanelMinSize(entry.panelId, breakpoint)
       : { w: 1, h: 1 };
-    return { i: entry.panelId, x: entry.x, y: entry.y, w: entry.w, h: entry.h, minW: min.w, minH: min.h };
+    return {
+      i: entry.panelId,
+      x: entry.x,
+      y: entry.y,
+      w: entry.w,
+      h: entry.h,
+      minW: min.w,
+      minH: min.h,
+    };
   });
 }
 
 function fromGridLayout(layout: Layout): DashboardLayoutItem[] {
   return layout
-    .filter((entry) => entry.i !== DROPPING_ITEM_ID && isDashboardPanelId(entry.i))
-    .map((entry) => ({ panelId: entry.i, x: entry.x, y: entry.y, w: entry.w, h: entry.h }));
+    .filter(
+      (entry) => entry.i !== DROPPING_ITEM_ID && isDashboardPanelId(entry.i),
+    )
+    .map((entry) => ({
+      panelId: entry.i,
+      x: entry.x,
+      y: entry.y,
+      w: entry.w,
+      h: entry.h,
+    }));
 }
 
-export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridProps) {
+export function DashboardGrid({
+  data,
+  editing,
+  onEditingChange,
+}: DashboardGridProps) {
   const t = useTranslate();
   const client = useClient();
   const setGlobalStatus = useGlobalStatus();
   const { uiSettings, uiSettingsLoaded, setUiSettings } = useUiSettings();
-  const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
+  const { width, containerRef, mounted } = useContainerWidth({
+    measureBeforeMount: true,
+  });
 
   const saved = React.useMemo(
     () => effectiveDashboardLayouts(uiSettings.dashboardLayouts),
@@ -291,7 +343,9 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   );
   const [draft, setDraft] = React.useState<DashboardLayouts | null>(null);
   const [trayOpen, setTrayOpen] = React.useState(false);
-  const [dragPanelId, setDragPanelId] = React.useState<DashboardPanelId | null>(null);
+  const [dragPanelId, setDragPanelId] = React.useState<DashboardPanelId | null>(
+    null,
+  );
   const [saving, setSaving] = React.useState(false);
   const [confirmReset, setConfirmReset] = React.useState(false);
 
@@ -320,7 +374,9 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   // panels, while the outline moves on. Each step hands just that panel a
   // fresh element, so it follows the pointer; the other panels keep their
   // memoised elements and do not redraw.
-  const [resizingPanelId, setResizingPanelId] = React.useState<string | null>(null);
+  const [resizingPanelId, setResizingPanelId] = React.useState<string | null>(
+    null,
+  );
   const [gestureFrame, setGestureFrame] = React.useState(0);
   // While a panel moves, resizes or comes in from the tray, the grid area
   // reaches a full screen past the bottom of the window, so the drop zones and
@@ -329,11 +385,20 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   const gridAreaRef = React.useRef<HTMLDivElement>(null);
   const rowsPastViewport = React.useCallback(() => {
     const top = gridAreaRef.current?.getBoundingClientRect().top ?? 0;
-    return Math.max(0, Math.ceil((2 * window.innerHeight - top) / DASHBOARD_ROW_STEP));
+    return Math.max(
+      0,
+      Math.ceil((2 * window.innerHeight - top) / DASHBOARD_ROW_STEP),
+    );
   }, []);
   const [gestureRows, setGestureRows] = React.useState<number | null>(null);
   const handleResizeStart = React.useCallback(
-    (_layout: Layout, oldItem: LayoutItem | null, _next: unknown, _placeholder: unknown, event: Event) => {
+    (
+      _layout: Layout,
+      oldItem: LayoutItem | null,
+      _next: unknown,
+      _placeholder: unknown,
+      event: Event,
+    ) => {
       window.getSelection()?.removeAllRanges();
       setGesture(resizeAxisFromEvent(event));
       setGestureRows(rowsPastViewport());
@@ -341,7 +406,10 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     },
     [rowsPastViewport],
   );
-  const handleGestureStep = React.useCallback(() => setGestureFrame((frame) => frame + 1), []);
+  const handleGestureStep = React.useCallback(
+    () => setGestureFrame((frame) => frame + 1),
+    [],
+  );
   // The area a moved panel can land in. Other panels never move during a
   // drag, since collisions are refused, so it is worked out once at the start.
   const [moveTargets, setMoveTargets] = React.useState<GridRect[] | null>(null);
@@ -374,9 +442,15 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     setResizingPanelId(null);
   }, []);
   const items = layouts[breakpoint];
-  const placed = React.useMemo(() => new Set(items.map((entry) => entry.panelId)), [items]);
+  const placed = React.useMemo(
+    () => new Set(items.map((entry) => entry.panelId)),
+    [items],
+  );
 
-  const gridLayout = React.useMemo(() => toGridLayout(items, breakpoint), [items, breakpoint]);
+  const gridLayout = React.useMemo(
+    () => toGridLayout(items, breakpoint),
+    [items, breakpoint],
+  );
   const gridConfig = React.useMemo(
     () => ({
       cols: DASHBOARD_COLUMNS[breakpoint],
@@ -428,18 +502,28 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
       }
       const rest = fromGridLayout(layout);
       updateDraft(() =>
-        placeDashboardPanel(rest, panelId, breakpoint, { x: item.x, y: item.y, w: item.w, h: item.h }),
+        placeDashboardPanel(rest, panelId, breakpoint, {
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
+        }),
       );
     },
     [breakpoint, dragPanelId, editing, updateDraft],
   );
 
   const dropItemSize = React.useMemo(
-    () => (dragPanelId ? dashboardPanelDefaultSize(dragPanelId, breakpoint) : { w: 1, h: 1 }),
+    () =>
+      dragPanelId
+        ? dashboardPanelDefaultSize(dragPanelId, breakpoint)
+        : { w: 1, h: 1 },
     [breakpoint, dragPanelId],
   );
 
-  const trayDragging = Boolean(dragPanelId && !placed.has(dragPanelId) && !stacked);
+  const trayDragging = Boolean(
+    dragPanelId && !placed.has(dragPanelId) && !stacked,
+  );
   const [trayDragRows, setTrayDragRows] = React.useState<number | null>(null);
   const handleTrayDrag = React.useCallback(
     (panelId: DashboardPanelId | null) => {
@@ -452,7 +536,12 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   const trayTargets = React.useMemo(
     () =>
       trayRows !== null
-        ? dashboardDropRegions(items, dropItemSize, DASHBOARD_COLUMNS[breakpoint], trayRows)
+        ? dashboardDropRegions(
+            items,
+            dropItemSize,
+            DASHBOARD_COLUMNS[breakpoint],
+            trayRows,
+          )
         : null,
     [breakpoint, dropItemSize, items, trayRows],
   );
@@ -488,7 +577,9 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
 
   const reportFailure = React.useCallback(
     (error: unknown, fallbackKey: string) => {
-      setGlobalStatus(dashboardLayoutErrorMessage(error, t, t(fallbackKey)), { level: "ERROR" });
+      setGlobalStatus(dashboardLayoutErrorMessage(error, t, t(fallbackKey)), {
+        level: "ERROR",
+      });
     },
     [setGlobalStatus, t],
   );
@@ -507,9 +598,12 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     try {
       for (const entry of changed) {
         const result = await client
-          .mutation<{ setMyDashboardLayout?: UiSettings }>(setMyDashboardLayoutMutation, {
-            input: dashboardLayoutInput(entry, draft[entry]),
-          })
+          .mutation<{ setMyDashboardLayout?: UiSettings }>(
+            setMyDashboardLayoutMutation,
+            {
+              input: dashboardLayoutInput(entry, draft[entry]),
+            },
+          )
           .toPromise();
         if (result.error || !result.data?.setMyDashboardLayout) {
           // Breakpoints saved before this one stay saved; the draft is kept so
@@ -526,13 +620,25 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     } finally {
       setSaving(false);
     }
-  }, [client, draft, finish, reportFailure, saved, setGlobalStatus, setUiSettings, t]);
+  }, [
+    client,
+    draft,
+    finish,
+    reportFailure,
+    saved,
+    setGlobalStatus,
+    setUiSettings,
+    t,
+  ]);
 
   // Leaving the page with an unsaved arrangement asks first: moves within the
   // app through the router, reloads and closing the tab through the browser.
   // A save in flight is not held up, since it ends edit mode itself.
   const hasUnsavedChanges = React.useMemo(
-    () => editing && draft !== null && changedDashboardBreakpoints(draft, saved).length > 0,
+    () =>
+      editing &&
+      draft !== null &&
+      changedDashboardBreakpoints(draft, saved).length > 0,
     [draft, editing, saved],
   );
   const guardNavigation = hasUnsavedChanges && !saving;
@@ -566,15 +672,21 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     finish();
     navigationBlocker.proceed?.();
   }, [finish, navigationBlocker]);
-  const stayOnPage = React.useCallback(() => navigationBlocker.reset?.(), [navigationBlocker]);
+  const stayOnPage = React.useCallback(
+    () => navigationBlocker.reset?.(),
+    [navigationBlocker],
+  );
 
   const reset = React.useCallback(async () => {
     setSaving(true);
     try {
       const result = await client
-        .mutation<{ resetMyDashboardLayout?: UiSettings }>(resetMyDashboardLayoutMutation, {
-          breakpoint: null,
-        })
+        .mutation<{ resetMyDashboardLayout?: UiSettings }>(
+          resetMyDashboardLayoutMutation,
+          {
+            breakpoint: null,
+          },
+        )
         .toPromise();
       if (result.error || !result.data?.resetMyDashboardLayout) {
         reportFailure(result.error, "dashboard.layout.resetFailed");
@@ -591,43 +703,64 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     }
   }, [client, finish, reportFailure, setGlobalStatus, setUiSettings, t]);
 
-
   const panelElements = React.useMemo(
     () =>
-      items.map((entry) => {
-        if (!isDashboardPanelId(entry.panelId)) {
-          return null;
-        }
-        const panelId = entry.panelId;
-        const tier = dashboardPanelTier(panelId, breakpoint, entry);
-        const title = t(DASHBOARD_PANELS[panelId].titleKey);
-        return (
-          <div key={panelId} data-panel-id={panelId} data-tier={tier} className="scry-dashboard-item">
-            {DASHBOARD_PANEL_RENDERERS[panelId]({ data, tier, breakpoint })}
-            {editing ? (
-              <div
-                className={DRAG_HANDLE_CLASS}
-                role="group"
-                aria-label={t("dashboard.layout.movePanel", { name: title })}
-              >
-                <div className="scry-dashboard-drag-bar">
-                  <GripVertical className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span className="scry-dashboard-drag-title" aria-hidden="true">{title}</span>
-                  <IconButton
-                    appearance="boxed"
-                    tone="delete"
-                    className={cn(NO_DRAG_CLASS, "h-7 w-7")}
-                    label={t("dashboard.layout.removePanel", { name: title })}
-                    onClick={() => updateDraft((current) => removeDashboardPanel(current, panelId))}
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden="true" />
-                  </IconButton>
+      items
+        .map((entry) => {
+          if (!isDashboardPanelId(entry.panelId)) {
+            return null;
+          }
+          const panelId = entry.panelId;
+          const tier = dashboardPanelTier(panelId, breakpoint, entry);
+          const title = t(DASHBOARD_PANELS[panelId].titleKey);
+          return (
+            <div
+              key={panelId}
+              data-panel-id={panelId}
+              data-tier={tier}
+              className="scry-dashboard-item"
+            >
+              {DASHBOARD_PANEL_RENDERERS[panelId]({ data, tier, breakpoint })}
+              {editing ? (
+                <div
+                  className={DRAG_HANDLE_CLASS}
+                  role="group"
+                  aria-label={t("dashboard.layout.movePanel", { name: title })}
+                >
+                  <div className="scry-dashboard-drag-bar">
+                    <GripVertical
+                      className="h-4 w-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="scry-dashboard-drag-title"
+                      aria-hidden="true"
+                    >
+                      {title}
+                    </span>
+                    <IconButton
+                      appearance="boxed"
+                      tone="delete"
+                      className={cn(NO_DRAG_CLASS, "h-7 w-7")}
+                      label={t("dashboard.layout.removePanel", { name: title })}
+                      onClick={() =>
+                        updateDraft((current) =>
+                          removeDashboardPanel(current, panelId),
+                        )
+                      }
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </IconButton>
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
-        );
-      }).filter((element): element is React.ReactElement<Record<string, unknown>> => element !== null),
+              ) : null}
+            </div>
+          );
+        })
+        .filter(
+          (element): element is React.ReactElement<Record<string, unknown>> =>
+            element !== null,
+        ),
     [breakpoint, data, editing, items, t, updateDraft],
   );
 
@@ -643,10 +776,19 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
               {t("dashboard.layout.editing")}
             </span>
             <span className="text-[11px] text-[var(--scry-muted)]">
-              {t(stacked ? "dashboard.layout.editHintStacked" : "dashboard.layout.editHint")}
+              {t(
+                stacked
+                  ? "dashboard.layout.editHintStacked"
+                  : "dashboard.layout.editHint",
+              )}
             </span>
           </span>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setTrayOpen(true)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => setTrayOpen(true)}
+          >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             {t("dashboard.layout.panels")}
           </Button>
@@ -660,10 +802,21 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
             {t("dashboard.layout.reset")}
           </Button>
-          <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={finish}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={saving}
+            onClick={finish}
+          >
             {t("label.cancel")}
           </Button>
-          <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+          <Button
+            type="button"
+            size="sm"
+            disabled={saving}
+            onClick={() => void save()}
+          >
             {t("label.save")}
           </Button>
         </div>
@@ -687,49 +840,68 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
           <div
             ref={gridAreaRef}
             className="relative"
-            style={extentRows !== null ? { minHeight: extentRows * DASHBOARD_ROW_STEP } : undefined}
+            style={
+              extentRows !== null
+                ? { minHeight: extentRows * DASHBOARD_ROW_STEP }
+                : undefined
+            }
           >
-          {extentRows !== null ? (
-            <DashboardGridCells width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
-          ) : null}
-          {editing && dropTargets ? (
-            <DashboardDropTargets regions={dropTargets} width={width} columns={DASHBOARD_COLUMNS[breakpoint]} />
-          ) : null}
-          <ReactGridLayout
-            key={breakpoint}
-            className={cn("scry-dashboard-grid", editing && "scry-dashboard-grid-editing")}
-            width={width}
-            layout={gridLayout}
-            gridConfig={gridConfig}
-            compactor={gridCompactor}
-            dragConfig={{
-              enabled: editing,
-              handle: `.${DRAG_HANDLE_CLASS}`,
-              cancel: `.${NO_DRAG_CLASS}`,
-              allowMobileScroll: true,
-            }}
-            resizeConfig={{ enabled: editing && !stacked, handles: [...RESIZE_AXES] }}
-            dropConfig={{
-              enabled: editing,
-              defaultItem: dropItemSize,
-              onDragOver: handleDropDragOver,
-              touchEnabled: true,
-            }}
-            onResizeStart={handleResizeStart}
-            onResize={handleGestureStep}
-            onDrag={handleGestureStep}
-            onResizeStop={handleGestureStop}
-            onDragStart={handleDragStart}
-            onDragStop={handleGestureStop}
-            onLayoutChange={handleLayoutChange}
-            onDrop={handleDrop}
-          >
-            {panelElements.map((element) =>
-              element.key === (resizingPanelId ?? movingPanelId)
-                ? React.cloneElement(element, { "data-gesture-frame": gestureFrame })
-                : element,
-            )}
-          </ReactGridLayout>
+            {extentRows !== null ? (
+              <DashboardGridCells
+                width={width}
+                columns={DASHBOARD_COLUMNS[breakpoint]}
+              />
+            ) : null}
+            {editing && dropTargets ? (
+              <DashboardDropTargets
+                regions={dropTargets}
+                width={width}
+                columns={DASHBOARD_COLUMNS[breakpoint]}
+              />
+            ) : null}
+            <ReactGridLayout
+              key={breakpoint}
+              className={cn(
+                "scry-dashboard-grid",
+                editing && "scry-dashboard-grid-editing",
+              )}
+              width={width}
+              layout={gridLayout}
+              gridConfig={gridConfig}
+              compactor={gridCompactor}
+              dragConfig={{
+                enabled: editing,
+                handle: `.${DRAG_HANDLE_CLASS}`,
+                cancel: `.${NO_DRAG_CLASS}`,
+                allowMobileScroll: true,
+              }}
+              resizeConfig={{
+                enabled: editing && !stacked,
+                handles: [...RESIZE_AXES],
+              }}
+              dropConfig={{
+                enabled: editing,
+                defaultItem: dropItemSize,
+                onDragOver: handleDropDragOver,
+                touchEnabled: true,
+              }}
+              onResizeStart={handleResizeStart}
+              onResize={handleGestureStep}
+              onDrag={handleGestureStep}
+              onResizeStop={handleGestureStop}
+              onDragStart={handleDragStart}
+              onDragStop={handleGestureStop}
+              onLayoutChange={handleLayoutChange}
+              onDrop={handleDrop}
+            >
+              {panelElements.map((element) =>
+                element.key === (resizingPanelId ?? movingPanelId)
+                  ? React.cloneElement(element, {
+                      "data-gesture-frame": gestureFrame,
+                    })
+                  : element,
+              )}
+            </ReactGridLayout>
           </div>
         </>
       )}
@@ -739,7 +911,11 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
         onOpenChange={setTrayOpen}
         placed={placed}
         onDragPanel={handleTrayDrag}
-        onAddPanel={(panelId) => updateDraft((current) => appendDashboardPanel(current, panelId, breakpoint))}
+        onAddPanel={(panelId) =>
+          updateDraft((current) =>
+            appendDashboardPanel(current, panelId, breakpoint),
+          )
+        }
       />
 
       <ConfirmDialog
@@ -794,7 +970,9 @@ function DashboardPanelTray({
       >
         <SheetHeader>
           <SheetTitle>{t("dashboard.layout.trayTitle")}</SheetTitle>
-          <SheetDescription>{t("dashboard.layout.trayDescription")}</SheetDescription>
+          <SheetDescription>
+            {t("dashboard.layout.trayDescription")}
+          </SheetDescription>
         </SheetHeader>
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4">
           {DASHBOARD_PANEL_IDS.map((panelId) => {
@@ -818,29 +996,44 @@ function DashboardPanelTray({
                 )}
               >
                 {isPlaced ? (
-                  <span className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <span
                     data-rgl-draggable=""
                     className="scry-dashboard-tray-grip mt-0.5 shrink-0 text-[var(--scry-muted2)]"
-                    aria-label={t("dashboard.layout.dragPanel", { name: title })}
+                    aria-label={t("dashboard.layout.dragPanel", {
+                      name: title,
+                    })}
                     role="img"
                     onTouchStart={() => onDragPanel(panelId)}
                   >
                     <GripVertical className="h-4 w-4" aria-hidden="true" />
                   </span>
                 )}
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--scry-muted2)]" aria-hidden="true" />
+                <Icon
+                  className="mt-0.5 h-4 w-4 shrink-0 text-[var(--scry-muted2)]"
+                  aria-hidden="true"
+                />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-[12px] font-semibold text-[var(--scry-ink2)]">{title}</span>
+                    <span className="truncate text-[12px] font-semibold text-[var(--scry-ink2)]">
+                      {title}
+                    </span>
                     {isPlaced ? (
-                      <Badge tone="positive" className="shrink-0 px-1 py-0 text-[10px]">
+                      <Badge
+                        tone="positive"
+                        className="shrink-0 px-1 py-0 text-[10px]"
+                      >
                         {t("dashboard.layout.placed")}
                       </Badge>
                     ) : null}
                   </span>
-                  <span className="text-[11px] text-[var(--scry-muted)]">{t(spec.descriptionKey)}</span>
+                  <span className="text-[11px] text-[var(--scry-muted)]">
+                    {t(spec.descriptionKey)}
+                  </span>
                 </span>
                 {isPlaced ? null : (
                   <IconButton

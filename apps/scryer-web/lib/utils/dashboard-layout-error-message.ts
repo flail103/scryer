@@ -12,15 +12,22 @@ import {
  * server's sentence.
  */
 export const DASHBOARD_LAYOUT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
-  SETTINGS_DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE: "dashboard.layout.refusal.columnsOutOfRange",
-  SETTINGS_DASHBOARD_LAYOUT_TOO_MANY_ITEMS: "dashboard.layout.refusal.tooManyPanels",
-  SETTINGS_DASHBOARD_PANEL_ID_INVALID: "dashboard.layout.refusal.panelIdInvalid",
-  SETTINGS_DASHBOARD_PANEL_ID_DUPLICATED: "dashboard.layout.refusal.panelIdDuplicate",
+  SETTINGS_DASHBOARD_LAYOUT_COLUMNS_OUT_OF_RANGE:
+    "dashboard.layout.refusal.columnsOutOfRange",
+  SETTINGS_DASHBOARD_LAYOUT_TOO_MANY_ITEMS:
+    "dashboard.layout.refusal.tooManyPanels",
+  SETTINGS_DASHBOARD_PANEL_ID_INVALID:
+    "dashboard.layout.refusal.panelIdInvalid",
+  SETTINGS_DASHBOARD_PANEL_ID_DUPLICATED:
+    "dashboard.layout.refusal.panelIdDuplicate",
   // A panel off the top or left edge and one past the right edge both mean it
   // is outside the grid.
-  SETTINGS_DASHBOARD_ITEM_POSITION_OUT_OF_RANGE: "dashboard.layout.refusal.outsideGrid",
-  SETTINGS_DASHBOARD_ITEM_EXCEEDS_COLUMNS: "dashboard.layout.refusal.outsideGrid",
-  SETTINGS_DASHBOARD_ITEM_SIZE_OUT_OF_RANGE: "dashboard.layout.refusal.sizeInvalid",
+  SETTINGS_DASHBOARD_ITEM_POSITION_OUT_OF_RANGE:
+    "dashboard.layout.refusal.outsideGrid",
+  SETTINGS_DASHBOARD_ITEM_EXCEEDS_COLUMNS:
+    "dashboard.layout.refusal.outsideGrid",
+  SETTINGS_DASHBOARD_ITEM_SIZE_OUT_OF_RANGE:
+    "dashboard.layout.refusal.sizeInvalid",
 };
 
 /** The translation key for the reason a layout was refused, if known. */

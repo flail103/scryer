@@ -1,4 +1,4 @@
-import { userFacingGraphQlErrorMessage } from '../graphql/error-message.ts';
+import { userFacingGraphQlErrorMessage } from "../graphql/error-message.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "urql";
 
@@ -31,7 +31,11 @@ export type SetupRulePackState = {
   error: string | null;
 };
 
-function errorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]) {
+function errorMessage(
+  error: unknown,
+  fallback: string,
+  translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2],
+) {
   return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
@@ -62,7 +66,9 @@ export function useSetupRulePacks({
   const enabledBeforeOff = useRef(new Map<string, string[]>());
 
   const refreshTracked = useCallback(async () => {
-    const { data, error } = await client.query(trackedRulePacksQuery, {}).toPromise();
+    const { data, error } = await client
+      .query(trackedRulePacksQuery, {})
+      .toPromise();
     if (error) throw error;
     const packs: TrackedRulePackRecord[] = data?.trackedRulePacks ?? [];
     setTracked(packs);
@@ -114,7 +120,8 @@ export function useSetupRulePacks({
           let templateIds: string[] = [];
           if (enabled) {
             templateIds =
-              enabledBeforeOff.current.get(packId) ?? (await packDefaults(packId));
+              enabledBeforeOff.current.get(packId) ??
+              (await packDefaults(packId));
           } else {
             const on = enabledRulePackTemplateIds(pack);
             if (on.length > 0) enabledBeforeOff.current.set(packId, on);
@@ -142,10 +149,13 @@ export function useSetupRulePacks({
 
   const packs: SetupRulePackState[] = SETUP_RULE_PACK_RECOMMENDATIONS.map(
     (recommendation) => {
-      const pack = tracked.find((entry) => entry.packId === recommendation.packId);
+      const pack = tracked.find(
+        (entry) => entry.packId === recommendation.packId,
+      );
       return {
         ...recommendation,
-        available: pack !== undefined || catalogPackIds.has(recommendation.packId),
+        available:
+          pack !== undefined || catalogPackIds.has(recommendation.packId),
         enabled: rulePackEnabled(pack),
         busy: busyPackIds.includes(recommendation.packId),
         error: errors[recommendation.packId] ?? null,
@@ -153,5 +163,9 @@ export function useSetupRulePacks({
     },
   );
 
-  return { rulePacks: packs, rulePacksLoading: !loaded, setRulePackEnabled: setPackEnabled };
+  return {
+    rulePacks: packs,
+    rulePacksLoading: !loaded,
+    setRulePackEnabled: setPackEnabled,
+  };
 }

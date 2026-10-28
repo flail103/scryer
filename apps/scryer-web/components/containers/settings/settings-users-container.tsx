@@ -37,7 +37,9 @@ import {
 type LibraryGrantDrafts = Record<string, string[]>;
 
 function normalizePermissions(values: string[] | null | undefined): string[] {
-  return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
+  return Array.from(
+    new Set((values ?? []).map((value) => value.trim()).filter(Boolean)),
+  );
 }
 
 function grantsToDrafts(
@@ -46,7 +48,9 @@ function grantsToDrafts(
   return Object.fromEntries(
     (grants ?? []).map((grant) => [
       grant.libraryId,
-      normalizeLibraryPermissionsForStorage(normalizePermissions(grant.permissions)),
+      normalizeLibraryPermissionsForStorage(
+        normalizePermissions(grant.permissions),
+      ),
     ]),
   );
 }
@@ -56,56 +60,79 @@ export function SettingsUsersContainer() {
   const t = useTranslate();
   const client = useClient();
   const { user: currentUser } = useAuth();
-  const canManageLists = hasAppPermission(currentUser, APP_PERMISSIONS.manageLists);
+  const canManageLists = hasAppPermission(
+    currentUser,
+    APP_PERMISSIONS.manageLists,
+  );
   const [settingsUsers, setSettingsUsers] = useState<UserRecord[]>([]);
   const [libraries, setLibraries] = useState<LibraryRecord[]>([]);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newAppPermissions, setNewAppPermissions] = useState<string[]>([]);
-  const [newLibraryPermissionDrafts, setNewLibraryPermissionDrafts] = useState<LibraryGrantDrafts>({});
-  const [userPasswordDrafts, setUserPasswordDrafts] = useState<Record<string, string>>({});
-  const [userAppPermissionDrafts, setUserAppPermissionDrafts] = useState<Record<string, string[]>>({});
-  const [userLibraryPermissionDrafts, setUserLibraryPermissionDrafts] = useState<Record<string, LibraryGrantDrafts>>({});
+  const [newLibraryPermissionDrafts, setNewLibraryPermissionDrafts] =
+    useState<LibraryGrantDrafts>({});
+  const [userPasswordDrafts, setUserPasswordDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [userAppPermissionDrafts, setUserAppPermissionDrafts] = useState<
+    Record<string, string[]>
+  >({});
+  const [userLibraryPermissionDrafts, setUserLibraryPermissionDrafts] =
+    useState<Record<string, LibraryGrantDrafts>>({});
   const [mutatingUserId, setMutatingUserId] = useState<string | null>(null);
-  const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRecord | null>(null);
-  const [pendingDisableUser, setPendingDisableUser] = useState<UserRecord | null>(null);
-  const [pendingResetMfaUser, setPendingResetMfaUser] = useState<UserRecord | null>(null);
+  const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRecord | null>(
+    null,
+  );
+  const [pendingDisableUser, setPendingDisableUser] =
+    useState<UserRecord | null>(null);
+  const [pendingResetMfaUser, setPendingResetMfaUser] =
+    useState<UserRecord | null>(null);
   const canManagePermissions =
-    currentUser?.appPermissions?.includes(APP_PERMISSIONS.managePermissions) ?? false;
+    currentUser?.appPermissions?.includes(APP_PERMISSIONS.managePermissions) ??
+    false;
 
-  const updateUserPasswordDraft = useCallback((userId: string, value: string) => {
-    setUserPasswordDrafts((previous) => ({ ...previous, [userId]: value }));
-  }, []);
+  const updateUserPasswordDraft = useCallback(
+    (userId: string, value: string) => {
+      setUserPasswordDrafts((previous) => ({ ...previous, [userId]: value }));
+    },
+    [],
+  );
 
-  const updateNewLibraryPermissions = useCallback((changes: LibraryGrantDrafts) => {
-    setNewLibraryPermissionDrafts((previous) => ({
-      ...previous,
-      ...changes,
-    }));
-  }, []);
-
-  const updateUserAppPermissionDraft = useCallback((userId: string, permissions: string[]) => {
-    setUserAppPermissionDrafts((previous) => ({
-      ...previous,
-      [userId]: permissions,
-    }));
-  }, []);
-
-  const updateUserLibraryPermissionDrafts = useCallback((
-    userId: string,
-    changes: LibraryGrantDrafts,
-  ) => {
-    setUserLibraryPermissionDrafts((previous) => {
-      const grants = previous[userId] ?? {};
-      return {
+  const updateNewLibraryPermissions = useCallback(
+    (changes: LibraryGrantDrafts) => {
+      setNewLibraryPermissionDrafts((previous) => ({
         ...previous,
-        [userId]: {
-          ...grants,
-          ...changes,
-        },
-      };
-    });
-  }, []);
+        ...changes,
+      }));
+    },
+    [],
+  );
+
+  const updateUserAppPermissionDraft = useCallback(
+    (userId: string, permissions: string[]) => {
+      setUserAppPermissionDrafts((previous) => ({
+        ...previous,
+        [userId]: permissions,
+      }));
+    },
+    [],
+  );
+
+  const updateUserLibraryPermissionDrafts = useCallback(
+    (userId: string, changes: LibraryGrantDrafts) => {
+      setUserLibraryPermissionDrafts((previous) => {
+        const grants = previous[userId] ?? {};
+        return {
+          ...previous,
+          [userId]: {
+            ...grants,
+            ...changes,
+          },
+        };
+      });
+    },
+    [],
+  );
 
   const refreshUsers = useCallback(async () => {
     try {
@@ -123,13 +150,23 @@ export function SettingsUsersContainer() {
       }));
       setSettingsUsers(users);
       setUserAppPermissionDrafts(
-        Object.fromEntries(users.map((user: UserRecord) => [user.id, [...user.appPermissions]])),
+        Object.fromEntries(
+          users.map((user: UserRecord) => [user.id, [...user.appPermissions]]),
+        ),
       );
       setUserLibraryPermissionDrafts(
-        Object.fromEntries(users.map((user: UserRecord) => [user.id, grantsToDrafts(user.libraryPermissions)])),
+        Object.fromEntries(
+          users.map((user: UserRecord) => [
+            user.id,
+            grantsToDrafts(user.libraryPermissions),
+          ]),
+        ),
       );
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     }
   }, [client, setGlobalStatus, t]);
 
@@ -141,7 +178,10 @@ export function SettingsUsersContainer() {
       if (error) throw error;
       setLibraries((data?.libraries ?? []) as LibraryRecord[]);
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     }
   }, [client, setGlobalStatus, t]);
 
@@ -157,7 +197,10 @@ export function SettingsUsersContainer() {
       const minLength = result.data?.securitySettings?.passwordMinLength;
       return typeof minLength === "number" && minLength > 0 ? minLength : null;
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
       return null;
     }
   }, [client, setGlobalStatus, t]);
@@ -170,31 +213,39 @@ export function SettingsUsersContainer() {
       return;
     }
     try {
-      const { error } = await client.mutation(createUserMutation, {
-        input: {
-          username: createdUsername,
-          password: newPassword,
-          appPermissions: canManagePermissions ? newAppPermissions : [],
-          libraryPermissions: canManagePermissions
-            ? Object.entries(newLibraryPermissionDrafts)
-                .map(([libraryId, permissions]) => ({
-                  libraryId,
-                  permissions: normalizeLibraryPermissionsForStorage(permissions),
-                }))
-                .filter((grant) => grant.permissions.length > 0)
-            : [],
-        },
-      }).toPromise();
+      const { error } = await client
+        .mutation(createUserMutation, {
+          input: {
+            username: createdUsername,
+            password: newPassword,
+            appPermissions: canManagePermissions ? newAppPermissions : [],
+            libraryPermissions: canManagePermissions
+              ? Object.entries(newLibraryPermissionDrafts)
+                  .map(([libraryId, permissions]) => ({
+                    libraryId,
+                    permissions:
+                      normalizeLibraryPermissionsForStorage(permissions),
+                  }))
+                  .filter((grant) => grant.permissions.length > 0)
+              : [],
+          },
+        })
+        .toPromise();
       if (error) throw error;
       setNewUsername("");
       setNewPassword("");
       setNewAppPermissions([]);
       setNewLibraryPermissionDrafts({});
-      setGlobalStatus(t("user.created", { name: createdUsername }), { level: "SUCCESS" });
+      setGlobalStatus(t("user.created", { name: createdUsername }), {
+        level: "SUCCESS",
+      });
       await refreshUsers();
       notifyExternalAccountInviteSourcesChanged();
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToCreate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToCreate"), t),
+        { level: "ERROR" },
+      );
     }
   };
 
@@ -208,60 +259,83 @@ export function SettingsUsersContainer() {
       return false;
     }
     if (passwordMinLength !== null && password.length < passwordMinLength) {
-      setGlobalStatus(t("settings.passwordMinLengthError", { min: passwordMinLength }));
+      setGlobalStatus(
+        t("settings.passwordMinLengthError", { min: passwordMinLength }),
+      );
       return false;
     }
     const updatedUserName =
-      settingsUsers.find((candidate) => candidate.id === userId)?.username ?? userId;
+      settingsUsers.find((candidate) => candidate.id === userId)?.username ??
+      userId;
     setMutatingUserId(userId);
     try {
-      const { error } = await client.mutation(setUserPasswordMutation, {
-        input: {
-          userId,
-          password,
-        },
-      }).toPromise();
+      const { error } = await client
+        .mutation(setUserPasswordMutation, {
+          input: {
+            userId,
+            password,
+          },
+        })
+        .toPromise();
       if (error) throw error;
       setUserPasswordDrafts((previous) => ({
         ...previous,
         [userId]: "",
       }));
-      setGlobalStatus(t("user.passwordUpdated", { name: updatedUserName }), { level: "SUCCESS" });
+      setGlobalStatus(t("user.passwordUpdated", { name: updatedUserName }), {
+        level: "SUCCESS",
+      });
       await refreshUsers();
       return true;
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
       return false;
     } finally {
       setMutatingUserId(null);
     }
   };
 
-  const setUserAppPermissions = async (userId: string, permissions?: string[]) => {
+  const setUserAppPermissions = async (
+    userId: string,
+    permissions?: string[],
+  ) => {
     if (!canManagePermissions) {
       setGlobalStatus(t("status.managePermissionsRequired"));
       return;
     }
-    const resolvedPermissions = normalizePermissions(permissions ?? userAppPermissionDrafts[userId]);
+    const resolvedPermissions = normalizePermissions(
+      permissions ?? userAppPermissionDrafts[userId],
+    );
     const updatedUserName =
-      settingsUsers.find((candidate) => candidate.id === userId)?.username ?? userId;
+      settingsUsers.find((candidate) => candidate.id === userId)?.username ??
+      userId;
     setMutatingUserId(userId);
     try {
-      const { error } = await client.mutation(setUserAppPermissionsMutation, {
-        input: {
-          userId,
-          permissions: resolvedPermissions,
-        },
-      }).toPromise();
+      const { error } = await client
+        .mutation(setUserAppPermissionsMutation, {
+          input: {
+            userId,
+            permissions: resolvedPermissions,
+          },
+        })
+        .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("user.permissionsUpdated", { name: updatedUserName }), { level: "SUCCESS" });
+      setGlobalStatus(t("user.permissionsUpdated", { name: updatedUserName }), {
+        level: "SUCCESS",
+      });
       await refreshUsers();
     } catch (error) {
       setUserAppPermissionDrafts((previous) => {
         const { [userId]: _rejected, ...rest } = previous;
         return rest;
       });
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingUserId(null);
     }
@@ -294,18 +368,26 @@ export function SettingsUsersContainer() {
       .filter((grant) => grant.permissions.length > 0);
     setMutatingUserId(userId);
     try {
-      const { error } = await client.mutation(setUserLibraryPermissionsMutation, {
-        input: { userId, grants },
-      }).toPromise();
+      const { error } = await client
+        .mutation(setUserLibraryPermissionsMutation, {
+          input: { userId, grants },
+        })
+        .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("user.permissionsUpdated", { name: user?.username ?? userId }), { level: "SUCCESS" });
+      setGlobalStatus(
+        t("user.permissionsUpdated", { name: user?.username ?? userId }),
+        { level: "SUCCESS" },
+      );
       await refreshUsers();
     } catch (error) {
       setUserLibraryPermissionDrafts((previous) => {
         const { [userId]: _rejected, ...rest } = previous;
         return rest;
       });
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingUserId(null);
     }
@@ -314,9 +396,11 @@ export function SettingsUsersContainer() {
   const applyUserLoginStatus = async (user: UserRecord, enabled: boolean) => {
     setMutatingUserId(user.id);
     try {
-      const { error } = await client.mutation(setUserLoginEnabledMutation, {
-        input: { userId: user.id, enabled },
-      }).toPromise();
+      const { error } = await client
+        .mutation(setUserLoginEnabledMutation, {
+          input: { userId: user.id, enabled },
+        })
+        .toPromise();
       if (error) throw error;
       setGlobalStatus(
         t(enabled ? "status.userLoginEnabled" : "status.userLoginDisabled", {
@@ -325,7 +409,10 @@ export function SettingsUsersContainer() {
       );
       await refreshUsers();
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingUserId(null);
     }
@@ -360,11 +447,15 @@ export function SettingsUsersContainer() {
     const user = pendingDeleteUser;
     setMutatingUserId(user.id);
     try {
-      const { error } = await client.mutation(deleteUserMutation, {
-        id: user.id,
-      }).toPromise();
+      const { error } = await client
+        .mutation(deleteUserMutation, {
+          id: user.id,
+        })
+        .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("status.userDeleted", { name: user.username }), { level: "SUCCESS" });
+      setGlobalStatus(t("status.userDeleted", { name: user.username }), {
+        level: "SUCCESS",
+      });
       await refreshUsers();
       setUserPasswordDrafts((previous) => {
         const next = { ...previous };
@@ -382,7 +473,10 @@ export function SettingsUsersContainer() {
         return next;
       });
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingUserId(null);
       setPendingDeleteUser(null);
@@ -396,14 +490,19 @@ export function SettingsUsersContainer() {
     const user = pendingResetMfaUser;
     setMutatingUserId(user.id);
     try {
-      const { error } = await client.mutation(resetUserMfaMutation, {
-        id: user.id,
-      }).toPromise();
+      const { error } = await client
+        .mutation(resetUserMfaMutation, {
+          id: user.id,
+        })
+        .toPromise();
       if (error) throw error;
       setGlobalStatus(t("user.mfaReset", { name: user.username }));
       await refreshUsers();
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingUserId(null);
       setPendingResetMfaUser(null);
@@ -416,7 +515,9 @@ export function SettingsUsersContainer() {
         settingsUsers={settingsUsers}
         libraries={libraries}
         externalAccountInvitesPanel={<ExternalAccountInvitesContainer />}
-        memberListPoliciesPanel={canManageLists ? <MemberListPoliciesContainer /> : null}
+        memberListPoliciesPanel={
+          canManageLists ? <MemberListPoliciesContainer /> : null
+        }
         newUsername={newUsername}
         setNewUsername={setNewUsername}
         newPassword={newPassword}
@@ -451,7 +552,9 @@ export function SettingsUsersContainer() {
         title={t("settings.disableLogin")}
         description={
           pendingDisableUser
-            ? t("settings.disableLoginConfirm", { name: pendingDisableUser.username })
+            ? t("settings.disableLoginConfirm", {
+                name: pendingDisableUser.username,
+              })
             : ""
         }
         confirmLabel={t("settings.disableLogin")}
@@ -488,7 +591,9 @@ export function SettingsUsersContainer() {
         title={t("settings.resetMfa")}
         description={
           pendingResetMfaUser
-            ? t("settings.resetMfaConfirm", { name: pendingResetMfaUser.username })
+            ? t("settings.resetMfaConfirm", {
+                name: pendingResetMfaUser.username,
+              })
             : ""
         }
         confirmLabel={t("settings.resetMfa")}

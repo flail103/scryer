@@ -1,5 +1,11 @@
 import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
-import { type ComponentProps, type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type ComponentProps,
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { SettingsMediaServersSection } from "@/components/views/settings/settings-media-servers-section";
 import {
@@ -43,7 +49,9 @@ import {
 import { nonEmptySecret } from "@/lib/utils/secret-input";
 import { normalizeMediaServerConnectionDraft } from "@/lib/utils/media-server-input";
 
-type SettingsMediaServersSectionProps = ComponentProps<typeof SettingsMediaServersSection>;
+type SettingsMediaServersSectionProps = ComponentProps<
+  typeof SettingsMediaServersSection
+>;
 
 type PendingMediaServerEditorAction =
   | { type: "create" }
@@ -79,7 +87,9 @@ const DEFAULT_MEDIA_SERVER_DRAFT: MediaServerConnectionDraft = {
   pathMappingsText: "",
 };
 
-function cloneDraft(draft: MediaServerConnectionDraft): MediaServerConnectionDraft {
+function cloneDraft(
+  draft: MediaServerConnectionDraft,
+): MediaServerConnectionDraft {
   return {
     ...draft,
     defaultAppPermissions: [...draft.defaultAppPermissions],
@@ -98,7 +108,10 @@ function normalizeOptional(value: string): string | undefined {
 
 function serializePathMappings(mappings: MediaServerPathMapping[]): string {
   return mappings
-    .map((mapping) => `${mapping.sourcePath.trim()} => ${mapping.destinationPath.trim()}`)
+    .map(
+      (mapping) =>
+        `${mapping.sourcePath.trim()} => ${mapping.destinationPath.trim()}`,
+    )
     .filter((line) => line !== "=>")
     .join("\n");
 }
@@ -115,7 +128,10 @@ function parsePathMappings(value: string): MediaServerPathMapping[] {
         destinationPath: destinationPath.trim(),
       };
     })
-    .filter((mapping) => mapping.sourcePath.length > 0 && mapping.destinationPath.length > 0);
+    .filter(
+      (mapping) =>
+        mapping.sourcePath.length > 0 && mapping.destinationPath.length > 0,
+    );
 }
 
 function pathMappingsTextHasValidLocalPaths(
@@ -149,7 +165,9 @@ function normalizeDefaultLibraryGrants(
     .filter((grant) => grant.permissions.length > 0);
 }
 
-function draftFromConnection(connection: MediaServerConnection): MediaServerConnectionDraft {
+function draftFromConnection(
+  connection: MediaServerConnection,
+): MediaServerConnectionDraft {
   return {
     provider: connection.provider,
     displayName: connection.displayName,
@@ -188,14 +206,17 @@ function buildCreateInput(
   effectiveFormLoginEnabled: boolean,
 ) {
   const supportsAuth =
-    draft.provider === "JELLYFIN" || draft.provider === "PLEX" || draft.provider === "EMBY";
+    draft.provider === "JELLYFIN" ||
+    draft.provider === "PLEX" ||
+    draft.provider === "EMBY";
   const input: Record<string, unknown> = {
     provider: draft.provider,
     displayName: draft.displayName.trim(),
     baseUrl: draft.baseUrl.trim(),
     externalUrl: draft.externalUrl.trim(),
     enabled: draft.enabled,
-    loginEnabled: supportsAuth && effectiveFormLoginEnabled && draft.loginEnabled,
+    loginEnabled:
+      supportsAuth && effectiveFormLoginEnabled && draft.loginEnabled,
     linkingEnabled: supportsAuth && draft.linkingEnabled,
     autoAddEnabled: supportsAuth && draft.autoAddEnabled,
     defaultAppPermissions: supportsAuth ? draft.defaultAppPermissions : [],
@@ -217,13 +238,16 @@ function buildCreateInput(
     input.embyConnectEnabled = draft.embyConnectEnabled;
     if (draft.embyConnectionMode === "LOCAL") {
       input.embyLocalSetupMethod = draft.embyLocalSetupMethod;
-      if (draft.embyLocalSetupMethod === "API_KEY" && apiKey) input.apiKey = apiKey;
+      if (draft.embyLocalSetupMethod === "API_KEY" && apiKey)
+        input.apiKey = apiKey;
       if (draft.embyLocalSetupMethod === "ADMIN_CREDENTIALS") {
         if (adminUsername) input.adminUsername = adminUsername;
         if (adminPassword) input.adminPassword = adminPassword;
       }
     } else {
-      const connectUsername = normalizeOptional(draft.embyConnectUsernameOrEmail);
+      const connectUsername = normalizeOptional(
+        draft.embyConnectUsernameOrEmail,
+      );
       const connectPassword = nonEmptySecret(draft.embyConnectPassword);
       const connectServerId = normalizeOptional(draft.embyConnectServerId);
       if (connectUsername) input.embyConnectUsernameOrEmail = connectUsername;
@@ -231,10 +255,17 @@ function buildCreateInput(
       if (connectServerId) input.embyConnectServerId = connectServerId;
     }
   }
-  if (draft.provider === "JELLYFIN" && draft.jellyfinCredentialMode === "apiKey" && apiKey) {
+  if (
+    draft.provider === "JELLYFIN" &&
+    draft.jellyfinCredentialMode === "apiKey" &&
+    apiKey
+  ) {
     input.apiKey = apiKey;
   }
-  if (draft.provider === "JELLYFIN" && draft.jellyfinCredentialMode === "adminLogin") {
+  if (
+    draft.provider === "JELLYFIN" &&
+    draft.jellyfinCredentialMode === "adminLogin"
+  ) {
     if (adminUsername) input.adminUsername = adminUsername;
     if (adminPassword) input.adminPassword = adminPassword;
   }
@@ -247,7 +278,11 @@ function buildUpdateInput(
   plexAuthToken: string | null,
   effectiveFormLoginEnabled: boolean,
 ) {
-  const input = buildCreateInput(draft, plexAuthToken, effectiveFormLoginEnabled);
+  const input = buildCreateInput(
+    draft,
+    plexAuthToken,
+    effectiveFormLoginEnabled,
+  );
   const apiKey = normalizeOptional(draft.apiKey);
   input.id = id;
   if (!effectiveFormLoginEnabled) delete input.loginEnabled;
@@ -279,54 +314,76 @@ export function SettingsMediaServersContainer() {
   const setGlobalStatus = useGlobalStatus();
   const t = useTranslate();
   const client = useClient();
-  const [connections, setConnections] =
-    useState<SettingsMediaServersSectionProps["connections"]>([]);
+  const [connections, setConnections] = useState<
+    SettingsMediaServersSectionProps["connections"]
+  >([]);
   const [libraries, setLibraries] = useState<LibraryRecord[]>([]);
   const [draft, setDraft] = useState<MediaServerConnectionDraft>(() =>
     cloneDraft(DEFAULT_MEDIA_SERVER_DRAFT),
   );
-  const [draftBaseline, setDraftBaseline] = useState<MediaServerConnectionDraft>(() =>
-    cloneDraft(DEFAULT_MEDIA_SERVER_DRAFT),
+  const [draftBaseline, setDraftBaseline] =
+    useState<MediaServerConnectionDraft>(() =>
+      cloneDraft(DEFAULT_MEDIA_SERVER_DRAFT),
+    );
+  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(
+    null,
   );
-  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
-  const [mutatingConnectionId, setMutatingConnectionId] = useState<string | null>(null);
-  const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
+  const [mutatingConnectionId, setMutatingConnectionId] = useState<
+    string | null
+  >(null);
+  const [testingConnectionId, setTestingConnectionId] = useState<string | null>(
+    null,
+  );
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [pendingDeleteConnection, setPendingDeleteConnection] =
     useState<MediaServerConnection | null>(null);
   const [pendingEditorAction, setPendingEditorAction] =
     useState<PendingMediaServerEditorAction>(null);
-  const [plexDiscoveryToken, setPlexDiscoveryToken] = useState<string | null>(null);
-  const [plexServerOptions, setPlexServerOptions] = useState<PlexServerDiscovery[]>([]);
+  const [plexDiscoveryToken, setPlexDiscoveryToken] = useState<string | null>(
+    null,
+  );
+  const [plexServerOptions, setPlexServerOptions] = useState<
+    PlexServerDiscovery[]
+  >([]);
   const [plexDiscoveryBusy, setPlexDiscoveryBusy] = useState(false);
   const [embyConnectBusy, setEmbyConnectBusy] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [localPathStyle, setLocalPathStyle] =
-    useState<LocalPathStyle | undefined>(undefined);
+  const [localPathStyle, setLocalPathStyle] = useState<
+    LocalPathStyle | undefined
+  >(undefined);
   const [pathMappingsValid, setPathMappingsValid] = useState(true);
-  const [effectiveFormLoginEnabled, setEffectiveFormLoginEnabled] = useState(false);
+  const [effectiveFormLoginEnabled, setEffectiveFormLoginEnabled] =
+    useState(false);
 
   const isDraftDirty = JSON.stringify(draft) !== JSON.stringify(draftBaseline);
 
   const refreshConnections = useCallback(async () => {
     const { data, error } = await client
-      .query(mediaServerConnectionsQuery, { provider: null }, { requestPolicy: "network-only" })
+      .query(
+        mediaServerConnectionsQuery,
+        { provider: null },
+        { requestPolicy: "network-only" },
+      )
       .toPromise();
     if (error) throw error;
     setLocalPathStyle(
       localPathStyleFromRuntimeValue(data?.runtimeInfo?.runtimePathStyle),
     );
     setConnections(
-      ((data?.mediaServerConnections ?? []) as MediaServerConnection[]).filter((connection) =>
-        isVisibleMediaServerProvider(connection.provider),
+      ((data?.mediaServerConnections ?? []) as MediaServerConnection[]).filter(
+        (connection) => isVisibleMediaServerProvider(connection.provider),
       ),
     );
   }, [client]);
 
   const refreshLibraries = useCallback(async () => {
     const { data, error } = await client
-      .query(librariesQuery, { facet: null, permission: "VIEW" }, { requestPolicy: "network-only" })
+      .query(
+        librariesQuery,
+        { facet: null, permission: "VIEW" },
+        { requestPolicy: "network-only" },
+      )
       .toPromise();
     if (error) throw error;
     setLibraries((data?.libraries ?? []) as LibraryRecord[]);
@@ -337,21 +394,35 @@ export function SettingsMediaServersContainer() {
       .query(authRuntimeStateQuery, {}, { requestPolicy: "network-only" })
       .toPromise();
     if (error) throw error;
-    setEffectiveFormLoginEnabled(data?.authRuntimeState?.effectiveFormLoginEnabled === true);
+    setEffectiveFormLoginEnabled(
+      data?.authRuntimeState?.effectiveFormLoginEnabled === true,
+    );
   }, [client]);
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([refreshConnections(), refreshLibraries(), refreshAuthRuntimeState()])
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
-        }
-      });
+    void Promise.all([
+      refreshConnections(),
+      refreshLibraries(),
+      refreshAuthRuntimeState(),
+    ]).catch((error: unknown) => {
+      if (!cancelled) {
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
+          { level: "ERROR" },
+        );
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [refreshConnections, refreshLibraries, refreshAuthRuntimeState, setGlobalStatus, t]);
+  }, [
+    refreshConnections,
+    refreshLibraries,
+    refreshAuthRuntimeState,
+    setGlobalStatus,
+    t,
+  ]);
 
   const resetDraft = useCallback(() => {
     setEditingConnectionId(null);
@@ -377,21 +448,29 @@ export function SettingsMediaServersContainer() {
     setIsEditorOpen(true);
   }, []);
 
-  const openEditEditor = useCallback((connection: MediaServerConnection) => {
-    const nextDraft = draftFromConnection(connection);
-    setEditingConnectionId(connection.id);
-    setDraft(nextDraft);
-    setDraftBaseline(cloneDraft(nextDraft));
-    setPlexDiscoveryToken(null);
-    setPlexServerOptions([]);
-    setEditorError(null);
-    setPathMappingsValid(
-      pathMappingsTextHasValidLocalPaths(nextDraft.pathMappingsText, localPathStyle),
-    );
-    setEditorMode("edit");
-    setIsEditorOpen(true);
-    setGlobalStatus(t("status.editingMediaServer", { name: connection.displayName }));
-  }, [localPathStyle, setGlobalStatus, t]);
+  const openEditEditor = useCallback(
+    (connection: MediaServerConnection) => {
+      const nextDraft = draftFromConnection(connection);
+      setEditingConnectionId(connection.id);
+      setDraft(nextDraft);
+      setDraftBaseline(cloneDraft(nextDraft));
+      setPlexDiscoveryToken(null);
+      setPlexServerOptions([]);
+      setEditorError(null);
+      setPathMappingsValid(
+        pathMappingsTextHasValidLocalPaths(
+          nextDraft.pathMappingsText,
+          localPathStyle,
+        ),
+      );
+      setEditorMode("edit");
+      setIsEditorOpen(true);
+      setGlobalStatus(
+        t("status.editingMediaServer", { name: connection.displayName }),
+      );
+    },
+    [localPathStyle, setGlobalStatus, t],
+  );
 
   const requestCreateEditor = useCallback(() => {
     if (!isEditorOpen || !isDraftDirty) {
@@ -401,13 +480,16 @@ export function SettingsMediaServersContainer() {
     setPendingEditorAction({ type: "create" });
   }, [isDraftDirty, isEditorOpen, openCreateEditor]);
 
-  const requestEditConnection = useCallback((connection: MediaServerConnection) => {
-    if (!isEditorOpen || !isDraftDirty) {
-      openEditEditor(connection);
-      return;
-    }
-    setPendingEditorAction({ type: "edit", connection });
-  }, [isDraftDirty, isEditorOpen, openEditEditor]);
+  const requestEditConnection = useCallback(
+    (connection: MediaServerConnection) => {
+      if (!isEditorOpen || !isDraftDirty) {
+        openEditEditor(connection);
+        return;
+      }
+      setPendingEditorAction({ type: "edit", connection });
+    },
+    [isDraftDirty, isEditorOpen, openEditEditor],
+  );
 
   const requestCloseEditor = useCallback(() => {
     if (!isEditorOpen) {
@@ -454,7 +536,8 @@ export function SettingsMediaServersContainer() {
       setPlexServerOptions(servers);
       setDraft((previous) => ({
         ...previous,
-        plexServerId: servers.length === 1 ? servers[0].id : previous.plexServerId,
+        plexServerId:
+          servers.length === 1 ? servers[0].id : previous.plexServerId,
       }));
       setGlobalStatus(
         servers.length > 0
@@ -462,7 +545,10 @@ export function SettingsMediaServersContainer() {
           : t("settings.plexServerDiscoveryEmpty"),
       );
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setPlexDiscoveryBusy(false);
     }
@@ -486,12 +572,14 @@ export function SettingsMediaServersContainer() {
       const servers = data?.discoverEmbyConnectServers ?? [];
       setDraft((previous) => {
         const selected =
-          servers.find((server) => server.serverId === previous.embyConnectServerId) ??
-          (servers.length === 1 ? servers[0] : null);
+          servers.find(
+            (server) => server.serverId === previous.embyConnectServerId,
+          ) ?? (servers.length === 1 ? servers[0] : null);
         return {
           ...previous,
           embyDiscoveredServers: servers,
-          embyConnectServerId: selected?.serverId ?? previous.embyConnectServerId,
+          embyConnectServerId:
+            selected?.serverId ?? previous.embyConnectServerId,
           baseUrl: selected?.suggestedBaseUrl ?? previous.baseUrl,
         };
       });
@@ -501,11 +589,20 @@ export function SettingsMediaServersContainer() {
           : "No Emby Connect servers were found",
       );
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setEmbyConnectBusy(false);
     }
-  }, [client, draft.embyConnectPassword, draft.embyConnectUsernameOrEmail, setGlobalStatus, t]);
+  }, [
+    client,
+    draft.embyConnectPassword,
+    draft.embyConnectUsernameOrEmail,
+    setGlobalStatus,
+    t,
+  ]);
 
   const testSavedEmbyConnect = useCallback(async () => {
     if (!editingConnectionId) return;
@@ -522,15 +619,31 @@ export function SettingsMediaServersContainer() {
         .toPromise();
       if (error) throw error;
       if (data?.testEmbyConnect?.status !== "ok") {
-        throw new Error(data?.testEmbyConnect?.message ?? "Emby Connect test failed");
+        throw new Error(
+          data?.testEmbyConnect?.message ?? "Emby Connect test failed",
+        );
       }
       setGlobalStatus("Emby Connect test passed", { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.embyConnectTestFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("error.fallback.embyConnectTestFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setEmbyConnectBusy(false);
     }
-  }, [client, draft.embyConnectPassword, draft.embyConnectUsernameOrEmail, editingConnectionId, setGlobalStatus, t]);
+  }, [
+    client,
+    draft.embyConnectPassword,
+    draft.embyConnectUsernameOrEmail,
+    editingConnectionId,
+    setGlobalStatus,
+    t,
+  ]);
 
   const submitConnection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -550,8 +663,15 @@ export function SettingsMediaServersContainer() {
       setGlobalStatus(message);
       return;
     }
-    if (!pathMappingsTextHasValidLocalPaths(submitted.pathMappingsText, localPathStyle)) {
-      const message = t("settings.downloadClientRemotePathMappingsLocalRequired");
+    if (
+      !pathMappingsTextHasValidLocalPaths(
+        submitted.pathMappingsText,
+        localPathStyle,
+      )
+    ) {
+      const message = t(
+        "settings.downloadClientRemotePathMappingsLocalRequired",
+      );
       setPathMappingsValid(false);
       setEditorError(message);
       setGlobalStatus(message);
@@ -559,7 +679,9 @@ export function SettingsMediaServersContainer() {
     }
     if (
       submitted.provider === "PLEX" &&
-      (submitted.loginEnabled || submitted.linkingEnabled || submitted.autoAddEnabled) &&
+      (submitted.loginEnabled ||
+        submitted.linkingEnabled ||
+        submitted.autoAddEnabled) &&
       !submitted.machineIdPresent &&
       !submitted.plexServerId
     ) {
@@ -572,20 +694,28 @@ export function SettingsMediaServersContainer() {
     setMutatingConnectionId(editingConnectionId ?? "new");
     try {
       if (editingConnectionId) {
-        const { error } = await client.mutation(updateMediaServerConnectionMutation, {
-          input: buildUpdateInput(
-            editingConnectionId,
-            submitted,
-            plexDiscoveryToken,
-            effectiveFormLoginEnabled,
-          ),
-        }).toPromise();
+        const { error } = await client
+          .mutation(updateMediaServerConnectionMutation, {
+            input: buildUpdateInput(
+              editingConnectionId,
+              submitted,
+              plexDiscoveryToken,
+              effectiveFormLoginEnabled,
+            ),
+          })
+          .toPromise();
         if (error) throw error;
         setGlobalStatus(t("status.mediaServerUpdated"), { level: "SUCCESS" });
       } else {
-        const { error } = await client.mutation(createMediaServerConnectionMutation, {
-          input: buildCreateInput(submitted, plexDiscoveryToken, effectiveFormLoginEnabled),
-        }).toPromise();
+        const { error } = await client
+          .mutation(createMediaServerConnectionMutation, {
+            input: buildCreateInput(
+              submitted,
+              plexDiscoveryToken,
+              effectiveFormLoginEnabled,
+            ),
+          })
+          .toPromise();
         if (error) throw error;
         setGlobalStatus(t("status.mediaServerCreated"), { level: "SUCCESS" });
       }
@@ -597,7 +727,11 @@ export function SettingsMediaServersContainer() {
       notifyExternalAccountInviteSourcesChanged();
     } catch (error) {
       if (!isReportedConnectionFeedbackError(error)) {
-        const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
+        const message = userFacingGraphQlErrorMessage(
+          error,
+          t("status.failedToUpdate"),
+          t,
+        );
         setEditorError(message);
         setGlobalStatus(message, { level: "ERROR" });
       }
@@ -606,69 +740,83 @@ export function SettingsMediaServersContainer() {
     }
   };
 
-  const testConnection = useCallback(async (connection: MediaServerConnection) => {
-    setTestingConnectionId(connection.id);
-    try {
-      await runConnectionFeedback({
-        setGlobalStatus,
-        startMessage: t("status.testingMediaServerConnection", {
-          server: connection.displayName,
-        }),
-        successMessage: t("status.mediaServerConnectionTestPassed", {
-          server: connection.displayName,
-        }),
-        failureFallbackMessage: t("status.mediaServerConnectionTestFailed", {
-          server: connection.displayName,
-        }),
-        run: async () => {
-          const plexAuthToken =
-            connection.provider === "PLEX" ? await authenticateWithPlexPin() : null;
-          const { data, error } = await client
-            .mutation(testMediaServerConnectionMutation, {
-              input: {
-                id: connection.id,
-                plexAuthToken,
-              },
-            })
-            .toPromise();
-          if (error) throw error;
-          const validation = data?.testMediaServerConnection;
-          if (validation?.status !== "ok") {
-            throw new Error(
-              validation?.message ?? t("status.mediaServerConnectionTestFailed", {
-                server: connection.displayName,
-              }),
-            );
-          }
-        },
-      });
-    } catch {
-      // Shared connection feedback already surfaced the failure.
-    } finally {
-      setTestingConnectionId(null);
-    }
-  }, [client, setGlobalStatus, t]);
+  const testConnection = useCallback(
+    async (connection: MediaServerConnection) => {
+      setTestingConnectionId(connection.id);
+      try {
+        await runConnectionFeedback({
+          setGlobalStatus,
+          startMessage: t("status.testingMediaServerConnection", {
+            server: connection.displayName,
+          }),
+          successMessage: t("status.mediaServerConnectionTestPassed", {
+            server: connection.displayName,
+          }),
+          failureFallbackMessage: t("status.mediaServerConnectionTestFailed", {
+            server: connection.displayName,
+          }),
+          run: async () => {
+            const plexAuthToken =
+              connection.provider === "PLEX"
+                ? await authenticateWithPlexPin()
+                : null;
+            const { data, error } = await client
+              .mutation(testMediaServerConnectionMutation, {
+                input: {
+                  id: connection.id,
+                  plexAuthToken,
+                },
+              })
+              .toPromise();
+            if (error) throw error;
+            const validation = data?.testMediaServerConnection;
+            if (validation?.status !== "ok") {
+              throw new Error(
+                validation?.message ??
+                  t("status.mediaServerConnectionTestFailed", {
+                    server: connection.displayName,
+                  }),
+              );
+            }
+          },
+        });
+      } catch {
+        // Shared connection feedback already surfaced the failure.
+      } finally {
+        setTestingConnectionId(null);
+      }
+    },
+    [client, setGlobalStatus, t],
+  );
 
-  const toggleConnectionEnabled = useCallback(async (connection: MediaServerConnection) => {
-    const nextEnabled = !connection.enabled;
-    setMutatingConnectionId(connection.id);
-    try {
-      const { error } = await client.mutation(updateMediaServerConnectionMutation, {
-        input: {
-          id: connection.id,
-          enabled: nextEnabled,
-        },
-      }).toPromise();
-      if (error) throw error;
-      setGlobalStatus(t("status.mediaServerUpdated"), { level: "SUCCESS" });
-      await refreshConnections();
-      notifyExternalAccountInviteSourcesChanged();
-    } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
-    } finally {
-      setMutatingConnectionId(null);
-    }
-  }, [client, refreshConnections, setGlobalStatus, t]);
+  const toggleConnectionEnabled = useCallback(
+    async (connection: MediaServerConnection) => {
+      const nextEnabled = !connection.enabled;
+      setMutatingConnectionId(connection.id);
+      try {
+        const { error } = await client
+          .mutation(updateMediaServerConnectionMutation, {
+            input: {
+              id: connection.id,
+              enabled: nextEnabled,
+            },
+          })
+          .toPromise();
+        if (error) throw error;
+        setGlobalStatus(t("status.mediaServerUpdated"), { level: "SUCCESS" });
+        await refreshConnections();
+        notifyExternalAccountInviteSourcesChanged();
+      } catch (error) {
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
+      } finally {
+        setMutatingConnectionId(null);
+      }
+    },
+    [client, refreshConnections, setGlobalStatus, t],
+  );
 
   const deleteConnection = useCallback((connection: MediaServerConnection) => {
     setPendingDeleteConnection(connection);
@@ -685,7 +833,10 @@ export function SettingsMediaServersContainer() {
         .mutation(deleteMediaServerConnectionMutation, { id: connection.id })
         .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("status.mediaServerDeleted", { name: connection.displayName }), { level: "SUCCESS" });
+      setGlobalStatus(
+        t("status.mediaServerDeleted", { name: connection.displayName }),
+        { level: "SUCCESS" },
+      );
       await refreshConnections();
       notifyExternalAccountInviteSourcesChanged();
       if (editingConnectionId === connection.id) {
@@ -694,7 +845,10 @@ export function SettingsMediaServersContainer() {
         setEditorMode("create");
       }
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToDelete"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setMutatingConnectionId(null);
       setPendingDeleteConnection(null);
@@ -761,7 +915,9 @@ export function SettingsMediaServersContainer() {
         title={t("label.delete")}
         description={
           pendingDeleteConnection
-            ? t("status.deletingMediaServer", { name: pendingDeleteConnection.displayName })
+            ? t("status.deletingMediaServer", {
+                name: pendingDeleteConnection.displayName,
+              })
             : ""
         }
         confirmLabel={t("label.delete")}

@@ -1,11 +1,6 @@
 import * as React from "react";
 import { useClient, useQuery } from "urql";
-import {
-  ChevronDown,
-  ChevronRight,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, TriangleAlert, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -118,7 +113,9 @@ function OperationPanel({ operationId, onDismiss }: Props) {
     }
     let active = true;
     client
-      .query<{ locationOperationRetrySelection: LocationRetrySelection | null }>(
+      .query<{
+        locationOperationRetrySelection: LocationRetrySelection | null;
+      }>(
         locationOperationRetrySelectionQuery,
         { id: operationId },
         { requestPolicy: "network-only" },
@@ -684,10 +681,13 @@ function TitleFiles({
                       )}
                     </TableCell>
                     <TableCell>
-                      {file.state === "VERIFYING" || file.state === "COMPARING" ? (
+                      {file.state === "VERIFYING" ||
+                      file.state === "COMPARING" ? (
                         <FileBytes
                           done={toCount(file.verificationBytes)}
-                          total={toCount(file.verificationTotalBytes ?? file.sizeBytes)}
+                          total={toCount(
+                            file.verificationTotalBytes ?? file.sizeBytes,
+                          )}
                           complete={false}
                           label={t("move.transferVerifyProgress")}
                           showBytes={false}

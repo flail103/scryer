@@ -3,7 +3,10 @@ import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchResultBuckets } from "@/components/common/release-search-results";
-import { ReleaseSearchLoader, ReleaseSearchSummary } from "@/components/common/release-search-status";
+import {
+  ReleaseSearchLoader,
+  ReleaseSearchSummary,
+} from "@/components/common/release-search-status";
 import { TitleSearchDownloadClientNotice } from "@/components/common/title-search-download-client-notice";
 import { useTranslate } from "@/lib/context/translate-context";
 import type { InteractiveSearchIndexerProgress } from "@/lib/graphql/release-search";
@@ -80,26 +83,42 @@ export const EpisodePanelContent = React.memo(function EpisodePanelContent({
   return (
     <Tabs
       value={activeTab}
-      onValueChange={(value) => onTabChange(value as EpisodePanelTab | "history")}
+      onValueChange={(value) =>
+        onTabChange(value as EpisodePanelTab | "history")
+      }
     >
       <TabsList className="flex w-full flex-nowrap overflow-x-auto">
         <TabsTrigger
           id={selectorId("series-overview-episode-tab", episode.id, "details")}
           value="details"
           className="shrink-0"
-        >{t("episode.details")}</TabsTrigger>
+        >
+          {t("episode.details")}
+        </TabsTrigger>
         {showHistoryTab ? (
           <TabsTrigger
-            id={selectorId("series-overview-episode-tab", episode.id, "history")}
+            id={selectorId(
+              "series-overview-episode-tab",
+              episode.id,
+              "history",
+            )}
             value="history"
             className="shrink-0"
-          >{t("history.title")}</TabsTrigger>
+          >
+            {t("history.title")}
+          </TabsTrigger>
         ) : null}
         <TabsTrigger
-          id={selectorId("series-overview-episode-tab", episode.id, "blocklist")}
+          id={selectorId(
+            "series-overview-episode-tab",
+            episode.id,
+            "blocklist",
+          )}
           value="blocklist"
           className="shrink-0"
-        >{t("episode.blocklist")}</TabsTrigger>
+        >
+          {t("episode.blocklist")}
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="details">
         <EpisodeDetailsPanel
@@ -135,8 +154,14 @@ export type EpisodeSearchResultsProps = {
   episodeResults: Release[];
   facet: string;
   hasSearchResults: boolean;
-  onQueueFromEpisodeSearch?: (episode: CollectionEpisode, release: Release) => Promise<void> | void;
-  onQueueAdditionalFromEpisodeSearch?: (episode: CollectionEpisode, release: Release) => Promise<void> | void;
+  onQueueFromEpisodeSearch?: (
+    episode: CollectionEpisode,
+    release: Release,
+  ) => Promise<void> | void;
+  onQueueAdditionalFromEpisodeSearch?: (
+    episode: CollectionEpisode,
+    release: Release,
+  ) => Promise<void> | void;
   onRunEpisodeSearch?: (episode: CollectionEpisode) => void;
   searchBlocked: boolean;
 };
@@ -164,7 +189,12 @@ export function EpisodeSearchResults({
         resultCount: episodeResults.length,
         indexers: episodeIndexerProgress,
       }),
-    [episodeIndexerProgress, episodeLoading, episodeResults.length, hasSearchResults],
+    [
+      episodeIndexerProgress,
+      episodeLoading,
+      episodeResults.length,
+      hasSearchResults,
+    ],
   );
   return (
     <>
@@ -178,7 +208,10 @@ export function EpisodeSearchResults({
             dataUi="episode-release-search-summary"
           />
           <Button
-            id={selectorId("series-overview-episode-search-refresh", episode.id)}
+            id={selectorId(
+              "series-overview-episode-search-refresh",
+              episode.id,
+            )}
             type="button"
             variant="ghost"
             size="sm"
@@ -204,7 +237,9 @@ export function EpisodeSearchResults({
           ownedScope={{ episodeId: episode.id }}
           results={episodeResults}
           onQueue={(release) => onQueueFromEpisodeSearch?.(episode, release)}
-          onQueueAdditional={(release) => onQueueAdditionalFromEpisodeSearch?.(episode, release)}
+          onQueueAdditional={(release) =>
+            onQueueAdditionalFromEpisodeSearch?.(episode, release)
+          }
           canQueueAdditional={(release) =>
             releaseSupportsAdditionalFileQueue(release, facet)
           }

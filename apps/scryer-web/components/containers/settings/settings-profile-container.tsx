@@ -1,5 +1,12 @@
 import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
-import { useState, useCallback, useEffect, useMemo, useRef, type FormEvent } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type FormEvent,
+} from "react";
 import { useClient } from "urql";
 import { notifyExternalAccountInviteSourcesChanged } from "@/components/containers/settings/external-account-invites-container";
 import { sanitizeTotpCode } from "@/components/auth/totp-code-form";
@@ -45,7 +52,10 @@ import {
   isVisibleExternalAccountProvider,
 } from "@/lib/constants/integration-providers";
 import { useTranslate } from "@/lib/context/translate-context";
-import { type GlobalStatusOptions, useGlobalStatus } from "@/lib/context/global-status-context";
+import {
+  type GlobalStatusOptions,
+  useGlobalStatus,
+} from "@/lib/context/global-status-context";
 import {
   useUiSettings,
   uiSettingsInputFromSettings,
@@ -100,12 +110,15 @@ type PendingSecurityFactorAction =
 type AccountSecurityReauthenticationMethod = "password" | "passkey" | "totp";
 
 function requiresAccountSecurityReauthentication(error: unknown): boolean {
-  const graphqlErrors = (error as {
-    graphQLErrors?: Array<{ extensions?: { code?: unknown } }>;
-  })?.graphQLErrors;
+  const graphqlErrors = (
+    error as {
+      graphQLErrors?: Array<{ extensions?: { code?: unknown } }>;
+    }
+  )?.graphQLErrors;
   return (
     graphqlErrors?.some(
-      (graphqlError) => graphqlError.extensions?.code === "REAUTHENTICATION_REQUIRED",
+      (graphqlError) =>
+        graphqlError.extensions?.code === "REAUTHENTICATION_REQUIRED",
     ) ?? false
   );
 }
@@ -130,20 +143,30 @@ function connectionsForProvider(
   settings: ExternalAuthRuntimeSettings,
   provider: ExternalAccountProvider,
 ): ExternalAuthRuntimeConnection[] {
-  return settings.connections.filter((connection) => connection.provider === provider);
+  return settings.connections.filter(
+    (connection) => connection.provider === provider,
+  );
 }
 
-function connectionLabelForDisplay(connection: ExternalAuthRuntimeConnection): string {
+function connectionLabelForDisplay(
+  connection: ExternalAuthRuntimeConnection,
+): string {
   return connection.displayName;
 }
 
 function isPasskeyFormLoginDisabledError(error: unknown): boolean {
-  return hasGraphQlErrorReason(error, "SECURITY_PASSKEY_AUTHENTICATION_UNAVAILABLE_WHILE_FORM_LOGIN_DISABLED", "VALIDATION_ERROR");
+  return hasGraphQlErrorReason(
+    error,
+    "SECURITY_PASSKEY_AUTHENTICATION_UNAVAILABLE_WHILE_FORM_LOGIN_DISABLED",
+    "VALIDATION_ERROR",
+  );
 }
 
 // Dismissing the browser's passkey prompt is a choice, not a failure, so it
 // stays out of the toasts.
-function passkeyFailureOptions(error: unknown): GlobalStatusOptions | undefined {
+function passkeyFailureOptions(
+  error: unknown,
+): GlobalStatusOptions | undefined {
   return error instanceof PasskeyClientError && error.code === "cancelled"
     ? undefined
     : { level: "ERROR" };
@@ -161,11 +184,17 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     effectiveFormLoginEnabled,
     passkeyEnabled,
   } = useAuth();
-  const { uiSettings, setUiSettings, saveUiSettings, changeAppearance, uiSettingsLoaded, uiSettingsLoading } =
-    useUiSettings();
-  const [savingHighlightColor, setSavingHighlightColor] = useState<string | null>(
-    null,
-  );
+  const {
+    uiSettings,
+    setUiSettings,
+    saveUiSettings,
+    changeAppearance,
+    uiSettingsLoaded,
+    uiSettingsLoading,
+  } = useUiSettings();
+  const [savingHighlightColor, setSavingHighlightColor] = useState<
+    string | null
+  >(null);
   const [savingSponsorPreference, setSavingSponsorPreference] = useState(false);
   const [savingGlowPreference, setSavingGlowPreference] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -178,23 +207,36 @@ export function SettingsProfileContainer({ userId, username }: Props) {
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [accountKind, setAccountKind] = useState<UserAccountKind | null>(null);
   const [totpStatus, setTotpStatus] = useState<TotpStatus | null>(null);
-  const [totpEnrollment, setTotpEnrollment] = useState<TotpEnrollmentStart | null>(null);
+  const [totpEnrollment, setTotpEnrollment] =
+    useState<TotpEnrollmentStart | null>(null);
   const [totpEnrollmentCode, setTotpEnrollmentCode] = useState("");
   const [totpActionCode, setTotpActionCode] = useState("");
-  const [securityReauthenticationOpen, setSecurityReauthenticationOpen] = useState(false);
+  const [securityReauthenticationOpen, setSecurityReauthenticationOpen] =
+    useState(false);
   const [securityReauthenticationMethod, setSecurityReauthenticationMethod] =
     useState<AccountSecurityReauthenticationMethod>("password");
-  const [securityReauthenticationPassword, setSecurityReauthenticationPassword] = useState("");
-  const [securityReauthenticationCode, setSecurityReauthenticationCode] = useState("");
-  const [securityReauthenticationBusy, setSecurityReauthenticationBusy] = useState(false);
+  const [
+    securityReauthenticationPassword,
+    setSecurityReauthenticationPassword,
+  ] = useState("");
+  const [securityReauthenticationCode, setSecurityReauthenticationCode] =
+    useState("");
+  const [securityReauthenticationBusy, setSecurityReauthenticationBusy] =
+    useState(false);
   const [pendingSecurityFactorAction, setPendingSecurityFactorAction] =
-    useState<PendingReauthenticationAction<PendingSecurityFactorAction> | null>(null);
-  const [securityReauthenticationGeneration, setSecurityReauthenticationGeneration] = useState(0);
+    useState<PendingReauthenticationAction<PendingSecurityFactorAction> | null>(
+      null,
+    );
+  const [
+    securityReauthenticationGeneration,
+    setSecurityReauthenticationGeneration,
+  ] = useState(0);
   const [totpRecoveryCodes, setTotpRecoveryCodes] = useState<string[]>([]);
   const [linkedAccounts, setLinkedAccounts] = useState<LinkedAccount[]>([]);
-  const [externalAuthSettings, setExternalAuthSettings] = useState<ExternalAuthRuntimeSettings>(
-    DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS,
-  );
+  const [externalAuthSettings, setExternalAuthSettings] =
+    useState<ExternalAuthRuntimeSettings>(
+      DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS,
+    );
   const [loadingPasskeys, setLoadingPasskeys] = useState(false);
   const [loadingOauthApps, setLoadingOauthApps] = useState(false);
   const [loadingTotp, setLoadingTotp] = useState(false);
@@ -202,10 +244,17 @@ export function SettingsProfileContainer({ userId, username }: Props) {
   const [loadingLinkOptions, setLoadingLinkOptions] = useState(false);
   const [addingPasskey, setAddingPasskey] = useState(false);
   const [totpBusy, setTotpBusy] = useState(false);
-  const [deletingPasskeyId, setDeletingPasskeyId] = useState<string | null>(null);
-  const [revokingOauthGrantId, setRevokingOauthGrantId] = useState<string | null>(null);
-  const [unlinkingAccountId, setUnlinkingAccountId] = useState<string | null>(null);
-  const [linkingProvider, setLinkingProvider] = useState<ExternalAccountProvider | null>(null);
+  const [deletingPasskeyId, setDeletingPasskeyId] = useState<string | null>(
+    null,
+  );
+  const [revokingOauthGrantId, setRevokingOauthGrantId] = useState<
+    string | null
+  >(null);
+  const [unlinkingAccountId, setUnlinkingAccountId] = useState<string | null>(
+    null,
+  );
+  const [linkingProvider, setLinkingProvider] =
+    useState<ExternalAccountProvider | null>(null);
   const [linkAccountDraft, setLinkAccountDraft] = useState<LinkAccountDraft>({
     provider: "JELLYFIN",
     connectionId: "",
@@ -216,19 +265,30 @@ export function SettingsProfileContainer({ userId, username }: Props) {
   const [linkAccountBusy, setLinkAccountBusy] = useState(false);
   const [linkAccountError, setLinkAccountError] = useState<string | null>(null);
 
-  const formatPasskeyError = useCallback((error: unknown) => {
-    if (error instanceof PasskeyClientError) {
-      if (error.code === "unsupported") {
-        return t("auth.passkeyUnsupported");
+  const formatPasskeyError = useCallback(
+    (error: unknown) => {
+      if (error instanceof PasskeyClientError) {
+        if (error.code === "unsupported") {
+          return t("auth.passkeyUnsupported");
+        }
+        if (error.code === "cancelled") {
+          return t("auth.passkeyCancelled");
+        }
+        return userFacingGraphQlErrorMessage(
+          error,
+          t("profile.passkeyOperationFailed"),
+          t,
+        );
       }
-      if (error.code === "cancelled") {
-        return t("auth.passkeyCancelled");
-      }
-      return userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t);
-    }
 
-    return userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t);
-  }, [t]);
+      return userFacingGraphQlErrorMessage(
+        error,
+        t("profile.passkeyOperationFailed"),
+        t,
+      );
+    },
+    [t],
+  );
 
   const finishSecurityReauthentication = useCallback(
     (replacementLogin: SecurityFactorLogin) => {
@@ -245,33 +305,39 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     [adoptSession],
   );
 
-  const requestSecurityReauthentication = useCallback((
-    error: unknown,
-    pendingAction?: PendingSecurityFactorAction,
-  ): boolean => {
-    if (!requiresAccountSecurityReauthentication(error)) {
-      return false;
-    }
-    if (pendingAction) {
-      setPendingSecurityFactorAction(
-        queueReauthenticationAction(pendingAction, securityReauthenticationGeneration),
+  const requestSecurityReauthentication = useCallback(
+    (error: unknown, pendingAction?: PendingSecurityFactorAction): boolean => {
+      if (!requiresAccountSecurityReauthentication(error)) {
+        return false;
+      }
+      if (pendingAction) {
+        setPendingSecurityFactorAction(
+          queueReauthenticationAction(
+            pendingAction,
+            securityReauthenticationGeneration,
+          ),
+        );
+      }
+      setSecurityReauthenticationMethod(
+        hasPassword ? "password" : passkeys.length > 0 ? "passkey" : "totp",
       );
-    }
-    setSecurityReauthenticationMethod(
-      hasPassword ? "password" : passkeys.length > 0 ? "passkey" : "totp",
-    );
-    setSecurityReauthenticationOpen(true);
-    return true;
-  }, [hasPassword, passkeys.length, securityReauthenticationGeneration]);
+      setSecurityReauthenticationOpen(true);
+      return true;
+    },
+    [hasPassword, passkeys.length, securityReauthenticationGeneration],
+  );
 
-  const handleSecurityReauthenticationOpenChange = useCallback((open: boolean) => {
-    setSecurityReauthenticationOpen(open);
-    if (!open) {
-      setPendingSecurityFactorAction(dismissReauthenticationAction());
-      setSecurityReauthenticationPassword("");
-      setSecurityReauthenticationCode("");
-    }
-  }, []);
+  const handleSecurityReauthenticationOpenChange = useCallback(
+    (open: boolean) => {
+      setSecurityReauthenticationOpen(open);
+      if (!open) {
+        setPendingSecurityFactorAction(dismissReauthenticationAction());
+        setSecurityReauthenticationPassword("");
+        setSecurityReauthenticationCode("");
+      }
+    },
+    [],
+  );
 
   const handlePasswordSecurityReauthentication = useCallback(async () => {
     if (!securityReauthenticationPassword) return;
@@ -288,13 +354,24 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const login = result.data?.accountSecurityPasswordVerify;
       if (result.error || !login) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.accountSecurityVerificationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("error.fallback.accountSecurityVerificationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       finishSecurityReauthentication(login);
     } catch (error) {
       setGlobalStatus(
-        userFacingGraphQlErrorMessage(error, t("error.fallback.accountSecurityVerificationFailed"), t),
+        userFacingGraphQlErrorMessage(
+          error,
+          t("error.fallback.accountSecurityVerificationFailed"),
+          t,
+        ),
         { level: "ERROR" },
       );
     } finally {
@@ -304,7 +381,8 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     client,
     finishSecurityReauthentication,
     securityReauthenticationPassword,
-    setGlobalStatus, t,
+    setGlobalStatus,
+    t,
   ]);
 
   const handlePasskeySecurityReauthentication = useCallback(async () => {
@@ -342,13 +420,24 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const login = result.data?.mfaVerifyStepUp;
       if (result.error || !login) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.accountSecurityVerificationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("error.fallback.accountSecurityVerificationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       finishSecurityReauthentication(login);
     } catch (error) {
       setGlobalStatus(
-        userFacingGraphQlErrorMessage(error, t("error.fallback.accountSecurityVerificationFailed"), t),
+        userFacingGraphQlErrorMessage(
+          error,
+          t("error.fallback.accountSecurityVerificationFailed"),
+          t,
+        ),
         { level: "ERROR" },
       );
     } finally {
@@ -358,7 +447,8 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     client,
     finishSecurityReauthentication,
     securityReauthenticationCode,
-    setGlobalStatus, t,
+    setGlobalStatus,
+    t,
   ]);
 
   const handleChangePassword = useCallback(async () => {
@@ -377,7 +467,10 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
 
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
 
@@ -394,25 +487,48 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setConfirmPassword("");
       setGlobalStatus(t("profile.passwordUpdated"), { level: "SUCCESS" });
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setSaving(false);
     }
-  }, [accountKind, authUser?.username, client, userId, username, hasPassword, currentPassword, newPassword, confirmPassword, login, setGlobalStatus, t]);
+  }, [
+    accountKind,
+    authUser?.username,
+    client,
+    userId,
+    username,
+    hasPassword,
+    currentPassword,
+    newPassword,
+    confirmPassword,
+    login,
+    setGlobalStatus,
+    t,
+  ]);
 
-  const handleSelectHighlightColor = useCallback(async (highlightColor: string | null) => {
-    setSavingHighlightColor(highlightColor ?? "default");
-    try {
-      const result = await changeAppearance({ highlightColor });
-      if (result === "failed") {
-        setGlobalStatus(t("profile.highlightColorSaveFailed"), { level: "ERROR" });
-      } else if (result === "saved") {
-        setGlobalStatus(t("profile.highlightColorSaved"), { level: "SUCCESS" });
+  const handleSelectHighlightColor = useCallback(
+    async (highlightColor: string | null) => {
+      setSavingHighlightColor(highlightColor ?? "default");
+      try {
+        const result = await changeAppearance({ highlightColor });
+        if (result === "failed") {
+          setGlobalStatus(t("profile.highlightColorSaveFailed"), {
+            level: "ERROR",
+          });
+        } else if (result === "saved") {
+          setGlobalStatus(t("profile.highlightColorSaved"), {
+            level: "SUCCESS",
+          });
+        }
+      } finally {
+        setSavingHighlightColor(null);
       }
-    } finally {
-      setSavingHighlightColor(null);
-    }
-  }, [changeAppearance, setGlobalStatus, t]);
+    },
+    [changeAppearance, setGlobalStatus, t],
+  );
 
   const handleHideSponsorButtonChange = useCallback(
     async (hideSponsorButton: boolean) => {
@@ -435,7 +551,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         );
         if (result.error || !result.data?.setMyUiSettings) {
           setUiSettings(previous);
-          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.failedToUpdateSponsorPreference"), t), { level: "ERROR" });
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("error.fallback.failedToUpdateSponsorPreference"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
           return;
         }
         setUiSettings(result.data.setMyUiSettings);
@@ -443,7 +566,11 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       } catch (error) {
         setUiSettings(previous);
         setGlobalStatus(
-          userFacingGraphQlErrorMessage(error, t("error.fallback.failedToUpdateSponsorPreference"), t),
+          userFacingGraphQlErrorMessage(
+            error,
+            t("error.fallback.failedToUpdateSponsorPreference"),
+            t,
+          ),
           { level: "ERROR" },
         );
       } finally {
@@ -457,7 +584,8 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setUiSettings,
       uiSettings,
       uiSettingsLoaded,
-      uiSettingsLoading, t,
+      uiSettingsLoading,
+      t,
     ],
   );
 
@@ -481,7 +609,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         );
         if (result.error || !result.data?.setMyUiSettings) {
           setUiSettings(previous);
-          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.glowSaveFailed"), t), { level: "ERROR" });
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("profile.glowSaveFailed"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
           return;
         }
         setUiSettings(result.data.setMyUiSettings);
@@ -522,15 +657,21 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setAccountKind(null);
       try {
         const result = await client
-          .query<{ me?: Pick<AuthUser, "id" | "hasPassword" | "accountKind"> | null }>(
-            meQuery,
-            {},
-          )
+          .query<{
+            me?: Pick<AuthUser, "id" | "hasPassword" | "accountKind"> | null;
+          }>(meQuery, {})
           .toPromise();
         if (cancelled) return;
 
         if (result.error) {
-          setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("status.apiError"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
           setHasPassword(false);
           setAccountKind(null);
           return;
@@ -539,12 +680,21 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         const currentUser = result.data?.me;
         const isProfileUser = currentUser?.id === userId;
         setHasPassword(isProfileUser && currentUser.hasPassword === true);
-        setAccountKind(isProfileUser ? currentUser.accountKind ?? "LOCAL" : null);
+        setAccountKind(
+          isProfileUser ? (currentUser.accountKind ?? "LOCAL") : null,
+        );
       } catch (error) {
         if (!cancelled) {
           setHasPassword(false);
           setAccountKind(null);
-          setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t), { level: "ERROR" });
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              error,
+              t("profile.passkeyOperationFailed"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
         }
       }
     })();
@@ -556,12 +706,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
 
   const loadPasskeys = useCallback(async () => {
     const generation = ++passkeyLoadGenerationRef.current;
-    if (!shouldLoadProfilePasskeys({
-      authLoading,
-      effectiveFormLoginEnabled: effectiveFormLoginEnabled === true,
-      passkeyEnabled,
-      userId,
-    })) {
+    if (
+      !shouldLoadProfilePasskeys({
+        authLoading,
+        effectiveFormLoginEnabled: effectiveFormLoginEnabled === true,
+        passkeyEnabled,
+        userId,
+      })
+    ) {
       setPasskeys([]);
       setLoadingPasskeys(false);
       return;
@@ -569,7 +721,9 @@ export function SettingsProfileContainer({ userId, username }: Props) {
 
     setLoadingPasskeys(true);
     try {
-      const result = await client.query<{ myPasskeys?: PasskeySummary[] }>(myPasskeysQuery, {}).toPromise();
+      const result = await client
+        .query<{ myPasskeys?: PasskeySummary[] }>(myPasskeysQuery, {})
+        .toPromise();
       if (generation !== passkeyLoadGenerationRef.current) {
         return;
       }
@@ -579,14 +733,24 @@ export function SettingsProfileContainer({ userId, username }: Props) {
           return;
         }
 
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
 
       setPasskeys(result.data?.myPasskeys ?? []);
     } catch (error) {
       if (generation === passkeyLoadGenerationRef.current) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyOperationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            error,
+            t("profile.passkeyOperationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
       }
     } finally {
       if (generation === passkeyLoadGenerationRef.current) {
@@ -623,12 +787,22 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .query<{ myOauthApps?: OAuthConnectedApp[] }>(myOauthAppsQuery, {})
         .toPromise();
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
       setOauthApps(result.data?.myOauthApps ?? []);
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.connectedAppsCouldNotBeLoaded"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("error.fallback.connectedAppsCouldNotBeLoaded"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setLoadingOauthApps(false);
     }
@@ -647,14 +821,26 @@ export function SettingsProfileContainer({ userId, username }: Props) {
 
     setLoadingTotp(true);
     try {
-      const result = await client.query<{ myTotp?: TotpStatus }>(myTotpQuery, {}).toPromise();
+      const result = await client
+        .query<{ myTotp?: TotpStatus }>(myTotpQuery, {})
+        .toPromise();
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
       setTotpStatus(result.data?.myTotp ?? null);
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.totpOperationFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setLoadingTotp(false);
     }
@@ -674,10 +860,15 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     setLoadingLinkedAccounts(true);
     try {
       const result = await client
-        .query<{ linkedAccounts?: LinkedAccount[] }>(linkedAccountsQuery, { userId })
+        .query<{ linkedAccounts?: LinkedAccount[] }>(linkedAccountsQuery, {
+          userId,
+        })
         .toPromise();
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
       setLinkedAccounts(
@@ -686,7 +877,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         ),
       );
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.linkedAccountsLoadFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.linkedAccountsLoadFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setLoadingLinkedAccounts(false);
     }
@@ -713,14 +911,25 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         )
         .toPromise();
       if (result.error) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(result.error, t("status.apiError"), t),
+          { level: "ERROR" },
+        );
         return;
       }
       setExternalAuthSettings(
-        result.data?.externalAuthRuntimeSettings ?? DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS,
+        result.data?.externalAuthRuntimeSettings ??
+          DEFAULT_EXTERNAL_AUTH_RUNTIME_SETTINGS,
       );
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.linkAccountLoadFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.linkAccountLoadFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setLoadingLinkOptions(false);
     }
@@ -732,7 +941,9 @@ export function SettingsProfileContainer({ userId, username }: Props) {
 
   const linkableConnections = useMemo(() => {
     const linkedPairs = new Set(
-      linkedAccounts.map((account) => `${account.provider}:${account.connectionId}`),
+      linkedAccounts.map(
+        (account) => `${account.provider}:${account.connectionId}`,
+      ),
     );
 
     const eligibleForProvider = (provider: ExternalAccountProvider) => {
@@ -745,7 +956,8 @@ export function SettingsProfileContainer({ userId, username }: Props) {
 
       return connectionsForProvider(externalAuthSettings, provider).filter(
         (connection) =>
-          connection.linkingEnabled && !linkedPairs.has(`${provider}:${connection.id}`),
+          connection.linkingEnabled &&
+          !linkedPairs.has(`${provider}:${connection.id}`),
       );
     };
 
@@ -759,9 +971,12 @@ export function SettingsProfileContainer({ userId, username }: Props) {
   const linkedAccountConnectionLabels = useMemo(() => {
     const labels: Record<string, string> = {};
     VISIBLE_EXTERNAL_ACCOUNT_PROVIDERS.forEach((provider) => {
-      connectionsForProvider(externalAuthSettings, provider).forEach((connection) => {
-        labels[`${provider}:${connection.id}`] = connectionLabelForDisplay(connection);
-      });
+      connectionsForProvider(externalAuthSettings, provider).forEach(
+        (connection) => {
+          labels[`${provider}:${connection.id}`] =
+            connectionLabelForDisplay(connection);
+        },
+      );
     });
     return labels;
   }, [externalAuthSettings]);
@@ -775,7 +990,8 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setPasskeys((current) => [...current, passkey]);
       setGlobalStatus(t("profile.passkeyAdded"));
     } catch (error) {
-      if (requestSecurityReauthentication(error, { kind: "add-passkey" })) return;
+      if (requestSecurityReauthentication(error, { kind: "add-passkey" }))
+        return;
       setGlobalStatus(formatPasskeyError(error), passkeyFailureOptions(error));
     } finally {
       setAddingPasskey(false);
@@ -789,82 +1005,154 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     userId,
   ]);
 
-  const handleDeletePasskey = useCallback(async (id: string) => {
-    setDeletingPasskeyId(id);
-    try {
-      const result = await client
-        .mutation<
-          { deleteMyPasskey?: { id?: string } },
-          { id: string }
-        >(
-          deleteMyPasskeyMutation,
-          { id },
+  const handleDeletePasskey = useCallback(
+    async (id: string) => {
+      setDeletingPasskeyId(id);
+      try {
+        const result = await client
+          .mutation<{ deleteMyPasskey?: { id?: string } }, { id: string }>(
+            deleteMyPasskeyMutation,
+            { id },
+          )
+          .toPromise();
+        const deleted = result.data?.deleteMyPasskey;
+        if (result.error || !deleted?.id) {
+          if (
+            requestSecurityReauthentication(result.error, {
+              kind: "delete-passkey",
+              id,
+            })
+          )
+            return;
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("profile.passkeyDeleteFailed"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
+          return;
+        }
+
+        setPasskeys((current) =>
+          current.filter((passkey) => passkey.id !== id),
+        );
+        setGlobalStatus(t("profile.passkeyDeleted"), { level: "SUCCESS" });
+      } catch (error) {
+        if (
+          requestSecurityReauthentication(error, { kind: "delete-passkey", id })
         )
-        .toPromise();
-      const deleted = result.data?.deleteMyPasskey;
-      if (result.error || !deleted?.id) {
-        if (requestSecurityReauthentication(result.error, { kind: "delete-passkey", id })) return;
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.passkeyDeleteFailed"), t), { level: "ERROR" });
-        return;
+          return;
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            error,
+            t("profile.passkeyDeleteFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
+      } finally {
+        setDeletingPasskeyId(null);
       }
+    },
+    [client, requestSecurityReauthentication, setGlobalStatus, t],
+  );
 
-      setPasskeys((current) => current.filter((passkey) => passkey.id !== id));
-      setGlobalStatus(t("profile.passkeyDeleted"), { level: "SUCCESS" });
-    } catch (error) {
-      if (requestSecurityReauthentication(error, { kind: "delete-passkey", id })) return;
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.passkeyDeleteFailed"), t), { level: "ERROR" });
-    } finally {
-      setDeletingPasskeyId(null);
-    }
-  }, [client, requestSecurityReauthentication, setGlobalStatus, t]);
+  const handleRevokeOauthApp = useCallback(
+    async (grantId: string) => {
+      setRevokingOauthGrantId(grantId);
+      try {
+        const result = await client
+          .mutation<
+            { revokeMyOauthApp?: { grantId?: string; revoked?: boolean } },
+            { grantId: string }
+          >(revokeMyOauthAppMutation, { grantId })
+          .toPromise();
+        if (result.error || result.data?.revokeMyOauthApp?.revoked !== true) {
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("error.fallback.connectedAppCouldNotBeRevoked"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
+          return;
+        }
 
-  const handleRevokeOauthApp = useCallback(async (grantId: string) => {
-    setRevokingOauthGrantId(grantId);
-    try {
-      const result = await client
-        .mutation<{ revokeMyOauthApp?: { grantId?: string; revoked?: boolean } }, { grantId: string }>(
-          revokeMyOauthAppMutation,
-          { grantId },
-        )
-        .toPromise();
-      if (result.error || result.data?.revokeMyOauthApp?.revoked !== true) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("error.fallback.connectedAppCouldNotBeRevoked"), t), { level: "ERROR" });
-        return;
+        setOauthApps((current) =>
+          current.filter((app) => app.grantId !== grantId),
+        );
+        setGlobalStatus("Connected app revoked.");
+      } catch (error) {
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            error,
+            t("error.fallback.connectedAppCouldNotBeRevoked"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
+      } finally {
+        setRevokingOauthGrantId(null);
       }
-
-      setOauthApps((current) => current.filter((app) => app.grantId !== grantId));
-      setGlobalStatus("Connected app revoked.");
-    } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("error.fallback.connectedAppCouldNotBeRevoked"), t), { level: "ERROR" });
-    } finally {
-      setRevokingOauthGrantId(null);
-    }
-  }, [client, setGlobalStatus, t]);
+    },
+    [client, setGlobalStatus, t],
+  );
 
   const handleStartTotpEnrollment = useCallback(async () => {
     setTotpBusy(true);
     setTotpRecoveryCodes([]);
     try {
       const result = await client
-        .mutation<{ totpEnrollmentStart?: TotpEnrollmentStart }>(totpEnrollmentStartMutation, {})
+        .mutation<{ totpEnrollmentStart?: TotpEnrollmentStart }>(
+          totpEnrollmentStartMutation,
+          {},
+        )
         .toPromise();
       if (result.error || !result.data?.totpEnrollmentStart) {
-        if (requestSecurityReauthentication(result.error, { kind: "start-totp-enrollment" })) return;
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+        if (
+          requestSecurityReauthentication(result.error, {
+            kind: "start-totp-enrollment",
+          })
+        )
+          return;
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.totpOperationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       setTotpEnrollment(result.data.totpEnrollmentStart);
       setTotpEnrollmentCode("");
     } catch (error) {
-      if (requestSecurityReauthentication(error, { kind: "start-totp-enrollment" })) return;
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+      if (
+        requestSecurityReauthentication(error, {
+          kind: "start-totp-enrollment",
+        })
+      )
+        return;
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.totpOperationFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setTotpBusy(false);
     }
   }, [client, requestSecurityReauthentication, setGlobalStatus, t]);
 
   const handleCompleteTotpEnrollment = useCallback(async () => {
-    if (!totpEnrollment || totpEnrollmentCode.length !== TOTP_CODE_LENGTH) return;
+    if (!totpEnrollment || totpEnrollmentCode.length !== TOTP_CODE_LENGTH)
+      return;
 
     setTotpBusy(true);
     try {
@@ -881,7 +1169,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .toPromise();
       const completed = result.data?.totpEnrollmentComplete;
       if (result.error || !completed) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.totpOperationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       setTotpStatus(completed.status);
@@ -890,17 +1185,18 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpEnrollmentCode("");
       setGlobalStatus(t("profile.totpEnabled"));
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.totpOperationFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setTotpBusy(false);
     }
-  }, [
-    client,
-    setGlobalStatus,
-    t,
-    totpEnrollment,
-    totpEnrollmentCode,
-  ]);
+  }, [client, setGlobalStatus, t, totpEnrollment, totpEnrollmentCode]);
 
   const handleDisableTotp = useCallback(async () => {
     if (totpActionCode.length !== TOTP_CODE_LENGTH) return;
@@ -908,17 +1204,21 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     setTotpBusy(true);
     try {
       const result = await client
-        .mutation<
-          { totpDisable?: TotpStatus },
-          { input: { code: string } }
-        >(
+        .mutation<{ totpDisable?: TotpStatus }, { input: { code: string } }>(
           totpDisableMutation,
           { input: { code: totpActionCode } },
         )
         .toPromise();
       const disabled = result.data?.totpDisable;
       if (result.error || !disabled) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.totpOperationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       setTotpStatus(disabled);
@@ -926,7 +1226,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpRecoveryCodes([]);
       setGlobalStatus(t("profile.totpDisabled"));
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.totpOperationFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setTotpBusy(false);
     }
@@ -941,11 +1248,20 @@ export function SettingsProfileContainer({ userId, username }: Props) {
         .mutation<
           { totpRegenerateRecoveryCodes?: TotpEnrollmentComplete },
           { input: { code: string } }
-        >(totpRegenerateRecoveryCodesMutation, { input: { code: totpActionCode } })
+        >(totpRegenerateRecoveryCodesMutation, {
+          input: { code: totpActionCode },
+        })
         .toPromise();
       const regenerated = result.data?.totpRegenerateRecoveryCodes;
       if (result.error || !regenerated) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.totpOperationFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
         return;
       }
       setTotpStatus(regenerated.status);
@@ -953,7 +1269,14 @@ export function SettingsProfileContainer({ userId, username }: Props) {
       setTotpActionCode("");
       setGlobalStatus(t("profile.totpRecoveryCodesRegenerated"));
     } catch (error) {
-      setGlobalStatus(userFacingGraphQlErrorMessage(error, t("profile.totpOperationFailed"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(
+          error,
+          t("profile.totpOperationFailed"),
+          t,
+        ),
+        { level: "ERROR" },
+      );
     } finally {
       setTotpBusy(false);
     }
@@ -989,53 +1312,79 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     securityReauthenticationGeneration,
   ]);
 
-  const handleUnlinkExternalAccount = useCallback(async (id: string) => {
-    setUnlinkingAccountId(id);
-    try {
-      const result = await client
-        .mutation<{ unlinkExternalAccount?: { linkedAccountId?: string } }, { linkedAccountId: string }>(
-          unlinkExternalAccountMutation,
-          { linkedAccountId: id },
-        )
-        .toPromise();
-      if (result.error || !result.data?.unlinkExternalAccount?.linkedAccountId) {
-        setGlobalStatus(userFacingGraphQlErrorMessage(result.error, t("profile.linkedAccountUnlinkFailed"), t), { level: "ERROR" });
+  const handleUnlinkExternalAccount = useCallback(
+    async (id: string) => {
+      setUnlinkingAccountId(id);
+      try {
+        const result = await client
+          .mutation<
+            { unlinkExternalAccount?: { linkedAccountId?: string } },
+            { linkedAccountId: string }
+          >(unlinkExternalAccountMutation, { linkedAccountId: id })
+          .toPromise();
+        if (
+          result.error ||
+          !result.data?.unlinkExternalAccount?.linkedAccountId
+        ) {
+          setGlobalStatus(
+            userFacingGraphQlErrorMessage(
+              result.error,
+              t("profile.linkedAccountUnlinkFailed"),
+              t,
+            ),
+            { level: "ERROR" },
+          );
+          return;
+        }
+
+        setLinkedAccounts((current) =>
+          current.filter((account) => account.id !== id),
+        );
+        notifyExternalAccountInviteSourcesChanged();
+        setGlobalStatus(t("profile.linkedAccountUnlinked"));
+      } catch (error) {
+        setGlobalStatus(
+          userFacingGraphQlErrorMessage(
+            error,
+            t("profile.linkedAccountUnlinkFailed"),
+            t,
+          ),
+          { level: "ERROR" },
+        );
+      } finally {
+        setUnlinkingAccountId(null);
+      }
+    },
+    [client, setGlobalStatus, t],
+  );
+
+  const handleStartLinkAccount = useCallback(
+    (provider: ExternalAccountProvider) => {
+      if (!isVisibleExternalAccountProvider(provider)) {
         return;
       }
-
-      setLinkedAccounts((current) => current.filter((account) => account.id !== id));
-      notifyExternalAccountInviteSourcesChanged();
-      setGlobalStatus(t("profile.linkedAccountUnlinked"));
-    } catch (error) {
-      setGlobalStatus(
-        userFacingGraphQlErrorMessage(error, t("profile.linkedAccountUnlinkFailed"), t),
-        { level: "ERROR" },
-      );
-    } finally {
-      setUnlinkingAccountId(null);
-    }
-  }, [client, setGlobalStatus, t]);
-
-  const handleStartLinkAccount = useCallback((provider: ExternalAccountProvider) => {
-    if (!isVisibleExternalAccountProvider(provider)) {
-      return;
-    }
-    const connections =
-      provider === "JELLYFIN"
-        ? linkableConnections.jellyfin
-        : provider === "EMBY"
-          ? linkableConnections.emby
-          : linkableConnections.plex;
-    setLinkingProvider(provider);
-    setLinkAccountError(null);
-    setLinkAccountDraft({
-      provider,
-      connectionId: connections[0]?.id ?? "",
-      jellyfinUsername: "",
-      jellyfinPassword: "",
-      embyMode: "LOCAL",
-    });
-  }, [linkableConnections.emby, linkableConnections.jellyfin, linkableConnections.plex]);
+      const connections =
+        provider === "JELLYFIN"
+          ? linkableConnections.jellyfin
+          : provider === "EMBY"
+            ? linkableConnections.emby
+            : linkableConnections.plex;
+      setLinkingProvider(provider);
+      setLinkAccountError(null);
+      setLinkAccountDraft({
+        provider,
+        connectionId: connections[0]?.id ?? "",
+        jellyfinUsername: "",
+        jellyfinPassword: "",
+        embyMode: "LOCAL",
+      });
+    },
+    [
+      linkableConnections.emby,
+      linkableConnections.jellyfin,
+      linkableConnections.plex,
+    ],
+  );
 
   const handleCancelLinkAccount = useCallback(() => {
     setLinkingProvider(null);
@@ -1046,359 +1395,466 @@ export function SettingsProfileContainer({ userId, username }: Props) {
     }));
   }, []);
 
-  const handleLinkAccountConnectionChange = useCallback((connectionId: string) => {
-    const connection = linkableConnections.emby.find((candidate) => candidate.id === connectionId);
-    setLinkAccountDraft((current) => ({
-      ...current,
-      connectionId,
-      embyMode:
-        current.provider === "EMBY"
-          ? effectiveEmbyLinkMode(current.embyMode, connection?.embyConnectEnabled === true)
-          : current.embyMode,
-    }));
-  }, [linkableConnections.emby]);
+  const handleLinkAccountConnectionChange = useCallback(
+    (connectionId: string) => {
+      const connection = linkableConnections.emby.find(
+        (candidate) => candidate.id === connectionId,
+      );
+      setLinkAccountDraft((current) => ({
+        ...current,
+        connectionId,
+        embyMode:
+          current.provider === "EMBY"
+            ? effectiveEmbyLinkMode(
+                current.embyMode,
+                connection?.embyConnectEnabled === true,
+              )
+            : current.embyMode,
+      }));
+    },
+    [linkableConnections.emby],
+  );
 
-  const handleLinkAccountUsernameChange = useCallback((jellyfinUsername: string) => {
-    setLinkAccountDraft((current) => ({ ...current, jellyfinUsername }));
-  }, []);
+  const handleLinkAccountUsernameChange = useCallback(
+    (jellyfinUsername: string) => {
+      setLinkAccountDraft((current) => ({ ...current, jellyfinUsername }));
+    },
+    [],
+  );
 
-  const handleLinkAccountPasswordChange = useCallback((jellyfinPassword: string) => {
-    setLinkAccountDraft((current) => ({ ...current, jellyfinPassword }));
-  }, []);
+  const handleLinkAccountPasswordChange = useCallback(
+    (jellyfinPassword: string) => {
+      setLinkAccountDraft((current) => ({ ...current, jellyfinPassword }));
+    },
+    [],
+  );
 
-  const handleSubmitJellyfinLink = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    // Same completeness rule the submit button uses, so the two cannot drift.
-    // `busy` is false here because re-entrancy is already prevented by the
-    // disabled button; this check is only about the draft being complete.
-    if (
-      linkingProvider !== "JELLYFIN" ||
-      !canSubmitJellyfinLink({
-        connectionId: linkAccountDraft.connectionId,
-        username: linkAccountDraft.jellyfinUsername,
-        busy: false,
-      })
-    ) {
-      return;
-    }
-    setLinkAccountBusy(true);
-    setLinkAccountError(null);
-    try {
-      const result = await client
-        .mutation<{ linkJellyfinAccount?: LinkedAccount }, {
-          input: { connectionId: string; username: string; password: string };
-        }>(linkJellyfinAccountMutation, {
-          input: {
-            connectionId: linkAccountDraft.connectionId,
-            username: linkAccountDraft.jellyfinUsername.trim(),
-            password: linkAccountDraft.jellyfinPassword,
-          },
+  const handleSubmitJellyfinLink = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      // Same completeness rule the submit button uses, so the two cannot drift.
+      // `busy` is false here because re-entrancy is already prevented by the
+      // disabled button; this check is only about the draft being complete.
+      if (
+        linkingProvider !== "JELLYFIN" ||
+        !canSubmitJellyfinLink({
+          connectionId: linkAccountDraft.connectionId,
+          username: linkAccountDraft.jellyfinUsername,
+          busy: false,
         })
-        .toPromise();
+      ) {
+        return;
+      }
+      setLinkAccountBusy(true);
+      setLinkAccountError(null);
+      try {
+        const result = await client
+          .mutation<
+            { linkJellyfinAccount?: LinkedAccount },
+            {
+              input: {
+                connectionId: string;
+                username: string;
+                password: string;
+              };
+            }
+          >(linkJellyfinAccountMutation, {
+            input: {
+              connectionId: linkAccountDraft.connectionId,
+              username: linkAccountDraft.jellyfinUsername.trim(),
+              password: linkAccountDraft.jellyfinPassword,
+            },
+          })
+          .toPromise();
 
-      if (result.error || !result.data?.linkJellyfinAccount) {
-        const message = userFacingGraphQlErrorMessage(result.error, t("profile.linkAccountFailed"), t);
+        if (result.error || !result.data?.linkJellyfinAccount) {
+          const message = userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.linkAccountFailed"),
+            t,
+          );
+          setLinkAccountError(message);
+          setGlobalStatus(message, { level: "ERROR" });
+          return;
+        }
+
+        setLinkingProvider(null);
+        setLinkAccountDraft((current) => ({
+          ...current,
+          jellyfinPassword: "",
+        }));
+        await loadLinkedAccounts();
+        notifyExternalAccountInviteSourcesChanged();
+        setGlobalStatus(t("profile.linkAccountLinked"));
+      } catch (error) {
+        const message = userFacingGraphQlErrorMessage(
+          error,
+          t("profile.linkAccountFailed"),
+          t,
+        );
         setLinkAccountError(message);
         setGlobalStatus(message, { level: "ERROR" });
+      } finally {
+        setLinkAccountDraft((current) => ({
+          ...current,
+          jellyfinPassword: "",
+        }));
+        setLinkAccountBusy(false);
+      }
+    },
+    [
+      client,
+      linkAccountDraft,
+      linkingProvider,
+      loadLinkedAccounts,
+      setGlobalStatus,
+      t,
+    ],
+  );
+
+  const handleSubmitEmbyLink = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (
+        linkingProvider !== "EMBY" ||
+        !linkAccountDraft.connectionId ||
+        !linkAccountDraft.jellyfinUsername.trim()
+      ) {
+        return;
+      }
+      const selectedConnection = linkableConnections.emby.find(
+        (connection) => connection.id === linkAccountDraft.connectionId,
+      );
+      const embyMode = effectiveEmbyLinkMode(
+        linkAccountDraft.embyMode,
+        selectedConnection?.embyConnectEnabled === true,
+      );
+
+      setLinkAccountBusy(true);
+      setLinkAccountError(null);
+      try {
+        const result = await client
+          .mutation<
+            { linkEmbyAccount?: LinkedAccount },
+            {
+              input: {
+                connectionId: string;
+                mode: "LOCAL" | "CONNECT";
+                username: string;
+                password: string;
+              };
+            }
+          >(linkEmbyAccountMutation, {
+            input: {
+              connectionId: linkAccountDraft.connectionId,
+              mode: embyMode,
+              username: linkAccountDraft.jellyfinUsername.trim(),
+              password: linkAccountDraft.jellyfinPassword,
+            },
+          })
+          .toPromise();
+
+        if (result.error || !result.data?.linkEmbyAccount) {
+          throw result.error ?? new Error(t("profile.linkAccountFailed"));
+        }
+        setLinkingProvider(null);
+        await loadLinkedAccounts();
+        notifyExternalAccountInviteSourcesChanged();
+        setGlobalStatus(t("profile.linkAccountLinked"));
+      } catch (error) {
+        const message = userFacingGraphQlErrorMessage(
+          error,
+          t("profile.linkAccountFailed"),
+          t,
+        );
+        setLinkAccountError(message);
+        setGlobalStatus(message, { level: "ERROR" });
+      } finally {
+        setLinkAccountDraft((current) => ({
+          ...current,
+          jellyfinPassword: "",
+        }));
+        setLinkAccountBusy(false);
+      }
+    },
+    [
+      client,
+      linkAccountDraft,
+      linkableConnections.emby,
+      linkingProvider,
+      loadLinkedAccounts,
+      setGlobalStatus,
+      t,
+    ],
+  );
+
+  const handleSubmitPlexLink = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (linkingProvider !== "PLEX" || !linkAccountDraft.connectionId) {
         return;
       }
 
-      setLinkingProvider(null);
-      setLinkAccountDraft((current) => ({ ...current, jellyfinPassword: "" }));
-      await loadLinkedAccounts();
-      notifyExternalAccountInviteSourcesChanged();
-      setGlobalStatus(t("profile.linkAccountLinked"));
-    } catch (error) {
-      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
-      setLinkAccountError(message);
-      setGlobalStatus(message, { level: "ERROR" });
-    } finally {
-      setLinkAccountDraft((current) => ({ ...current, jellyfinPassword: "" }));
-      setLinkAccountBusy(false);
-    }
-  }, [client, linkAccountDraft, linkingProvider, loadLinkedAccounts, setGlobalStatus, t]);
+      setLinkAccountBusy(true);
+      setLinkAccountError(null);
+      try {
+        setGlobalStatus(t("auth.plexPinFlowPending"), { level: "SUCCESS" });
+        const plexAuthToken = await authenticateWithPlexPin();
+        const result = await client
+          .mutation<
+            { linkPlexAccount?: LinkedAccount },
+            {
+              input: { connectionId: string; plexAuthToken: string };
+            }
+          >(linkPlexAccountMutation, {
+            input: {
+              connectionId: linkAccountDraft.connectionId,
+              plexAuthToken,
+            },
+          })
+          .toPromise();
 
-  const handleSubmitEmbyLink = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (
-      linkingProvider !== "EMBY" ||
-      !linkAccountDraft.connectionId ||
-      !linkAccountDraft.jellyfinUsername.trim()
-    ) {
-      return;
-    }
-    const selectedConnection = linkableConnections.emby.find(
-      (connection) => connection.id === linkAccountDraft.connectionId,
-    );
-    const embyMode = effectiveEmbyLinkMode(
-      linkAccountDraft.embyMode,
-      selectedConnection?.embyConnectEnabled === true,
-    );
+        if (result.error || !result.data?.linkPlexAccount) {
+          const message = userFacingGraphQlErrorMessage(
+            result.error,
+            t("profile.linkAccountFailed"),
+            t,
+          );
+          setLinkAccountError(message);
+          setGlobalStatus(message, { level: "ERROR" });
+          return;
+        }
 
-    setLinkAccountBusy(true);
-    setLinkAccountError(null);
-    try {
-      const result = await client
-        .mutation<{ linkEmbyAccount?: LinkedAccount }, {
-          input: {
-            connectionId: string;
-            mode: "LOCAL" | "CONNECT";
-            username: string;
-            password: string;
-          };
-        }>(linkEmbyAccountMutation, {
-          input: {
-            connectionId: linkAccountDraft.connectionId,
-            mode: embyMode,
-            username: linkAccountDraft.jellyfinUsername.trim(),
-            password: linkAccountDraft.jellyfinPassword,
-          },
-        })
-        .toPromise();
-
-      if (result.error || !result.data?.linkEmbyAccount) {
-        throw result.error ?? new Error(t("profile.linkAccountFailed"));
-      }
-      setLinkingProvider(null);
-      await loadLinkedAccounts();
-      notifyExternalAccountInviteSourcesChanged();
-      setGlobalStatus(t("profile.linkAccountLinked"));
-    } catch (error) {
-      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
-      setLinkAccountError(message);
-      setGlobalStatus(message, { level: "ERROR" });
-    } finally {
-      setLinkAccountDraft((current) => ({ ...current, jellyfinPassword: "" }));
-      setLinkAccountBusy(false);
-    }
-  }, [
-    client,
-    linkAccountDraft,
-    linkableConnections.emby,
-    linkingProvider,
-    loadLinkedAccounts,
-    setGlobalStatus,
-    t,
-  ]);
-
-  const handleSubmitPlexLink = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (linkingProvider !== "PLEX" || !linkAccountDraft.connectionId) {
-      return;
-    }
-
-    setLinkAccountBusy(true);
-    setLinkAccountError(null);
-    try {
-      setGlobalStatus(t("auth.plexPinFlowPending"), { level: "SUCCESS" });
-      const plexAuthToken = await authenticateWithPlexPin();
-      const result = await client
-        .mutation<{ linkPlexAccount?: LinkedAccount }, {
-          input: { connectionId: string; plexAuthToken: string };
-        }>(linkPlexAccountMutation, {
-          input: {
-            connectionId: linkAccountDraft.connectionId,
-            plexAuthToken,
-          },
-        })
-        .toPromise();
-
-      if (result.error || !result.data?.linkPlexAccount) {
-        const message = userFacingGraphQlErrorMessage(result.error, t("profile.linkAccountFailed"), t);
+        setLinkingProvider(null);
+        await loadLinkedAccounts();
+        notifyExternalAccountInviteSourcesChanged();
+        setGlobalStatus(t("profile.linkAccountLinked"));
+      } catch (error) {
+        const message = userFacingGraphQlErrorMessage(
+          error,
+          t("profile.linkAccountFailed"),
+          t,
+        );
         setLinkAccountError(message);
         setGlobalStatus(message, { level: "ERROR" });
-        return;
+      } finally {
+        setLinkAccountBusy(false);
       }
-
-      setLinkingProvider(null);
-      await loadLinkedAccounts();
-      notifyExternalAccountInviteSourcesChanged();
-      setGlobalStatus(t("profile.linkAccountLinked"));
-    } catch (error) {
-      const message = userFacingGraphQlErrorMessage(error, t("profile.linkAccountFailed"), t);
-      setLinkAccountError(message);
-      setGlobalStatus(message, { level: "ERROR" });
-    } finally {
-      setLinkAccountBusy(false);
-    }
-  }, [client, linkAccountDraft.connectionId, linkingProvider, loadLinkedAccounts, setGlobalStatus, t]);
+    },
+    [
+      client,
+      linkAccountDraft.connectionId,
+      linkingProvider,
+      loadLinkedAccounts,
+      setGlobalStatus,
+      t,
+    ],
+  );
 
   return (
     <>
-    <SettingsProfileSection
-      username={username}
-      highlightColor={uiSettings.highlightColor}
-      savingHighlightColor={savingHighlightColor}
-      onSelectHighlightColor={handleSelectHighlightColor}
-      hideSponsorButton={uiSettings.hideSponsorButton}
-      savingSponsorPreference={savingSponsorPreference}
-      onHideSponsorButtonChange={handleHideSponsorButtonChange}
-      noGlow={uiSettings.noGlow}
-      savingGlowPreference={savingGlowPreference}
-      onNoGlowChange={handleNoGlowChange}
-      currentPassword={currentPassword}
-      newPassword={newPassword}
-      confirmPassword={confirmPassword}
-      saving={saving}
-      canChangePassword={accountKind === "LOCAL"}
-      requiresCurrentPassword={hasPassword === true}
-      onCurrentPasswordChange={setCurrentPassword}
-      onNewPasswordChange={setNewPassword}
-      onConfirmPasswordChange={setConfirmPassword}
-      onChangePassword={handleChangePassword}
-      showPasskeys={Boolean(userId)}
-      canAddPasskey={Boolean(userId)}
-      passkeys={passkeys}
-      oauthApps={oauthApps}
-      totpStatus={totpStatus}
-      totpEnrollment={totpEnrollment}
-      totpEnrollmentCode={totpEnrollmentCode}
-      totpActionCode={totpActionCode}
-      totpRecoveryCodes={totpRecoveryCodes}
-      linkedAccounts={linkedAccounts}
-      linkedAccountConnectionLabels={linkedAccountConnectionLabels}
-      linkableJellyfinConnections={linkableConnections.jellyfin}
-      linkablePlexConnections={linkableConnections.plex}
-      linkableEmbyConnections={linkableConnections.emby}
-      linkingProvider={linkingProvider}
-      linkAccountConnectionId={linkAccountDraft.connectionId}
-      linkAccountUsername={linkAccountDraft.jellyfinUsername}
-      linkAccountPassword={linkAccountDraft.jellyfinPassword}
-      linkAccountEmbyMode={linkAccountDraft.embyMode}
-      linkAccountBusy={linkAccountBusy}
-      linkAccountError={linkAccountError}
-      loadingPasskeys={loadingPasskeys}
-      loadingOauthApps={loadingOauthApps}
-      loadingTotp={loadingTotp}
-      loadingLinkedAccounts={loadingLinkedAccounts}
-      loadingLinkOptions={loadingLinkOptions}
-      addingPasskey={addingPasskey}
-      totpBusy={totpBusy}
-      deletingPasskeyId={deletingPasskeyId}
-      revokingOauthGrantId={revokingOauthGrantId}
-      unlinkingAccountId={unlinkingAccountId}
-      onAddPasskey={handleAddPasskey}
-      onDeletePasskey={handleDeletePasskey}
-      onRevokeOauthApp={handleRevokeOauthApp}
-      onStartTotpEnrollment={handleStartTotpEnrollment}
-      onTotpEnrollmentCodeChange={(value) => setTotpEnrollmentCode(sanitizeTotpCode(value))}
-      onCompleteTotpEnrollment={handleCompleteTotpEnrollment}
-      onTotpActionCodeChange={(value) => setTotpActionCode(sanitizeTotpCode(value))}
-      onDisableTotp={handleDisableTotp}
-      onRegenerateTotpRecoveryCodes={handleRegenerateTotpRecoveryCodes}
-      onStartLinkAccount={handleStartLinkAccount}
-      onCancelLinkAccount={handleCancelLinkAccount}
-      onLinkAccountConnectionChange={handleLinkAccountConnectionChange}
-      onLinkAccountUsernameChange={handleLinkAccountUsernameChange}
-      onLinkAccountPasswordChange={handleLinkAccountPasswordChange}
-      onLinkAccountEmbyModeChange={(embyMode) =>
-        setLinkAccountDraft((current) => ({ ...current, embyMode }))
-      }
-      onSubmitJellyfinLink={handleSubmitJellyfinLink}
-      onSubmitEmbyLink={handleSubmitEmbyLink}
-      onSubmitPlexLink={handleSubmitPlexLink}
-      onUnlinkExternalAccount={handleUnlinkExternalAccount}
-    />
-    {userId ? <ProfileListAccounts key={userId} /> : null}
-    <ApiKeysPanel adoptSession={adoptSession} />
-    <Dialog
-      open={securityReauthenticationOpen}
-      onOpenChange={handleSecurityReauthenticationOpenChange}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Verify account security</DialogTitle>
-          <DialogDescription>
-            Verify a current factor before managing passkeys, TOTP, or recovery codes.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-wrap gap-2">
-          {hasPassword ? (
+      <SettingsProfileSection
+        username={username}
+        highlightColor={uiSettings.highlightColor}
+        savingHighlightColor={savingHighlightColor}
+        onSelectHighlightColor={handleSelectHighlightColor}
+        hideSponsorButton={uiSettings.hideSponsorButton}
+        savingSponsorPreference={savingSponsorPreference}
+        onHideSponsorButtonChange={handleHideSponsorButtonChange}
+        noGlow={uiSettings.noGlow}
+        savingGlowPreference={savingGlowPreference}
+        onNoGlowChange={handleNoGlowChange}
+        currentPassword={currentPassword}
+        newPassword={newPassword}
+        confirmPassword={confirmPassword}
+        saving={saving}
+        canChangePassword={accountKind === "LOCAL"}
+        requiresCurrentPassword={hasPassword === true}
+        onCurrentPasswordChange={setCurrentPassword}
+        onNewPasswordChange={setNewPassword}
+        onConfirmPasswordChange={setConfirmPassword}
+        onChangePassword={handleChangePassword}
+        showPasskeys={Boolean(userId)}
+        canAddPasskey={Boolean(userId)}
+        passkeys={passkeys}
+        oauthApps={oauthApps}
+        totpStatus={totpStatus}
+        totpEnrollment={totpEnrollment}
+        totpEnrollmentCode={totpEnrollmentCode}
+        totpActionCode={totpActionCode}
+        totpRecoveryCodes={totpRecoveryCodes}
+        linkedAccounts={linkedAccounts}
+        linkedAccountConnectionLabels={linkedAccountConnectionLabels}
+        linkableJellyfinConnections={linkableConnections.jellyfin}
+        linkablePlexConnections={linkableConnections.plex}
+        linkableEmbyConnections={linkableConnections.emby}
+        linkingProvider={linkingProvider}
+        linkAccountConnectionId={linkAccountDraft.connectionId}
+        linkAccountUsername={linkAccountDraft.jellyfinUsername}
+        linkAccountPassword={linkAccountDraft.jellyfinPassword}
+        linkAccountEmbyMode={linkAccountDraft.embyMode}
+        linkAccountBusy={linkAccountBusy}
+        linkAccountError={linkAccountError}
+        loadingPasskeys={loadingPasskeys}
+        loadingOauthApps={loadingOauthApps}
+        loadingTotp={loadingTotp}
+        loadingLinkedAccounts={loadingLinkedAccounts}
+        loadingLinkOptions={loadingLinkOptions}
+        addingPasskey={addingPasskey}
+        totpBusy={totpBusy}
+        deletingPasskeyId={deletingPasskeyId}
+        revokingOauthGrantId={revokingOauthGrantId}
+        unlinkingAccountId={unlinkingAccountId}
+        onAddPasskey={handleAddPasskey}
+        onDeletePasskey={handleDeletePasskey}
+        onRevokeOauthApp={handleRevokeOauthApp}
+        onStartTotpEnrollment={handleStartTotpEnrollment}
+        onTotpEnrollmentCodeChange={(value) =>
+          setTotpEnrollmentCode(sanitizeTotpCode(value))
+        }
+        onCompleteTotpEnrollment={handleCompleteTotpEnrollment}
+        onTotpActionCodeChange={(value) =>
+          setTotpActionCode(sanitizeTotpCode(value))
+        }
+        onDisableTotp={handleDisableTotp}
+        onRegenerateTotpRecoveryCodes={handleRegenerateTotpRecoveryCodes}
+        onStartLinkAccount={handleStartLinkAccount}
+        onCancelLinkAccount={handleCancelLinkAccount}
+        onLinkAccountConnectionChange={handleLinkAccountConnectionChange}
+        onLinkAccountUsernameChange={handleLinkAccountUsernameChange}
+        onLinkAccountPasswordChange={handleLinkAccountPasswordChange}
+        onLinkAccountEmbyModeChange={(embyMode) =>
+          setLinkAccountDraft((current) => ({ ...current, embyMode }))
+        }
+        onSubmitJellyfinLink={handleSubmitJellyfinLink}
+        onSubmitEmbyLink={handleSubmitEmbyLink}
+        onSubmitPlexLink={handleSubmitPlexLink}
+        onUnlinkExternalAccount={handleUnlinkExternalAccount}
+      />
+      {userId ? <ProfileListAccounts key={userId} /> : null}
+      <ApiKeysPanel adoptSession={adoptSession} />
+      <Dialog
+        open={securityReauthenticationOpen}
+        onOpenChange={handleSecurityReauthenticationOpenChange}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verify account security</DialogTitle>
+            <DialogDescription>
+              Verify a current factor before managing passkeys, TOTP, or
+              recovery codes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-2">
+            {hasPassword ? (
+              <Button
+                type="button"
+                variant={
+                  securityReauthenticationMethod === "password"
+                    ? "default"
+                    : "outline"
+                }
+                onClick={() => setSecurityReauthenticationMethod("password")}
+                disabled={securityReauthenticationBusy}
+              >
+                Password
+              </Button>
+            ) : null}
+            {passkeys.length > 0 ? (
+              <Button
+                type="button"
+                variant={
+                  securityReauthenticationMethod === "passkey"
+                    ? "default"
+                    : "outline"
+                }
+                onClick={() => setSecurityReauthenticationMethod("passkey")}
+                disabled={securityReauthenticationBusy}
+              >
+                Passkey
+              </Button>
+            ) : null}
+            {totpStatus?.enabled ? (
+              <Button
+                type="button"
+                variant={
+                  securityReauthenticationMethod === "totp"
+                    ? "default"
+                    : "outline"
+                }
+                onClick={() => setSecurityReauthenticationMethod("totp")}
+                disabled={securityReauthenticationBusy}
+              >
+                TOTP or recovery code
+              </Button>
+            ) : null}
+          </div>
+          {securityReauthenticationMethod === "password" && hasPassword ? (
+            <>
+              <Input
+                type="password"
+                value={securityReauthenticationPassword}
+                onChange={(event) =>
+                  setSecurityReauthenticationPassword(event.target.value)
+                }
+                autoComplete="current-password"
+                ignorePasswordManagers
+                placeholder="Current password"
+                disabled={securityReauthenticationBusy}
+              />
+              <Button
+                type="button"
+                onClick={handlePasswordSecurityReauthentication}
+                disabled={
+                  securityReauthenticationBusy ||
+                  !securityReauthenticationPassword
+                }
+              >
+                Verify password
+              </Button>
+            </>
+          ) : null}
+          {securityReauthenticationMethod === "passkey" &&
+          passkeys.length > 0 ? (
             <Button
               type="button"
-              variant={securityReauthenticationMethod === "password" ? "default" : "outline"}
-              onClick={() => setSecurityReauthenticationMethod("password")}
+              onClick={handlePasskeySecurityReauthentication}
               disabled={securityReauthenticationBusy}
             >
-              Password
+              Verify with passkey
             </Button>
           ) : null}
-          {passkeys.length > 0 ? (
-            <Button
-              type="button"
-              variant={securityReauthenticationMethod === "passkey" ? "default" : "outline"}
-              onClick={() => setSecurityReauthenticationMethod("passkey")}
-              disabled={securityReauthenticationBusy}
-            >
-              Passkey
-            </Button>
+          {securityReauthenticationMethod === "totp" && totpStatus?.enabled ? (
+            <>
+              <Input
+                value={securityReauthenticationCode}
+                onChange={(event) =>
+                  setSecurityReauthenticationCode(event.target.value)
+                }
+                autoComplete="one-time-code"
+                placeholder="TOTP or recovery code"
+                disabled={securityReauthenticationBusy}
+              />
+              <Button
+                type="button"
+                onClick={handleTotpSecurityReauthentication}
+                disabled={
+                  securityReauthenticationBusy ||
+                  !securityReauthenticationCode.trim()
+                }
+              >
+                Verify code
+              </Button>
+            </>
           ) : null}
-          {totpStatus?.enabled ? (
-            <Button
-              type="button"
-              variant={securityReauthenticationMethod === "totp" ? "default" : "outline"}
-              onClick={() => setSecurityReauthenticationMethod("totp")}
-              disabled={securityReauthenticationBusy}
-            >
-              TOTP or recovery code
-            </Button>
+          {!hasPassword && passkeys.length === 0 && !totpStatus?.enabled ? (
+            <p className="text-sm text-[var(--scry-muted3)]">
+              This account has no available reauthentication factor. Sign out
+              and sign in again, then retry the account-security change.
+            </p>
           ) : null}
-        </div>
-        {securityReauthenticationMethod === "password" && hasPassword ? (
-          <>
-            <Input
-              type="password"
-              value={securityReauthenticationPassword}
-              onChange={(event) => setSecurityReauthenticationPassword(event.target.value)}
-              autoComplete="current-password"
-              ignorePasswordManagers
-              placeholder="Current password"
-              disabled={securityReauthenticationBusy}
-            />
-            <Button
-              type="button"
-              onClick={handlePasswordSecurityReauthentication}
-              disabled={securityReauthenticationBusy || !securityReauthenticationPassword}
-            >
-              Verify password
-            </Button>
-          </>
-        ) : null}
-        {securityReauthenticationMethod === "passkey" && passkeys.length > 0 ? (
-          <Button
-            type="button"
-            onClick={handlePasskeySecurityReauthentication}
-            disabled={securityReauthenticationBusy}
-          >
-            Verify with passkey
-          </Button>
-        ) : null}
-        {securityReauthenticationMethod === "totp" && totpStatus?.enabled ? (
-          <>
-            <Input
-              value={securityReauthenticationCode}
-              onChange={(event) => setSecurityReauthenticationCode(event.target.value)}
-              autoComplete="one-time-code"
-              placeholder="TOTP or recovery code"
-              disabled={securityReauthenticationBusy}
-            />
-            <Button
-              type="button"
-              onClick={handleTotpSecurityReauthentication}
-              disabled={securityReauthenticationBusy || !securityReauthenticationCode.trim()}
-            >
-              Verify code
-            </Button>
-          </>
-        ) : null}
-        {!hasPassword && passkeys.length === 0 && !totpStatus?.enabled ? (
-          <p className="text-sm text-[var(--scry-muted3)]">
-            This account has no available reauthentication factor. Sign out and sign in again,
-            then retry the account-security change.
-          </p>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

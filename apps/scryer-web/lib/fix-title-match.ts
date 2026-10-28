@@ -51,7 +51,9 @@ export function fixTitleMatchTarget(
   if (result.smgId != null && result.smgId > 0) target.smgId = result.smgId;
   const tvdbId = result.tvdbId?.trim();
   if (tvdbId) target.tvdbId = tvdbId;
-  return target.smgId === undefined && target.tvdbId === undefined ? null : target;
+  return target.smgId === undefined && target.tvdbId === undefined
+    ? null
+    : target;
 }
 
 export async function handleFixTitleMatchComplete({
@@ -64,7 +66,10 @@ export async function handleFixTitleMatchComplete({
   try {
     await refreshTitleDetail();
   } catch (error) {
-    setGlobalStatus(userFacingGraphQlErrorMessage(error, t("status.apiError"), t), { level: "ERROR" });
+    setGlobalStatus(
+      userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
+      { level: "ERROR" },
+    );
     return;
   }
 

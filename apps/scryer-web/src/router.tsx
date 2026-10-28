@@ -19,7 +19,9 @@ const RootPageShell = lazy(() => import("@/components/root/root-page-shell"));
 const LoginPage = lazy(() => import("@/src/pages/login"));
 const OAuthAuthorizePage = lazy(() => import("@/src/pages/oauth-authorize"));
 const SetupPage = lazy(() => import("@/src/pages/setup"));
-const ListAccountReturnPage = lazy(() => import("@/src/pages/list-account-return"));
+const ListAccountReturnPage = lazy(
+  () => import("@/src/pages/list-account-return"),
+);
 
 // This provider covers sibling routes such as login and setup. The selected
 // dictionary is loaded before useLanguage commits a language change.
@@ -88,11 +90,21 @@ export const router = createBrowserRouter(
         },
         ...["/lists/oauth/return", "/lists/oauth/callback"].map((path) => ({
           path,
-          element: <Suspense fallback={<PageShellFallback />}><ListAccountReturnPage /></Suspense>,
+          element: (
+            <Suspense fallback={<PageShellFallback />}>
+              <ListAccountReturnPage />
+            </Suspense>
+          ),
         })),
         { path: "*", element: <ShellRoute /> },
       ],
     },
   ],
-  { basename: /^\/lists\/oauth\/(return|callback)$/.test(window.location.pathname) ? "/" : getRuntimeBasePath() },
+  {
+    basename: /^\/lists\/oauth\/(return|callback)$/.test(
+      window.location.pathname,
+    )
+      ? "/"
+      : getRuntimeBasePath(),
+  },
 );

@@ -305,7 +305,9 @@ function ManagedIndexerRateLimitsPopover({
             );
           }}
         >
-          <p className="text-sm font-medium">{t("settings.indexerRateLimits")}</p>
+          <p className="text-sm font-medium">
+            {t("settings.indexerRateLimits")}
+          </p>
           <label className="block">
             <Label className="mb-2 block" htmlFor={intervalId}>
               {t("form.indexerRateLimitSeconds")}
@@ -1858,7 +1860,9 @@ export function SettingsIndexersSection({
                                     indexer={indexer}
                                     routingByScope={indexerRoutingByScope}
                                     isLoading={indexerRoutingLoading}
-                                    mutatingScopes={mutatingIndexerRoutingScopes}
+                                    mutatingScopes={
+                                      mutatingIndexerRoutingScopes
+                                    }
                                     onChange={updateIndexerRoutingForScope}
                                   />
                                 </div>
@@ -2185,7 +2189,9 @@ export function SettingsIndexersSection({
                                   draft={indexerDraft}
                                   onChange={handleConfigValueChange}
                                   loginChallenge={loginChallenge}
-                                  onRefreshLoginChallenge={refreshLoginChallenge}
+                                  onRefreshLoginChallenge={
+                                    refreshLoginChallenge
+                                  }
                                 />
                               </CollapsibleContent>
                             </Collapsible>

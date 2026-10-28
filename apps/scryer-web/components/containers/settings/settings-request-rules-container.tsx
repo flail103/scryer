@@ -92,14 +92,18 @@ export function SettingsRequestRulesContainer() {
     APP_PERMISSIONS.managePermissions,
   );
 
-  const [ruleSetRecords, setRuleSetRecords] = useState<RequestRuleSetRecord[]>([]);
+  const [ruleSetRecords, setRuleSetRecords] = useState<RequestRuleSetRecord[]>(
+    [],
+  );
   const [libraries, setLibraries] = useState<LibraryRecord[]>([]);
   const [qualityProfiles, setQualityProfiles] = useState<
     RequestQualityProfileOption[]
   >([]);
   const [users, setUsers] = useState<RequestRuleUserOption[]>([]);
 
-  const [mutatingRuleSetId, setMutatingRuleSetId] = useState<string | null>(null);
+  const [mutatingRuleSetId, setMutatingRuleSetId] = useState<string | null>(
+    null,
+  );
   const [editingRuleSetId, setEditingRuleSetId] = useState<string | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [pendingDeleteRuleSet, setPendingDeleteRuleSet] =
@@ -112,14 +116,18 @@ export function SettingsRequestRulesContainer() {
   const [ruleSetDraftBaseline, setRuleSetDraftBaseline] =
     useState<RequestRuleSetDraft>(initialRequestRuleDraft);
   const { validating, validationResult, setValidationResult, validateDraft } =
-    useRegoValidation("request", ruleSetDraft.regoSource, editingRuleSetId, isEditorOpen);
+    useRegoValidation(
+      "request",
+      ruleSetDraft.regoSource,
+      editingRuleSetId,
+      isEditorOpen,
+    );
 
   const [previewSource, setPreviewSource] =
     useState<RequestRulePreviewSource>("stored");
   const [previewRuleSetId, setPreviewRuleSetId] = useState("");
-  const [previewSample, setPreviewSample] = useState<RequestRulePreviewSample>(
-    initialPreviewSample,
-  );
+  const [previewSample, setPreviewSample] =
+    useState<RequestRulePreviewSample>(initialPreviewSample);
   const [previewing, setPreviewing] = useState(false);
   const [previewResult, setPreviewResult] =
     useState<RequestRulePreviewResult | null>(null);
@@ -159,7 +167,8 @@ export function SettingsRequestRulesContainer() {
           .query(requestRuleSetQuery, { id })
           .toPromise();
         if (error) throw error;
-        const detail = (data?.requestRuleSet as RequestRuleSetDetail | null) ?? null;
+        const detail =
+          (data?.requestRuleSet as RequestRuleSetDetail | null) ?? null;
         if (!detail) {
           setGlobalStatus(t("status.failedToLoad"), { level: "ERROR" });
         }
@@ -308,7 +317,9 @@ export function SettingsRequestRulesContainer() {
         .query(requestRuleSetsQuery, {}, { requestPolicy: "network-only" })
         .toPromise();
       if (error) throw error;
-      setRuleSetRecords((data?.requestRuleSets as RequestRuleSetRecord[]) ?? []);
+      setRuleSetRecords(
+        (data?.requestRuleSets as RequestRuleSetRecord[]) ?? [],
+      );
     } catch (error) {
       setGlobalStatus(
         userFacingGraphQlErrorMessage(error, t("status.failedToLoad"), t),
@@ -331,15 +342,19 @@ export function SettingsRequestRulesContainer() {
         setLibraries((libraryList.data?.libraries ?? []) as LibraryRecord[]);
       }
       if (!profiles.error) {
-        setQualityProfiles(profiles.data?.qualityProfileSettings?.profiles ?? []);
+        setQualityProfiles(
+          profiles.data?.qualityProfileSettings?.profiles ?? [],
+        );
       }
       setUsers(
         userList.error
           ? []
-          : ((userList.data?.users ?? []) as Array<{
-              id: string;
-              username: string;
-            }>).map((user) => ({ id: user.id, username: user.username })),
+          : (
+              (userList.data?.users ?? []) as Array<{
+                id: string;
+                username: string;
+              }>
+            ).map((user) => ({ id: user.id, username: user.username })),
       );
     } catch (error) {
       setGlobalStatus(
@@ -389,7 +404,6 @@ export function SettingsRequestRulesContainer() {
     void refreshDecisions();
   }, [refreshDecisions]);
 
-
   const applyRequesters = useCallback(
     (usernames: string[]) => {
       setRuleSetDraft((prev) => {
@@ -410,7 +424,9 @@ export function SettingsRequestRulesContainer() {
         .mutation(deleteRequestRuleSetMutation, { id: record.id })
         .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("settings.requestRuleDeleted", { name: record.name }), { level: "SUCCESS" });
+      setGlobalStatus(t("settings.requestRuleDeleted", { name: record.name }), {
+        level: "SUCCESS",
+      });
       if (editingRuleSetId === record.id) {
         closeEditor();
       }
@@ -462,13 +478,19 @@ export function SettingsRequestRulesContainer() {
       if (editingRuleSetId) {
         const matcher = await client
           .mutation(updateRequestRuleMatcherMutation, {
-            input: updateRequestRuleMatcherInput(editingRuleSetId, ruleSetDraft),
+            input: updateRequestRuleMatcherInput(
+              editingRuleSetId,
+              ruleSetDraft,
+            ),
           })
           .toPromise();
         if (matcher.error) throw matcher.error;
         const metadata = await client
           .mutation(updateRequestRuleMetadataMutation, {
-            input: updateRequestRuleMetadataInput(editingRuleSetId, ruleSetDraft),
+            input: updateRequestRuleMetadataInput(
+              editingRuleSetId,
+              ruleSetDraft,
+            ),
           })
           .toPromise();
         if (metadata.error) throw metadata.error;
@@ -485,7 +507,11 @@ export function SettingsRequestRulesContainer() {
       closeEditor();
       await refreshRuleSets();
     } catch (error) {
-      const message = userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t);
+      const message = userFacingGraphQlErrorMessage(
+        error,
+        t("status.failedToUpdate"),
+        t,
+      );
       setValidationResult(graphQlRuleValidationResult(error, message));
     } finally {
       setMutatingRuleSetId(null);
@@ -552,7 +578,8 @@ export function SettingsRequestRulesContainer() {
             /// source together is refused, because it does not say which one
             /// the author meant to preview.
             ruleSetId: previewSource === "stored" ? previewRuleSetId : null,
-            regoSource: previewSource === "draft" ? ruleSetDraft.regoSource : null,
+            regoSource:
+              previewSource === "draft" ? ruleSetDraft.regoSource : null,
             sample: {
               userId: previewSample.userId,
               libraryId: previewSample.libraryId,
@@ -610,7 +637,9 @@ export function SettingsRequestRulesContainer() {
         validating={validating}
         validationResult={validationResult}
         applyRequesters={applyRequesters}
-        setRuleEnabled={(record, enabled) => void setRuleEnabled(record, enabled)}
+        setRuleEnabled={(record, enabled) =>
+          void setRuleEnabled(record, enabled)
+        }
         canManagePermissions={canManagePermissions}
         previewSource={previewSource}
         setPreviewSource={setPreviewSource}

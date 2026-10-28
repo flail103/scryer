@@ -206,7 +206,9 @@ export function useIndexerSetup({ client, t }: UseIndexerSetupArgs) {
       if (error) throw error;
       setIdxSaved(true);
     } catch (err) {
-      setIdxError(userFacingGraphQlErrorMessage(err, t("error.fallback.failedToSave"), t));
+      setIdxError(
+        userFacingGraphQlErrorMessage(err, t("error.fallback.failedToSave"), t),
+      );
     } finally {
       setIdxSaving(false);
     }

@@ -348,7 +348,9 @@ export function requestFilterArgument(value: string): string | undefined {
 }
 
 /** Permission-sensitive targeting is explicitly named by validation. */
-export function isPersonTargetingRefusal(diagnostic: { code: string }): boolean {
+export function isPersonTargetingRefusal(diagnostic: {
+  code: string;
+}): boolean {
   return diagnostic.code === "RULE_TARGETS_PERSON";
 }
 

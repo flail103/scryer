@@ -66,10 +66,7 @@ import type {
   Facet,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import {
-  APP_PERMISSIONS,
-  hasAnyAppPermission,
-} from "@/lib/utils/permissions";
+import { APP_PERMISSIONS, hasAnyAppPermission } from "@/lib/utils/permissions";
 import {
   deriveQueueRowPresentation,
   formatBytes,
@@ -91,8 +88,14 @@ import {
   usageTone,
 } from "@/lib/utils/dashboard";
 import { selectPosterVariantUrl } from "@/lib/utils/poster-images";
-import type { DashboardPanelState, DashboardPanelStates } from "@/lib/utils/dashboard-refresh";
-import type { DashboardBreakpoint, DashboardTier } from "@/lib/utils/dashboard-layout";
+import type {
+  DashboardPanelState,
+  DashboardPanelStates,
+} from "@/lib/utils/dashboard-refresh";
+import type {
+  DashboardBreakpoint,
+  DashboardTier,
+} from "@/lib/utils/dashboard-layout";
 import { buildOverviewDetailPath, buildViewPath } from "@/lib/utils/routing";
 import { episodeTitleOrTba } from "@/lib/utils/episode-title";
 
@@ -173,11 +176,30 @@ export type DashboardViewProps = {
 };
 
 /** A panel's own loading and error state around its content, filling its cell. */
-export function DashboardPanelLoad({ state, children }: { state: DashboardPanelState; children: React.ReactNode }) {
-  return <div className="flex h-full min-h-0 min-w-0 flex-col" aria-busy={state.loading}>
-    {state.error ? <p role="alert" className="shrink-0 p-3 text-sm text-destructive">{state.error}</p> : null}
-    {state.ready ? <div className="min-h-0 min-w-0 flex-1">{children}</div> : state.loading ? <Skeleton className="h-full w-full rounded-xl" /> : null}
-  </div>;
+export function DashboardPanelLoad({
+  state,
+  children,
+}: {
+  state: DashboardPanelState;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col"
+      aria-busy={state.loading}
+    >
+      {state.error ? (
+        <p role="alert" className="shrink-0 p-3 text-sm text-destructive">
+          {state.error}
+        </p>
+      ) : null}
+      {state.ready ? (
+        <div className="min-h-0 min-w-0 flex-1">{children}</div>
+      ) : state.loading ? (
+        <Skeleton className="h-full w-full rounded-xl" />
+      ) : null}
+    </div>
+  );
 }
 
 /** Stand-in while the grid's code loads: the default LG rhythm in outline. */
@@ -356,16 +378,24 @@ function PluginUpdateStrip({
             key={update.id}
             className="flex min-w-0 items-center gap-1.5 rounded-md border border-[var(--scry-warning-border)] px-2 py-0.5 text-[11px]"
           >
-            <span className="truncate text-[var(--scry-ink2)]">{update.name}</span>
+            <span className="truncate text-[var(--scry-ink2)]">
+              {update.name}
+            </span>
             <span className="whitespace-nowrap font-[var(--font-code)] text-[var(--scry-muted2)]">
               {update.fromVersion ?? "—"}
             </span>
-            <ArrowUp className="h-3 w-3 shrink-0 text-[var(--scry-muted2)]" aria-hidden="true" />
+            <ArrowUp
+              className="h-3 w-3 shrink-0 text-[var(--scry-muted2)]"
+              aria-hidden="true"
+            />
             <span className="whitespace-nowrap font-[var(--font-code)] text-[var(--scry-success-text)]">
               {update.toVersion ?? "—"}
             </span>
             {update.breaking ? (
-              <Badge tone="negative" className="px-1 py-0 text-[10px] uppercase">
+              <Badge
+                tone="negative"
+                className="px-1 py-0 text-[10px] uppercase"
+              >
                 {t("dashboard.pluginBreaking")}
               </Badge>
             ) : null}
@@ -415,7 +445,8 @@ const STATS_COLUMNS: Record<DashboardTier, string> = {
  * The full-width panel at SM (701 to 1240px) keeps the old dashboard's extra
  * step: two tiles across, then all three from a 1081px viewport.
  */
-const SM_FULL_WIDTH_STATS_COLUMNS = "grid-cols-2 min-[1081px]:grid-cols-[1.25fr_1fr_1fr]";
+const SM_FULL_WIDTH_STATS_COLUMNS =
+  "grid-cols-2 min-[1081px]:grid-cols-[1.25fr_1fr_1fr]";
 
 /**
  * The three stat tiles as one panel. How many sit side by side follows the
@@ -443,7 +474,9 @@ export function StatsPanel({
     <div
       className={cn(
         "grid h-full auto-rows-fr gap-3",
-        breakpoint === "SM" && tier === "regular" ? SM_FULL_WIDTH_STATS_COLUMNS : STATS_COLUMNS[tier],
+        breakpoint === "SM" && tier === "regular"
+          ? SM_FULL_WIDTH_STATS_COLUMNS
+          : STATS_COLUMNS[tier],
       )}
     >
       <StatTile
@@ -617,7 +650,10 @@ export function RequestsPanel({
                 key={request.id}
                 className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-[7px] last:border-b-0"
               >
-                <RowPoster posterUrl={request.posterUrl} facet={request.facet} />
+                <RowPoster
+                  posterUrl={request.posterUrl}
+                  facet={request.facet}
+                />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-[12px] font-medium text-[var(--scry-ink2)]">
                     {request.title}
@@ -627,30 +663,36 @@ export function RequestsPanel({
                       </span>
                     ) : null}
                   </span>
-                  {tier === "compact" ? null : <span className="flex min-w-0 items-center gap-1.5">
-                    {tier === "expanded" && request.requesters.length > 1 ? (
-                      <span className="truncate text-[11px] text-[var(--scry-muted2)]">
-                        {t("dashboard.requestedBy", {
-                          names: request.requesters.map((entry) => entry.username).join(", "),
-                        })}
-                      </span>
-                    ) : requester ? (
-                      <span className="flex min-w-0 items-center gap-1">
-                        <AuthenticatedAvatar
-                          avatarUrl={requester.avatarUrl}
-                          label={requester.username}
-                          imageClassName="h-3.5 w-3.5 rounded-full object-cover"
-                          fallbackClassName="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[8px] text-muted-foreground"
-                        />
+                  {tier === "compact" ? null : (
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {tier === "expanded" && request.requesters.length > 1 ? (
                         <span className="truncate text-[11px] text-[var(--scry-muted2)]">
-                          {requester.username}
+                          {t("dashboard.requestedBy", {
+                            names: request.requesters
+                              .map((entry) => entry.username)
+                              .join(", "),
+                          })}
                         </span>
-                      </span>
-                    ) : null}
-                    <FacetChip facet={request.facet} />
-                  </span>}
+                      ) : requester ? (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <AuthenticatedAvatar
+                            avatarUrl={requester.avatarUrl}
+                            label={requester.username}
+                            imageClassName="h-3.5 w-3.5 rounded-full object-cover"
+                            fallbackClassName="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[8px] text-muted-foreground"
+                          />
+                          <span className="truncate text-[11px] text-[var(--scry-muted2)]">
+                            {requester.username}
+                          </span>
+                        </span>
+                      ) : null}
+                      <FacetChip facet={request.facet} />
+                    </span>
+                  )}
                 </span>
-                {tier === "compact" ? null : <AgeLabel isoDate={request.createdAt} />}
+                {tier === "compact" ? null : (
+                  <AgeLabel isoDate={request.createdAt} />
+                )}
                 <IconButton
                   appearance="boxed"
                   tone="enabled"
@@ -693,7 +735,10 @@ function RowPoster({
     return (
       <span className="flex h-[35px] w-6 shrink-0 items-center justify-center rounded-[3px] bg-[var(--scry-chip)]">
         {Icon ? (
-          <Icon className="h-3 w-3 text-[var(--scry-muted2)]" aria-hidden="true" />
+          <Icon
+            className="h-3 w-3 text-[var(--scry-muted2)]"
+            aria-hidden="true"
+          />
         ) : null}
       </span>
     );
@@ -827,7 +872,9 @@ function ImportActivityRow({
           ) : null}
         </span>
       </span>
-      {tier === "compact" ? null : <AgeLabel isoDate={item.queuedAt ?? item.lastUpdatedAt} />}
+      {tier === "compact" ? null : (
+        <AgeLabel isoDate={item.queuedAt ?? item.lastUpdatedAt} />
+      )}
       <span className="flex shrink-0 items-center gap-1">
         {presentation.canInteractiveManualImport ||
         presentation.canDirectManualImport ? (
@@ -875,7 +922,9 @@ type RecentlyImportedHoverPreview = {
   };
 };
 
-function calendarEpisodeForImportedItem(item: DashboardImportedItem): CalendarEpisodeItem {
+function calendarEpisodeForImportedItem(
+  item: DashboardImportedItem,
+): CalendarEpisodeItem {
   const facet = normalizeFacet(item.facet)?.toLowerCase() ?? "series";
   return {
     id: item.episode?.id ?? item.id,
@@ -892,11 +941,20 @@ function calendarEpisodeForImportedItem(item: DashboardImportedItem): CalendarEp
     airDate: item.episode?.airDate ?? null,
     monitored: true,
     playbackLinks: [],
-    mediaAvailability: { state: "AVAILABLE", primaryQualityLabel: item.quality },
+    mediaAvailability: {
+      state: "AVAILABLE",
+      primaryQualityLabel: item.quality,
+    },
   };
 }
 
-export function RecentlyImportedPanel({ items, tier }: { items: DashboardImportedItem[]; tier: DashboardTier }) {
+export function RecentlyImportedPanel({
+  items,
+  tier,
+}: {
+  items: DashboardImportedItem[];
+  tier: DashboardTier;
+}) {
   const t = useTranslate();
   const isMobile = useIsMobile();
   const [hoverPreview, setHoverPreview] =
@@ -954,7 +1012,14 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
       <DashboardPanel
         icon={DASHBOARD_PANEL_ICONS["recently-imported"]}
         title={t("dashboard.recentlyImported")}
-        linkTo={buildViewPath("activity", undefined, undefined, undefined, undefined, "history")}
+        linkTo={buildViewPath(
+          "activity",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          "history",
+        )}
         linkLabel={t("dashboard.viewAll")}
         bodyClassName={PREVIEW_PANE_CLASS}
       >
@@ -968,25 +1033,43 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
                 <li
                   key={item.id}
                   className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-[7px] last:border-b-0"
-                  onMouseEnter={(event) => handleRowMouseEnter(item, event.currentTarget)}
+                  onMouseEnter={(event) =>
+                    handleRowMouseEnter(item, event.currentTarget)
+                  }
                   onMouseLeave={scheduleHoverPreviewClose}
-                  onFocus={(event) => handleRowMouseEnter(item, event.currentTarget)}
+                  onFocus={(event) =>
+                    handleRowMouseEnter(item, event.currentTarget)
+                  }
                   onBlur={scheduleHoverPreviewClose}
-                  onKeyDown={(event) => { if (event.key === "Escape") setHoverPreview(null); }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setHoverPreview(null);
+                  }}
                 >
-                  {tier === "compact" ? null : <RowPoster posterUrl={item.posterUrl} facet={facet} />}
+                  {tier === "compact" ? null : (
+                    <RowPoster posterUrl={item.posterUrl} facet={facet} />
+                  )}
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <Link className="truncate text-[12px] font-medium text-[var(--scry-ink2)] hover:underline" to={`${buildOverviewDetailPath(facet === "MOVIE" ? "movies" : facet === "ANIME" ? "anime" : "series", null, null)}?id=${encodeURIComponent(item.titleId)}${item.episode ? `&episodeId=${encodeURIComponent(item.episode.id)}` : ""}`}>
+                    <Link
+                      className="truncate text-[12px] font-medium text-[var(--scry-ink2)] hover:underline"
+                      to={`${buildOverviewDetailPath(facet === "MOVIE" ? "movies" : facet === "ANIME" ? "anime" : "series", null, null)}?id=${encodeURIComponent(item.titleId)}${item.episode ? `&episodeId=${encodeURIComponent(item.episode.id)}` : ""}`}
+                    >
                       {item.titleName ?? item.titleId}
                     </Link>
-                    {item.episode ? <span className="truncate text-[11px]">{`S${item.episode.seasonNumber ?? "?"}E${item.episode.episodeNumber ?? "?"}`} {episodeTitleOrTba(item.episode.title, t)}</span> : null}
+                    {item.episode ? (
+                      <span className="truncate text-[11px]">
+                        {`S${item.episode.seasonNumber ?? "?"}E${item.episode.episodeNumber ?? "?"}`}{" "}
+                        {episodeTitleOrTba(item.episode.title, t)}
+                      </span>
+                    ) : null}
                     {tier === "compact" ? null : (
                       <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--scry-muted2)]">
                         {facet ? <FacetChip facet={facet} /> : null}
                         {item.quality ? (
                           <span className="truncate">{item.quality}</span>
                         ) : null}
-                        <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
+                        <span className="tabular-nums">
+                          {formatBytes(item.sizeBytes)}
+                        </span>
                       </span>
                     )}
                     {tier === "expanded" && item.episode?.overview ? (
@@ -996,12 +1079,21 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
                     ) : null}
                   </span>
                   {item.kind === "UPGRADE" ? (
-                    <Badge tone="info" className="shrink-0 px-1 py-0 text-[10px]">
+                    <Badge
+                      tone="info"
+                      className="shrink-0 px-1 py-0 text-[10px]"
+                    >
                       <ArrowUp className="h-2.5 w-2.5" aria-hidden="true" />
                       {t("dashboard.upgradeBadge")}
                     </Badge>
                   ) : (
-                    <Badge className="shrink-0 px-1 py-0 text-[10px]">{t(item.kind === "NEW_IMPORT" ? "dashboard.newImportBadge" : "history.imported")}</Badge>
+                    <Badge className="shrink-0 px-1 py-0 text-[10px]">
+                      {t(
+                        item.kind === "NEW_IMPORT"
+                          ? "dashboard.newImportBadge"
+                          : "history.imported",
+                      )}
+                    </Badge>
                   )}
                   <AgeLabel isoDate={item.occurredAt} />
                 </li>
@@ -1014,7 +1106,10 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
         <CalendarEventHoverCard
           key={hoverPreview.item.id}
           posterFallbackUrl={hoverPreview.item.posterUrl}
-          preview={{ episode: calendarEpisodeForImportedItem(hoverPreview.item), anchor: hoverPreview.anchor }}
+          preview={{
+            episode: calendarEpisodeForImportedItem(hoverPreview.item),
+            anchor: hoverPreview.anchor,
+          }}
           onMouseEnter={clearHoverTimer}
           onMouseLeave={scheduleHoverPreviewClose}
         />
@@ -1025,7 +1120,11 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
 
 // ── Indexers ────────────────────────────────────────────────────────────────
 
-export function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
+export function IndexersPanel({
+  overview,
+}: {
+  overview: DashboardOverview | null;
+}) {
   const t = useTranslate();
   const { user } = useAuth();
   const canViewErrorHistory = hasAnyAppPermission(user, [
@@ -1044,7 +1143,10 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
     }
     return map;
   }, [overview?.indexerStats]);
-  const health = React.useMemo(() => summarizeIndexerHealth(indexers), [indexers]);
+  const health = React.useMemo(
+    () => summarizeIndexerHealth(indexers),
+    [indexers],
+  );
   // Attention first, then busiest: an erroring indexer outranks a heavily used
   // healthy one, and unused healthy ones settle to the bottom.
   const sortedIndexers = React.useMemo(() => {
@@ -1094,25 +1196,28 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
       {indexers.length === 0 ? (
         <DashboardPanelEmpty message={t("dashboard.emptyIndexers")} />
       ) : (
-        <Table
-          density="dense"
-          wrapperClassName={PROVIDER_TABLE_PANE_CLASS}
-        >
+        <Table density="dense" wrapperClassName={PROVIDER_TABLE_PANE_CLASS}>
           <TableHeader>
             <TableRow>
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnIndexer")}
               </TableHead>
               <TableHead className={cn(TABLE_HEAD_CLASS, INDEXER_TYPE_COLUMN)}>
-                  {t("dashboard.columnType")}
-                </TableHead>
-                            <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
+                {t("dashboard.columnType")}
+              </TableHead>
+              <TableHead
+                className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}
+              >
                 {t("dashboard.columnSearch")}
               </TableHead>
-              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
+              <TableHead
+                className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}
+              >
                 {t("dashboard.columnGrab")}
               </TableHead>
-              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
+              <TableHead
+                className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}
+              >
                 {t("dashboard.columnFail")}
               </TableHead>
               <TableHead className={cn(TABLE_HEAD_CLASS, INDEXER_STATS_COLUMN)}>
@@ -1137,13 +1242,28 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
                       {indexer.name}
                     </span>
                   </TableCell>
-                  <TableCell className={cn("px-3 py-[7px] text-[11px] text-[var(--scry-muted)]", INDEXER_TYPE_COLUMN)}>
-                      {indexer.providerType}
-                    </TableCell>
-                                    <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]", INDEXER_STATS_COLUMN)}>
+                  <TableCell
+                    className={cn(
+                      "px-3 py-[7px] text-[11px] text-[var(--scry-muted)]",
+                      INDEXER_TYPE_COLUMN,
+                    )}
+                  >
+                    {indexer.providerType}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]",
+                      INDEXER_STATS_COLUMN,
+                    )}
+                  >
                     {stat?.queriesLast24H ?? 0}
                   </TableCell>
-                  <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-success-text)]", INDEXER_STATS_COLUMN)}>
+                  <TableCell
+                    className={cn(
+                      "px-3 py-[7px] text-right tabular-nums text-[var(--scry-success-text)]",
+                      INDEXER_STATS_COLUMN,
+                    )}
+                  >
                     {stat?.grabsLast24H ?? 0}
                   </TableCell>
                   <TableCell
@@ -1157,7 +1277,9 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
                   >
                     {failed}
                   </TableCell>
-                  <TableCell className={cn("px-3 py-[7px]", INDEXER_STATS_COLUMN)}>
+                  <TableCell
+                    className={cn("px-3 py-[7px]", INDEXER_STATS_COLUMN)}
+                  >
                     <QuotaBar
                       current={stat?.apiCurrent ?? null}
                       max={stat?.apiMax ?? null}
@@ -1172,10 +1294,11 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
                       rateLimitedUntil={indexer.rateLimitedUntil}
                       onOpenErrorHistory={
                         canViewErrorHistory
-                          ? () => setErrorHistoryIndexer({
-                              id: indexer.id,
-                              name: indexer.name,
-                            })
+                          ? () =>
+                              setErrorHistoryIndexer({
+                                id: indexer.id,
+                                name: indexer.name,
+                              })
                           : undefined
                       }
                     />
@@ -1198,7 +1321,13 @@ export function IndexersPanel({ overview }: { overview: DashboardOverview | null
 }
 
 /** API quota as a thin bar on the shared usage ramp; unmetered shows ∞. */
-function QuotaBar({ current, max }: { current: number | null; max: number | null }) {
+function QuotaBar({
+  current,
+  max,
+}: {
+  current: number | null;
+  max: number | null;
+}) {
   const t = useTranslate();
   const percent = usagePercent(current, max);
 
@@ -1386,22 +1515,23 @@ export function DownloadClientsPanel({
       {clients.length === 0 ? (
         <DashboardPanelEmpty message={t("dashboard.emptyClients")} />
       ) : (
-        <Table
-          density="dense"
-          wrapperClassName={PROVIDER_TABLE_PANE_CLASS}
-        >
+        <Table density="dense" wrapperClassName={PROVIDER_TABLE_PANE_CLASS}>
           <TableHeader>
             <TableRow>
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnClient")}
               </TableHead>
               <TableHead className={cn(TABLE_HEAD_CLASS, CLIENT_TYPE_COLUMN)}>
-                  {t("dashboard.columnType")}
-                </TableHead>
-                            <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}>
+                {t("dashboard.columnType")}
+              </TableHead>
+              <TableHead
+                className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}
+              >
                 {t("dashboard.columnActive")}
               </TableHead>
-              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}>
+              <TableHead
+                className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}
+              >
                 {t("dashboard.columnQueue")}
               </TableHead>
               <TableHead className={TABLE_HEAD_CLASS}>
@@ -1411,7 +1541,10 @@ export function DownloadClientsPanel({
           </TableHeader>
           <TableBody>
             {sortedClients.map((client) => {
-              const counts = activity.get(client.id) ?? { active: 0, queued: 0 };
+              const counts = activity.get(client.id) ?? {
+                active: 0,
+                queued: 0,
+              };
               return (
                 <TableRow key={client.id}>
                   <TableCell className="px-3 py-[7px]">
@@ -1428,10 +1561,15 @@ export function DownloadClientsPanel({
                       </span>
                     </span>
                   </TableCell>
-                  <TableCell className={cn("px-3 py-[7px] text-[11px] text-[var(--scry-muted)]", CLIENT_TYPE_COLUMN)}>
-                      {client.clientType}
-                    </TableCell>
-                                    <TableCell
+                  <TableCell
+                    className={cn(
+                      "px-3 py-[7px] text-[11px] text-[var(--scry-muted)]",
+                      CLIENT_TYPE_COLUMN,
+                    )}
+                  >
+                    {client.clientType}
+                  </TableCell>
+                  <TableCell
                     className={cn(
                       CLIENT_STATS_COLUMN,
                       "px-3 py-[7px] text-right tabular-nums",
@@ -1442,7 +1580,12 @@ export function DownloadClientsPanel({
                   >
                     {counts.active}
                   </TableCell>
-                  <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]", CLIENT_STATS_COLUMN)}>
+                  <TableCell
+                    className={cn(
+                      "px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]",
+                      CLIENT_STATS_COLUMN,
+                    )}
+                  >
                     {counts.queued}
                   </TableCell>
                   <TableCell className="px-3 py-[7px]">
@@ -1466,9 +1609,18 @@ export function DownloadClientsPanel({
 
 // ── Storage ─────────────────────────────────────────────────────────────────
 
-export function StoragePanel({ roots, tier }: { roots: DashboardStorageRoot[]; tier: DashboardTier }) {
+export function StoragePanel({
+  roots,
+  tier,
+}: {
+  roots: DashboardStorageRoot[];
+  tier: DashboardTier;
+}) {
   const t = useTranslate();
-  const groups = React.useMemo(() => groupStorageRootsByLibrary(roots), [roots]);
+  const groups = React.useMemo(
+    () => groupStorageRootsByLibrary(roots),
+    [roots],
+  );
 
   return (
     <DashboardPanel
@@ -1487,45 +1639,46 @@ export function StoragePanel({ roots, tier }: { roots: DashboardStorageRoot[]; t
     >
       {roots.length === 0 ? (
         <DashboardPanelEmpty message={t("dashboard.emptyStorage")} />
+      ) : // Flex-wrap rather than an auto-fill grid: a grid materialises a track
+      // per tile width regardless of item count, so a single-root library
+      // leaves most of its row blank. Flex growth fills the last row exactly.
+      tier === "expanded" ? (
+        // With room to spare, roots sit under their library's heading.
+        <div className="flex flex-col gap-3 p-3">
+          {groups.map((group) => (
+            <section
+              key={group.libraryId}
+              className="flex min-w-0 flex-col gap-1.5"
+            >
+              <h3 className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--scry-muted2)]">
+                {group.libraryName}
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {group.roots.map((root) => (
+                  <StorageRootTile
+                    key={`${group.libraryId}:${root.path}`}
+                    libraryName={group.libraryName}
+                    root={root}
+                    compact={false}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       ) : (
-        // Flex-wrap rather than an auto-fill grid: a grid materialises a track
-        // per tile width regardless of item count, so a single-root library
-        // leaves most of its row blank. Flex growth fills the last row exactly.
-        tier === "expanded" ? (
-          // With room to spare, roots sit under their library's heading.
-          <div className="flex flex-col gap-3 p-3">
-            {groups.map((group) => (
-              <section key={group.libraryId} className="flex min-w-0 flex-col gap-1.5">
-                <h3 className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--scry-muted2)]">
-                  {group.libraryName}
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {group.roots.map((root) => (
-                    <StorageRootTile
-                      key={`${group.libraryId}:${root.path}`}
-                      libraryName={group.libraryName}
-                      root={root}
-                      compact={false}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2 p-3">
-            {groups.flatMap((group) =>
-              group.roots.map((root) => (
-                <StorageRootTile
-                  key={`${group.libraryId}:${root.path}`}
-                  libraryName={group.libraryName}
-                  root={root}
-                  compact={tier === "compact"}
-                />
-              )),
-            )}
-          </div>
-        )
+        <div className="flex flex-wrap gap-2 p-3">
+          {groups.flatMap((group) =>
+            group.roots.map((root) => (
+              <StorageRootTile
+                key={`${group.libraryId}:${root.path}`}
+                libraryName={group.libraryName}
+                root={root}
+                compact={tier === "compact"}
+              />
+            )),
+          )}
+        </div>
       )}
     </DashboardPanel>
   );
@@ -1573,47 +1726,53 @@ function StorageRootTile({
           ) : null}
           <span
             className="shrink-0 font-[var(--font-display)] text-[15px] font-bold tabular-nums"
-            style={{ color: percent === null ? "var(--scry-muted2)" : toneStyle.text }}
+            style={{
+              color: percent === null ? "var(--scry-muted2)" : toneStyle.text,
+            }}
           >
             {percent === null ? "—" : `${Math.round(percent)}%`}
           </span>
         </div>
-        {compact ? null : <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[10px] text-[var(--scry-muted2)]">
-          <span className="flex shrink-0 items-center gap-1">
-            {Icon ? (
-              <Icon
-                className="h-2.5 w-2.5"
-                style={{ color: facetPillStyle(root.facet).color }}
-                aria-hidden="true"
-              />
-            ) : null}
-            <span className="max-w-[90px] truncate">{libraryName}</span>
-          </span>
-          {percent === null ? (
-            <span>{t("dashboard.storageUnavailable")}</span>
-          ) : (
-            <>
-              <span className="min-w-0 truncate tabular-nums">
-                {t("dashboard.storageUsage", {
-                  used: usedTb ?? "—",
-                  total: totalTb ?? "—",
-                })}
-              </span>
-              <span
-                className="shrink-0 tabular-nums"
-                style={
-                  tag === "crit" ? { color: "var(--scry-danger-text)" } : undefined
-                }
-              >
-                {t("dashboard.storageFree", {
-                  size: freeStorage
-                    ? `${freeStorage.value} ${freeStorage.unit}`
-                    : "—",
-                })}
-              </span>
-            </>
-          )}
-        </div>}
+        {compact ? null : (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[10px] text-[var(--scry-muted2)]">
+            <span className="flex shrink-0 items-center gap-1">
+              {Icon ? (
+                <Icon
+                  className="h-2.5 w-2.5"
+                  style={{ color: facetPillStyle(root.facet).color }}
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span className="max-w-[90px] truncate">{libraryName}</span>
+            </span>
+            {percent === null ? (
+              <span>{t("dashboard.storageUnavailable")}</span>
+            ) : (
+              <>
+                <span className="min-w-0 truncate tabular-nums">
+                  {t("dashboard.storageUsage", {
+                    used: usedTb ?? "—",
+                    total: totalTb ?? "—",
+                  })}
+                </span>
+                <span
+                  className="shrink-0 tabular-nums"
+                  style={
+                    tag === "crit"
+                      ? { color: "var(--scry-danger-text)" }
+                      : undefined
+                  }
+                >
+                  {t("dashboard.storageFree", {
+                    size: freeStorage
+                      ? `${freeStorage.value} ${freeStorage.unit}`
+                      : "—",
+                  })}
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1661,7 +1820,13 @@ export function ActiveQueuePanel({
   );
 }
 
-function QueueRow({ item, tier }: { item: DownloadQueueItem; tier: DashboardTier }) {
+function QueueRow({
+  item,
+  tier,
+}: {
+  item: DownloadQueueItem;
+  tier: DashboardTier;
+}) {
   const t = useTranslate();
   // Reuses the activity view's state derivation so the dashboard can never
   // disagree with the queue page about what a row is doing.
@@ -1677,25 +1842,27 @@ function QueueRow({ item, tier }: { item: DownloadQueueItem; tier: DashboardTier
           {presentation.statusLabel}
         </span>
       </div>
-      {tier === "compact" ? null : <>
-      <ActivityProgressBar
-        percent={presentation.percent}
-        remainingLabel={presentation.remainingLabel}
-        colorClass={getProgressBarColor(presentation.displayStateKey)}
-        compact
-        hideLabel
-      />
-      <div className="flex min-w-0 items-center gap-2 text-[10px] text-[var(--scry-muted2)]">
-        {tier === "expanded" ? (
-          <span className="min-w-0 truncate">{item.clientName}</span>
-        ) : null}
-        <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
-        <span className="tabular-nums">{presentation.percent}%</span>
-        <span className="ml-auto shrink-0 tabular-nums">
-          {presentation.remainingLabel ?? "—"}
-        </span>
-      </div>
-      </>}
+      {tier === "compact" ? null : (
+        <>
+          <ActivityProgressBar
+            percent={presentation.percent}
+            remainingLabel={presentation.remainingLabel}
+            colorClass={getProgressBarColor(presentation.displayStateKey)}
+            compact
+            hideLabel
+          />
+          <div className="flex min-w-0 items-center gap-2 text-[10px] text-[var(--scry-muted2)]">
+            {tier === "expanded" ? (
+              <span className="min-w-0 truncate">{item.clientName}</span>
+            ) : null}
+            <span className="tabular-nums">{formatBytes(item.sizeBytes)}</span>
+            <span className="tabular-nums">{presentation.percent}%</span>
+            <span className="ml-auto shrink-0 tabular-nums">
+              {presentation.remainingLabel ?? "—"}
+            </span>
+          </div>
+        </>
+      )}
     </li>
   );
 }

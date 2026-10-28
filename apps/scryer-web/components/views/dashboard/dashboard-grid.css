@@ -135,7 +135,9 @@
   touch-action: none;
 }
 
-.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-e {
+.scry-dashboard-grid
+  .react-grid-item
+  > .react-resizable-handle.react-resizable-handle-e {
   top: 0.75rem;
   right: -4px;
   bottom: 0.75rem;
@@ -145,7 +147,9 @@
   transform: none;
 }
 
-.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+.scry-dashboard-grid
+  .react-grid-item
+  > .react-resizable-handle.react-resizable-handle-s {
   left: 0.75rem;
   right: 0.75rem;
   bottom: -4px;
@@ -156,7 +160,9 @@
 }
 
 /* The corner wins where it meets the edge strips. */
-.scry-dashboard-grid .react-grid-item > .react-resizable-handle.react-resizable-handle-se {
+.scry-dashboard-grid
+  .react-grid-item
+  > .react-resizable-handle.react-resizable-handle-se {
   z-index: 3;
   width: 24px;
   height: 24px;
@@ -195,8 +201,12 @@
 
 .scry-dashboard-grid .react-grid-item > .react-resizable-handle-e:hover::after,
 .scry-dashboard-grid .react-grid-item > .react-resizable-handle-s:hover::after,
-.scry-dashboard-grid .react-grid-item.resizing > .react-resizable-handle-e::after,
-.scry-dashboard-grid .react-grid-item.resizing > .react-resizable-handle-s::after {
+.scry-dashboard-grid
+  .react-grid-item.resizing
+  > .react-resizable-handle-e::after,
+.scry-dashboard-grid
+  .react-grid-item.resizing
+  > .react-resizable-handle-s::after {
   opacity: 0.7;
 }
 

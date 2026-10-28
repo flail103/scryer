@@ -50,14 +50,18 @@ export function useMaintenanceRuleState({
   const setGlobalStatus = useGlobalStatus();
   const t = useTranslate();
   const client = useClient();
-  const [pendingArming, setPendingArming] = useState<PendingArming | null>(null);
+  const [pendingArming, setPendingArming] = useState<PendingArming | null>(
+    null,
+  );
 
   const applyRuleState = useCallback(
     async (
       record: MaintenanceRuleSetRecord,
       state: MaintenanceRuleState,
       candidateCount?: number,
-    ): Promise<{ ok: true } | { ok: false; message: string; error: unknown }> => {
+    ): Promise<
+      { ok: true } | { ok: false; message: string; error: unknown }
+    > => {
       const { error } = await client
         .mutation(
           setMaintenanceRuleStateMutation,
@@ -65,7 +69,15 @@ export function useMaintenanceRuleState({
         )
         .toPromise();
       if (error) {
-        return { ok: false, message: userFacingGraphQlErrorMessage(error, t("status.failedToUpdate"), t), error };
+        return {
+          ok: false,
+          message: userFacingGraphQlErrorMessage(
+            error,
+            t("status.failedToUpdate"),
+            t,
+          ),
+          error,
+        };
       }
       await onChanged();
       return { ok: true };
@@ -141,7 +153,13 @@ export function useMaintenanceRuleState({
         );
       })();
     },
-    [applyRuleState, openDestructiveArming, setBusyRuleSetId, setGlobalStatus, t],
+    [
+      applyRuleState,
+      openDestructiveArming,
+      setBusyRuleSetId,
+      setGlobalStatus,
+      t,
+    ],
   );
 
   /// The server rejects a stale acknowledgement and reports the count it holds.
@@ -164,7 +182,10 @@ export function useMaintenanceRuleState({
     const serverCount = parseAcknowledgedCandidateCountMismatch(result.error);
     if (serverCount === null) {
       setPendingArming(null);
-      setGlobalStatus(userFacingGraphQlErrorMessage(result, t("status.apiError"), t), { level: "ERROR" });
+      setGlobalStatus(
+        userFacingGraphQlErrorMessage(result, t("status.apiError"), t),
+        { level: "ERROR" },
+      );
       await onChanged();
       return;
     }
@@ -218,7 +239,10 @@ export function useMaintenanceRuleState({
                   })}
                 </p>
               ) : null}
-              <p id="settings-maintenance-arming-count" className="font-semibold">
+              <p
+                id="settings-maintenance-arming-count"
+                className="font-semibold"
+              >
                 {pendingArming.candidateCount === 0
                   ? t("settings.maintenanceArmDestructiveNoCandidates")
                   : t("settings.maintenanceArmDestructiveCount", {

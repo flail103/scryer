@@ -20,19 +20,34 @@ export function dashboardDropRegions(
 ): GridRect[] {
   const w = Math.min(Math.max(1, size.w), columns);
   const h = Math.max(1, size.h);
-  const bottom = others.reduce((max, rect) => Math.max(max, rect.y + rect.h), 0);
+  const bottom = others.reduce(
+    (max, rect) => Math.max(max, rect.y + rect.h),
+    0,
+  );
   const rows = Math.max(bottom + h, minRows);
 
-  const occupied = Array.from({ length: rows }, () => new Array<boolean>(columns).fill(false));
+  const occupied = Array.from({ length: rows }, () =>
+    new Array<boolean>(columns).fill(false),
+  );
   for (const rect of others) {
-    for (let y = Math.max(0, rect.y); y < Math.min(rows, rect.y + rect.h); y += 1) {
-      for (let x = Math.max(0, rect.x); x < Math.min(columns, rect.x + rect.w); x += 1) {
+    for (
+      let y = Math.max(0, rect.y);
+      y < Math.min(rows, rect.y + rect.h);
+      y += 1
+    ) {
+      for (
+        let x = Math.max(0, rect.x);
+        x < Math.min(columns, rect.x + rect.w);
+        x += 1
+      ) {
         occupied[y][x] = true;
       }
     }
   }
 
-  const reachable = Array.from({ length: rows }, () => new Array<boolean>(columns).fill(false));
+  const reachable = Array.from({ length: rows }, () =>
+    new Array<boolean>(columns).fill(false),
+  );
   for (let y = 0; y + h <= rows; y += 1) {
     for (let x = 0; x + w <= columns; x += 1) {
       if (!fits(occupied, x, y, w, h)) {
@@ -64,18 +79,34 @@ export function nearestOpenSpot(
 ): { x: number; y: number } {
   const w = Math.min(Math.max(1, rect.w), columns);
   const h = Math.max(1, rect.h);
-  const bottom = others.reduce((max, other) => Math.max(max, other.y + other.h), 0);
+  const bottom = others.reduce(
+    (max, other) => Math.max(max, other.y + other.h),
+    0,
+  );
   const rows = Math.max(bottom, rect.y) + h;
-  const occupied = Array.from({ length: rows }, () => new Array<boolean>(columns).fill(false));
+  const occupied = Array.from({ length: rows }, () =>
+    new Array<boolean>(columns).fill(false),
+  );
   for (const other of others) {
-    for (let y = Math.max(0, other.y); y < Math.min(rows, other.y + other.h); y += 1) {
-      for (let x = Math.max(0, other.x); x < Math.min(columns, other.x + other.w); x += 1) {
+    for (
+      let y = Math.max(0, other.y);
+      y < Math.min(rows, other.y + other.h);
+      y += 1
+    ) {
+      for (
+        let x = Math.max(0, other.x);
+        x < Math.min(columns, other.x + other.w);
+        x += 1
+      ) {
         occupied[y][x] = true;
       }
     }
   }
 
-  let best = { x: Math.min(Math.max(0, rect.x), columns - w), y: Math.max(0, bottom) };
+  let best = {
+    x: Math.min(Math.max(0, rect.x), columns - w),
+    y: Math.max(0, bottom),
+  };
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let y = 0; y + h <= rows; y += 1) {
     for (let x = 0; x + w <= columns; x += 1) {
@@ -91,7 +122,13 @@ export function nearestOpenSpot(
   return best;
 }
 
-function fits(occupied: boolean[][], x: number, y: number, w: number, h: number): boolean {
+function fits(
+  occupied: boolean[][],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): boolean {
   for (let dy = 0; dy < h; dy += 1) {
     for (let dx = 0; dx < w; dx += 1) {
       if (occupied[y + dy][x + dx]) {

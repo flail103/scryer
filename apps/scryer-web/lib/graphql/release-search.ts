@@ -53,10 +53,7 @@ export type IndexerCapsSource =
   | "PROVIDER_DECLARATIONS";
 
 export type InteractiveSearchSkipReason =
-  | "INDEXER_DISABLED"
-  | "TEMPORARILY_DISABLED"
-  | "BACKED_OFF"
-  | "NO_TEXT_SEARCH";
+  "INDEXER_DISABLED" | "TEMPORARILY_DISABLED" | "BACKED_OFF" | "NO_TEXT_SEARCH";
 
 export type InteractiveSearchProgress = {
   /**
@@ -169,15 +166,21 @@ export async function runIterativeReleaseSearch(
   try {
     const { data, error } = await client
       .mutation(
-        options.after ? continueInteractiveReleaseSearchMutation : startInteractiveReleaseSearchMutation,
-        options.after ? { after: options.after, first: input.aggregatePageSize } : { input },
+        options.after
+          ? continueInteractiveReleaseSearchMutation
+          : startInteractiveReleaseSearchMutation,
+        options.after
+          ? { after: options.after, first: input.aggregatePageSize }
+          : { input },
         fetchOptions,
       )
       .toPromise();
     if (error) throw error;
-    job = (options.after ? data?.continueInteractiveReleaseSearch : data?.startInteractiveReleaseSearch) as
-      | InteractiveReleaseSearchJobPayload
-      | undefined;
+    job = (
+      options.after
+        ? data?.continueInteractiveReleaseSearch
+        : data?.startInteractiveReleaseSearch
+    ) as InteractiveReleaseSearchJobPayload | undefined;
   } catch (startError) {
     if (signal?.aborted || isAbortError(startError)) {
       return releases;
@@ -218,9 +221,8 @@ export async function runIterativeReleaseSearch(
           return releases;
         }
         if (pollError) throw pollError;
-        const snapshot = (pollData?.interactiveReleaseSearch ?? null) as
-          | InteractiveReleaseSearchJobPayload
-          | null;
+        const snapshot = (pollData?.interactiveReleaseSearch ??
+          null) as InteractiveReleaseSearchJobPayload | null;
         if (!snapshot) {
           // Unknown/evicted job — treat as finished with what we have.
           return releases;

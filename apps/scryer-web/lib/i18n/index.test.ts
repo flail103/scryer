@@ -24,7 +24,10 @@ test("normalizes supported locale aliases and falls back to English", () => {
 });
 
 test("offers Dutch for metadata hydration", () => {
-  assert.equal(METADATA_LANGUAGES.some(({ code }) => code === "nld"), true);
+  assert.equal(
+    METADATA_LANGUAGES.some(({ code }) => code === "nld"),
+    true,
+  );
 });
 
 test("keeps regional UI languages separate from generic Chinese metadata", () => {
@@ -34,9 +37,10 @@ test("keeps regional UI languages separate from generic Chinese metadata", () =>
   assert.equal(metadataLanguageForUi("EN_us"), "eng");
   assert.equal(metadataLanguageForUi("pt-BR"), "por");
   assert.equal(metadataLanguageForUi("unknown"), "eng");
-  assert.deepEqual(METADATA_LANGUAGES.filter(({ code }) => code.startsWith("zh")), [
-    { code: "zho", label: "中文" },
-  ]);
+  assert.deepEqual(
+    METADATA_LANGUAGES.filter(({ code }) => code.startsWith("zh")),
+    [{ code: "zho", label: "中文" }],
+  );
 });
 
 test("keeps English synchronously available", () => {
@@ -61,7 +65,19 @@ test("loads and caches a deferred locale atomically", async () => {
 });
 
 test("every deferred locale has a valid loader", async () => {
-  const locales = ["fra", "deu", "ita", "por", "kor", "zho", "zh-HK", "zh-TW", "jpn", "rus", "nld"];
+  const locales = [
+    "fra",
+    "deu",
+    "ita",
+    "por",
+    "kor",
+    "zho",
+    "zh-HK",
+    "zh-TW",
+    "jpn",
+    "rus",
+    "nld",
+  ];
   for (const locale of locales) {
     const dictionary = await loadLocaleDictionary(locale);
     assert.equal(typeof dictionary["label.language"], "string");

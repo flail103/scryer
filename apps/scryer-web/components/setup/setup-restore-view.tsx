@@ -22,7 +22,10 @@ import { getAuthToken } from "@/lib/hooks/use-auth";
 import { getRuntimeBasePath, getRuntimeGraphqlUrl } from "@/lib/runtime-config";
 import { cn } from "@/lib/utils";
 import { LoadingMark } from "@/components/common/loading-mark";
-import { restoreErrorMessage, restoreJobError } from "@/lib/utils/restore-error-message";
+import {
+  restoreErrorMessage,
+  restoreJobError,
+} from "@/lib/utils/restore-error-message";
 
 const INSPECT_RESTORE_BUNDLE_OPERATION = `
   mutation InspectRestoreBundle($bundleUpload: Upload!, $password: String) {
@@ -142,7 +145,9 @@ function graphqlRequestError(
   return error;
 }
 
-async function parseJsonResponse<T>(response: Response): Promise<T | undefined> {
+async function parseJsonResponse<T>(
+  response: Response,
+): Promise<T | undefined> {
   const text = await response.text().catch(() => "");
   if (!text.trim()) {
     return undefined;
@@ -153,20 +158,26 @@ async function parseJsonResponse<T>(response: Response): Promise<T | undefined> 
 
 const INSPECTION_ATTEMPT_KEY = "scryer_restore_inspection_attempt";
 
-async function waitForInspection(id: string, fallback: string, signal: AbortSignal) {
+async function waitForInspection(
+  id: string,
+  fallback: string,
+  signal: AbortSignal,
+) {
   for (;;) {
     signal.throwIfAborted();
     const response = await scryerFetch(graphqlUrl(), {
       method: "POST",
       signal,
       headers: createAuthHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify({ query: `query RestoreInspectionStatus {
+      body: JSON.stringify({
+        query: `query RestoreInspectionStatus {
         inspectRestoreBundle: restoreStatus {
           id phase uploadId reason message
           summary { formatVersion createdAt sourceScryerVersion sourceEngine sourceMigrationKey
             encrypted totalRows rowCounts { table rowCount } }
         }
-      }` }),
+      }`,
+      }),
     });
     const payload = await parseJsonResponse<RestoreInspectResponse>(response);
     if (!response.ok || payload?.errors?.length) {
@@ -191,7 +202,10 @@ async function waitForInspection(id: string, fallback: string, signal: AbortSign
       );
     }
     await new Promise<void>((resolve, reject) => {
-      const cancel = () => { window.clearTimeout(timer); reject(signal.reason); };
+      const cancel = () => {
+        window.clearTimeout(timer);
+        reject(signal.reason);
+      };
       const timer = window.setTimeout(() => {
         signal.removeEventListener("abort", cancel);
         resolve();
@@ -210,10 +224,7 @@ function formatDateTime(value: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
-export function SetupRestoreView({
-  t,
-  onBack,
-}: SetupRestoreViewProps) {
+export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
   const [selectedBundle, setSelectedBundle] = React.useState<File | null>(null);
   const [password, setPassword] = React.useState("");
   const [fileInputKey, setFileInputKey] = React.useState(0);
@@ -221,7 +232,9 @@ export function SetupRestoreView({
   const [applying, setApplying] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [uploadId, setUploadId] = React.useState<string | null>(null);
-  const [summary, setSummary] = React.useState<RestoreSummaryPayload | null>(null);
+  const [summary, setSummary] = React.useState<RestoreSummaryPayload | null>(
+    null,
+  );
   const [isDragActive, setIsDragActive] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const inspectionAbort = React.useRef<AbortController | null>(null);
@@ -239,18 +252,23 @@ export function SetupRestoreView({
           setSummary(job.summary);
         })
         .catch((error) => {
-          if (!controller.signal.aborted) setError(restoreErrorMessage(error, t, t("status.failedToLoad")));
+          if (!controller.signal.aborted)
+            setError(restoreErrorMessage(error, t, t("status.failedToLoad")));
         })
-        .finally(() => { if (!controller.signal.aborted) setInspecting(false); });
+        .finally(() => {
+          if (!controller.signal.aborted) setInspecting(false);
+        });
     }
     return () => inspectionAbort.current?.abort();
   }, [t]);
 
-  const bundleLooksEncrypted
-    = selectedBundle?.name.toLowerCase().endsWith(".enc") ?? false;
+  const bundleLooksEncrypted =
+    selectedBundle?.name.toLowerCase().endsWith(".enc") ?? false;
   const requiresPassword = summary?.encrypted ?? bundleLooksEncrypted;
   const rowCounts = summary
-    ? [...summary.rowCounts].sort((left, right) => left.table.localeCompare(right.table))
+    ? [...summary.rowCounts].sort((left, right) =>
+        left.table.localeCompare(right.table),
+      )
     : [];
 
   const handleBundleSelected = React.useCallback((file: File | null) => {
@@ -300,7 +318,10 @@ export function SetupRestoreView({
           },
         }),
       );
-      formData.append("map", JSON.stringify({ "0": ["variables.bundleUpload"] }));
+      formData.append(
+        "map",
+        JSON.stringify({ "0": ["variables.bundleUpload"] }),
+      );
       formData.append("0", selectedBundle, selectedBundle.name);
 
       const response = await scryerFetch(graphqlUrl(), {
@@ -315,7 +336,11 @@ export function SetupRestoreView({
       }
 
       sessionStorage.setItem(INSPECTION_ATTEMPT_KEY, result.id);
-      const inspected = await waitForInspection(result.id, t("status.failedToLoad"), controller.signal);
+      const inspected = await waitForInspection(
+        result.id,
+        t("status.failedToLoad"),
+        controller.signal,
+      );
       if (controller.signal.aborted) return;
       setUploadId(inspected.uploadId);
       setSummary(inspected.summary);
@@ -395,7 +420,11 @@ export function SetupRestoreView({
                 }}
                 onDragLeave={(event) => {
                   event.preventDefault();
-                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  if (
+                    event.currentTarget.contains(
+                      event.relatedTarget as Node | null,
+                    )
+                  ) {
                     return;
                   }
                   setIsDragActive(false);
@@ -420,7 +449,9 @@ export function SetupRestoreView({
                     <p
                       className={cn(
                         "break-all text-base font-semibold text-[var(--scry-ink2)]",
-                        selectedBundle ? "font-[var(--font-code)] text-sm" : null,
+                        selectedBundle
+                          ? "font-[var(--font-code)] text-sm"
+                          : null,
                       )}
                     >
                       {selectedBundle
@@ -486,7 +517,9 @@ export function SetupRestoreView({
             ) : null}
 
             {error ? (
-              <p id="setup-restore-error" className="text-sm text-destructive">{error}</p>
+              <p id="setup-restore-error" className="text-sm text-destructive">
+                {error}
+              </p>
             ) : null}
           </CardContent>
         </Card>
@@ -593,7 +626,12 @@ export function SetupRestoreView({
               </p>
 
               {error ? (
-                <p id="setup-restore-error" className="text-sm text-destructive">{error}</p>
+                <p
+                  id="setup-restore-error"
+                  className="text-sm text-destructive"
+                >
+                  {error}
+                </p>
               ) : null}
             </CardContent>
           </Card>
@@ -644,9 +682,9 @@ export function SetupRestoreView({
               type="button"
               onClick={() => void handleInspect()}
               disabled={
-                inspecting
-                || !selectedBundle
-                || (requiresPassword && password.length === 0)
+                inspecting ||
+                !selectedBundle ||
+                (requiresPassword && password.length === 0)
               }
             >
               {inspecting ? (

@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { PageShellFallback } from "@/components/root/page-shell-fallback";
 import { cn } from "@/lib/utils";
@@ -20,7 +26,9 @@ function msSinceAppeared() {
 }
 
 export function prefersReducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  return (
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  );
 }
 
 /** Whether this visit to setup gets the welcome: not when reopened from Settings. */
@@ -167,7 +175,9 @@ export function SetupIntroMark({
         const track = () => {
           const current = targetRef.current;
           if (current) {
-            for (const [name, value] of Object.entries(aimAt(flying, current))) {
+            for (const [name, value] of Object.entries(
+              aimAt(flying, current),
+            )) {
               flying.style.setProperty(name, value);
             }
           }
@@ -181,5 +191,7 @@ export function SetupIntroMark({
     };
   }, [ready, targetRef, onStart, onDone]);
 
-  return <SetupIntroLogo flight={flight} flyingRef={flyingRef} onLanded={onDone} />;
+  return (
+    <SetupIntroLogo flight={flight} flyingRef={flyingRef} onLanded={onDone} />
+  );
 }

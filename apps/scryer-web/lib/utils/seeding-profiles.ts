@@ -80,9 +80,7 @@ export function seedingProfileToDraft(
   };
 }
 
-type ParsedGoal =
-  | { ok: true; value: number | null }
-  | { ok: false };
+type ParsedGoal = { ok: true; value: number | null } | { ok: false };
 
 /**
  * Unlike the goal fields, zero is meaningful here: it disables the check for
@@ -245,7 +243,8 @@ export function validateSeedingProfileFields(
     }
   }
   if (!parseMinimumSeeders(draft.minimumSeeders).ok) {
-    errors.minimumSeeders = "Enter a whole number of 0 or more, or leave empty.";
+    errors.minimumSeeders =
+      "Enter a whole number of 0 or more, or leave empty.";
   }
   return errors;
 }
@@ -289,9 +288,7 @@ export function seedingProfileDraftToInput(
   const ratio = parseOptionalRatio(draft.ratio);
   const seedTime = parseSeedDuration(draft.seedTimeMinutes);
   const seasonPackRatio = parseOptionalRatio(draft.seasonPackRatio);
-  const seasonPackSeedTime = parseSeedDuration(
-    draft.seasonPackSeedTimeMinutes,
-  );
+  const seasonPackSeedTime = parseSeedDuration(draft.seasonPackSeedTimeMinutes);
   const minimumSeeders = parseMinimumSeeders(draft.minimumSeeders);
   const isOverride = draft.seasonPackMode === "OVERRIDE";
 
@@ -300,7 +297,8 @@ export function seedingProfileDraftToInput(
     ratio: ratio.ok ? ratio.value : null,
     seedTimeMinutes: seedTime.ok ? seedTime.value : null,
     seasonPackMode: draft.seasonPackMode,
-    seasonPackRatio: isOverride && seasonPackRatio.ok ? seasonPackRatio.value : null,
+    seasonPackRatio:
+      isOverride && seasonPackRatio.ok ? seasonPackRatio.value : null,
     seasonPackSeedTimeMinutes:
       isOverride && seasonPackSeedTime.ok ? seasonPackSeedTime.value : null,
     honorTrackerMinimums: draft.honorTrackerMinimums,
@@ -325,7 +323,10 @@ export function toUpdateSeedingProfileInput(draft: SeedingProfileDraft) {
 }
 
 /** Reads the raw server message off a urql error without rewording it. */
-export function extractSeedingProfileErrorMessage(error: unknown, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string | null {
+export function extractSeedingProfileErrorMessage(
+  error: unknown,
+  translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2],
+): string | null {
   return userFacingGraphQlErrorMessage(error, "", translate) || null;
 }
 
@@ -373,8 +374,7 @@ export function formatSeasonPackSummary(
  * value *below* the floor, which loosens admission instead of tightening it.
  */
 export type SeedingProfileMinimumSeedersChip =
-  | { kind: "disabled" }
-  | { kind: "threshold"; value: number };
+  { kind: "disabled" } | { kind: "threshold"; value: number };
 
 export function seedingProfileMinimumSeedersChip(
   minimumSeeders: number | null,

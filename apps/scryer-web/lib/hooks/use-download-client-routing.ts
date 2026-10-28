@@ -101,7 +101,10 @@ export function useDownloadClientRouting({
       clients: DownloadClientRecord[],
       routingEntries: DownloadClientRoutingEntry[],
     ) => {
-      const nextState = buildDownloadClientRoutingState(clients, routingEntries);
+      const nextState = buildDownloadClientRoutingState(
+        clients,
+        routingEntries,
+      );
       const scopeRouting = nextState.routing;
       const nextOrder = nextState.order;
 
@@ -197,7 +200,10 @@ export function useDownloadClientRouting({
         setDownloadClientRoutingByScope((previous) => {
           const currentScopeRouting = previous[scopeId] ?? {};
           if (
-            areNzbgetRoutingMapsEqual(currentScopeRouting, normalizedSavedRouting)
+            areNzbgetRoutingMapsEqual(
+              currentScopeRouting,
+              normalizedSavedRouting,
+            )
           ) {
             return previous;
           }

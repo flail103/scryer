@@ -96,7 +96,13 @@ export function buildRuleSetTestInput({
   // A stored file is scored from its own size and frozen listing facts.
   const selection = mediaFileId
     ? { titleId, episodeId, mediaFileId }
-    : { titleId, episodeId, releaseName, sizeBytes, ...(listing ? { listing } : {}) };
+    : {
+        titleId,
+        episodeId,
+        releaseName,
+        sizeBytes,
+        ...(listing ? { listing } : {}),
+      };
   return testRuleSetId
     ? { ...selection, testRuleSetId }
     : {
@@ -162,7 +168,11 @@ export function listingInputFromDraft(
     } catch {
       return { error: "settings.ruleTestListingExtraInvalid" };
     }
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
       return { error: "settings.ruleTestListingExtraInvalid" };
     }
     value.extra = parsed as Record<string, unknown>;
@@ -222,7 +232,13 @@ export function ruleSetTestFingerprint(
   copySourceRuleSetId: string | null,
   testRuleSetId: string | null,
 ): string {
-  return JSON.stringify({ draft, selection, editRuleSetId, copySourceRuleSetId, testRuleSetId });
+  return JSON.stringify({
+    draft,
+    selection,
+    editRuleSetId,
+    copySourceRuleSetId,
+    testRuleSetId,
+  });
 }
 
 export function canTestRuleSet(
@@ -237,7 +253,10 @@ export function canTestRuleSet(
   );
 }
 
-export function isCurrentRuleSetTest(request: number, currentRequest: number): boolean {
+export function isCurrentRuleSetTest(
+  request: number,
+  currentRequest: number,
+): boolean {
   return request === currentRequest;
 }
 
@@ -276,10 +295,9 @@ export class RuleSetTestRequestController {
   }
 }
 
-export function sizeBytesFromGib(value: string):
-  | { value: undefined }
-  | { value: number }
-  | { error: string } {
+export function sizeBytesFromGib(
+  value: string,
+): { value: undefined } | { value: number } | { error: string } {
   if (value.trim() === "") return { value: undefined };
   const gib = Number(value);
   if (!Number.isFinite(gib) || gib < 0) {

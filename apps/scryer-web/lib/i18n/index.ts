@@ -112,7 +112,9 @@ const METADATA_LANGUAGE_CODES = new Set([
 /** {@link AVAILABLE_LANGUAGES}, less the ones metadata cannot be fetched in. */
 export const METADATA_LANGUAGES: LanguageOption[] = AVAILABLE_LANGUAGES.filter(
   (language) => METADATA_LANGUAGE_CODES.has(language.code),
-).map((language) => language.code === "zho" ? { ...language, label: "中文" } : language);
+).map((language) =>
+  language.code === "zho" ? { ...language, label: "中文" } : language,
+);
 
 export function metadataLanguageForUi(code: string): string {
   const locale = normalizeLocale(code);
@@ -121,12 +123,17 @@ export function metadataLanguageForUi(code: string): string {
 
 export function getLanguageLabel(code: string): string {
   const normalized = normalizeLocale(code);
-  return AVAILABLE_LANGUAGES.find((language) => language.code === normalized)?.label ?? normalized;
+  return (
+    AVAILABLE_LANGUAGES.find((language) => language.code === normalized)
+      ?.label ?? normalized
+  );
 }
 
 const FALLBACK: LocaleDictionary = en;
 
-export function getLocaleDictionary(code: string | null | undefined): LocaleDictionary {
+export function getLocaleDictionary(
+  code: string | null | undefined,
+): LocaleDictionary {
   if (!code) {
     return FALLBACK;
   }
@@ -181,7 +188,9 @@ export function normalizeLocale(code?: string | null): LocaleCode {
   if (!normalized) {
     return DEFAULT_LANGUAGE;
   }
-  const exact = AVAILABLE_LANGUAGES.find(({ code }) => code.toLowerCase() === normalized);
+  const exact = AVAILABLE_LANGUAGES.find(
+    ({ code }) => code.toLowerCase() === normalized,
+  );
   if (exact) return exact.code;
   const exactAlias = LOCALE_ALIASES[normalized];
   if (exactAlias) return exactAlias;
@@ -196,7 +205,11 @@ export function normalizeLocale(code?: string | null): LocaleCode {
   return DEFAULT_LANGUAGE;
 }
 
-export function t(key: string, code: string, values?: Record<string, string | number | boolean | null | undefined>): string {
+export function t(
+  key: string,
+  code: string,
+  values?: Record<string, string | number | boolean | null | undefined>,
+): string {
   const locale = getLocaleDictionary(code);
   const template = locale[key] ?? FALLBACK[key] ?? key;
   return interpolate(template, values);

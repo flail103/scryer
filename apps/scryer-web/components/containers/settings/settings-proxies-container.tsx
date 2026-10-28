@@ -9,7 +9,11 @@ import { SettingsProxiesSection } from "@/components/views/settings/settings-pro
 import { useClient } from "urql";
 import { useTranslate } from "@/lib/context/translate-context";
 import { useGlobalStatus } from "@/lib/context/global-status-context";
-import type { ProxyDraft, ProxyProviderTypeValue, ProxyRecord } from "@/lib/types";
+import type {
+  ProxyDraft,
+  ProxyProviderTypeValue,
+  ProxyRecord,
+} from "@/lib/types";
 import {
   PROXY_DEFAULT_BASE_URLS,
   PROXY_INITIAL_DRAFT,
@@ -46,12 +50,14 @@ export function SettingsProxiesContainer() {
   const [isProxyEditorOpen, setIsProxyEditorOpen] = useState(false);
   const [mutatingProxyId, setMutatingProxyId] = useState<string | null>(null);
   const [testingProxyId, setTestingProxyId] = useState<string | null>(null);
-  const [pendingTestProxy, setPendingTestProxy] = useState<ProxyRecord | null>(null);
-  const [resettingHostKeyProxyId, setResettingHostKeyProxyId] =
-    useState<string | null>(null);
-  const [pendingDeleteProxy, setPendingDeleteProxy] = useState<ProxyRecord | null>(
+  const [pendingTestProxy, setPendingTestProxy] = useState<ProxyRecord | null>(
     null,
   );
+  const [resettingHostKeyProxyId, setResettingHostKeyProxyId] = useState<
+    string | null
+  >(null);
+  const [pendingDeleteProxy, setPendingDeleteProxy] =
+    useState<ProxyRecord | null>(null);
   const [pendingHostKeyResetProxy, setPendingHostKeyResetProxy] =
     useState<ProxyRecord | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft>(() => ({
@@ -157,7 +163,9 @@ export function SettingsProxiesContainer() {
           tunnelDnsServers: "",
           tunnelMtu: "",
           tunnelKeepaliveSeconds: "",
-          remoteDns: supportsProxyRemoteDns(providerType) ? prev.remoteDns : false,
+          remoteDns: supportsProxyRemoteDns(providerType)
+            ? prev.remoteDns
+            : false,
         };
       });
     },
@@ -173,7 +181,8 @@ export function SettingsProxiesContainer() {
   const wireguardValidationMessage = useCallback(
     (draft: ProxyDraft): string | null => {
       const privateKey = draft.privateKey.trim();
-      const keepsPrivateKey = draft.hasStoredPrivateKey && !draft.clearPrivateKey;
+      const keepsPrivateKey =
+        draft.hasStoredPrivateKey && !draft.clearPrivateKey;
       if (privateKey === "" && !keepsPrivateKey) {
         return t("settings.proxyValidationWireguardPrivateKey");
       }
@@ -310,7 +319,10 @@ export function SettingsProxiesContainer() {
           }),
         );
       }
-      setGlobalStatus(notes.join(" "), parsed.peerCount > 1 ? { level: "WARNING" } : undefined);
+      setGlobalStatus(
+        notes.join(" "),
+        parsed.peerCount > 1 ? { level: "WARNING" } : undefined,
+      );
       return true;
     },
     [setGlobalStatus, t],
@@ -416,7 +428,9 @@ export function SettingsProxiesContainer() {
         await navigator.clipboard.writeText(publicKey);
         setGlobalStatus(t("status.proxyTunnelPublicKeyCopied"));
       } catch {
-        setGlobalStatus(t("status.proxyTunnelPublicKeyCopyFailed"), { level: "ERROR" });
+        setGlobalStatus(t("status.proxyTunnelPublicKeyCopyFailed"), {
+          level: "ERROR",
+        });
       }
     },
     [setGlobalStatus, t],
@@ -433,7 +447,9 @@ export function SettingsProxiesContainer() {
         .mutation(deleteProxyConfigMutation, { id: proxy.id })
         .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("status.proxyDeleted", { name: proxy.name }), { level: "SUCCESS" });
+      setGlobalStatus(t("status.proxyDeleted", { name: proxy.name }), {
+        level: "SUCCESS",
+      });
       if (editingProxyId === proxy.id) {
         resetProxyDraft();
       }
@@ -505,14 +521,16 @@ export function SettingsProxiesContainer() {
         editProxy={editProxy}
         importWireguardConfig={importWireguardConfig}
         testProxy={setPendingTestProxy}
-        testForm={pendingTestProxy && (
-          <ProxyTestForm
-            key={pendingTestProxy.id}
-            proxy={pendingTestProxy}
-            onTest={testProxy}
-            onClose={() => setPendingTestProxy(null)}
-          />
-        )}
+        testForm={
+          pendingTestProxy && (
+            <ProxyTestForm
+              key={pendingTestProxy.id}
+              proxy={pendingTestProxy}
+              onTest={testProxy}
+              onClose={() => setPendingTestProxy(null)}
+            />
+          )
+        }
         deleteProxy={deleteProxy}
         requestResetHostKey={setPendingHostKeyResetProxy}
         copyTunnelPublicKey={copyTunnelPublicKey}

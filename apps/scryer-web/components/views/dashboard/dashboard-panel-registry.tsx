@@ -36,7 +36,11 @@ export const DASHBOARD_PANEL_RENDERERS: Readonly<
 > = {
   stats: ({ data, tier, breakpoint }) => (
     <DashboardPanelLoad state={data.panels.overview}>
-      <StatsPanel overview={data.overview} tier={tier} breakpoint={breakpoint} />
+      <StatsPanel
+        overview={data.overview}
+        tier={tier}
+        breakpoint={breakpoint}
+      />
     </DashboardPanelLoad>
   ),
   requests: ({ data, tier }) => (
@@ -75,8 +79,13 @@ export const DASHBOARD_PANEL_RENDERERS: Readonly<
     </DashboardPanelLoad>
   ),
   "download-clients": ({ data }) => (
-    <DashboardPanelLoad state={combinePanelStates(data.panels.overview, data.panels.queue)}>
-      <DownloadClientsPanel overview={data.overview} queueItems={data.queueItems} />
+    <DashboardPanelLoad
+      state={combinePanelStates(data.panels.overview, data.panels.queue)}
+    >
+      <DownloadClientsPanel
+        overview={data.overview}
+        queueItems={data.queueItems}
+      />
     </DashboardPanelLoad>
   ),
   storage: ({ data, tier }) => (
@@ -86,7 +95,11 @@ export const DASHBOARD_PANEL_RENDERERS: Readonly<
   ),
   "active-queue": ({ data, tier }) => (
     <DashboardPanelLoad state={data.panels.queue}>
-      <ActiveQueuePanel items={data.queueItems} totalCount={data.queueTotal} tier={tier} />
+      <ActiveQueuePanel
+        items={data.queueItems}
+        totalCount={data.queueTotal}
+        tier={tier}
+      />
     </DashboardPanelLoad>
   ),
 };

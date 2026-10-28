@@ -64,7 +64,10 @@ test("finalize polling advances then resolves once the apply completes", async (
   ];
 
   const outcome = await pollExternalImportFinalize("apply-session", {
-    fetchStatus: async () => ({ sample: statuses.shift() ?? null, error: null }),
+    fetchStatus: async () => ({
+      sample: statuses.shift() ?? null,
+      error: null,
+    }),
     onSample: (sample) => samples.push(sample),
     wait: async (ms) => {
       waits.push(ms);
@@ -159,9 +162,12 @@ test("isFinalizeSettled only accepts terminal statuses", () => {
 
 test("a throw while starting finalize reports a message and clears the gate", async () => {
   const failures: string[] = [];
-  const outcome = await runFinalizeStart(async () => {
-    throw new Error("createLibrary exploded");
-  }, (message) => failures.push(message));
+  const outcome = await runFinalizeStart(
+    async () => {
+      throw new Error("createLibrary exploded");
+    },
+    (message) => failures.push(message),
+  );
 
   assert.deepEqual(outcome, { ok: false, error: "createLibrary exploded" });
   assert.deepEqual(failures, ["createLibrary exploded"]);

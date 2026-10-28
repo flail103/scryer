@@ -55,10 +55,10 @@ export function InstanceFeaturesProvider({
   children: React.ReactNode;
 }) {
   const client = useClient();
-  const [instanceFeatures, setInstanceFeatures] = React.useState<InstanceFeatures>(
-    DEFAULT_INSTANCE_FEATURES,
-  );
-  const [instanceFeaturesLoaded, setInstanceFeaturesLoaded] = React.useState(false);
+  const [instanceFeatures, setInstanceFeatures] =
+    React.useState<InstanceFeatures>(DEFAULT_INSTANCE_FEATURES);
+  const [instanceFeaturesLoaded, setInstanceFeaturesLoaded] =
+    React.useState(false);
   const requestSequenceRef = React.useRef(0);
   const sessionIdentityRef = React.useRef<string | null>(null);
 
@@ -128,9 +128,14 @@ export function InstanceFeaturesProvider({
       sessionIdentityRef.current = identity;
       void loadInstanceFeatures();
     };
-    const handleFocus = () => { void loadInstanceFeatures(); };
+    const handleFocus = () => {
+      void loadInstanceFeatures();
+    };
 
-    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, handleAuthSessionChanged);
+    window.addEventListener(
+      AUTH_SESSION_CHANGED_EVENT,
+      handleAuthSessionChanged,
+    );
     window.addEventListener("focus", handleFocus);
     const cancelScheduledQuery = scheduleAfterFirstPaint(() => {
       void loadInstanceFeatures();
@@ -192,5 +197,7 @@ export function useExperimentalFeaturesEnabled(): boolean {
  * the page is unavailable. Outside the provider the defaults are the answer.
  */
 export function useInstanceFeaturesLoaded(): boolean {
-  return React.useContext(InstanceFeaturesContext)?.instanceFeaturesLoaded ?? true;
+  return (
+    React.useContext(InstanceFeaturesContext)?.instanceFeaturesLoaded ?? true
+  );
 }

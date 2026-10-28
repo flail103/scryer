@@ -50,7 +50,11 @@ import {
   updateAutoBackupSettingsMutation,
   updateBackupSettingsMutation,
 } from "@/lib/graphql/mutations";
-import { autoBackupSettingsQuery, backupSettingsQuery, backupsQuery } from "@/lib/graphql/queries";
+import {
+  autoBackupSettingsQuery,
+  backupSettingsQuery,
+  backupsQuery,
+} from "@/lib/graphql/queries";
 import { scryerFetch } from "@/lib/graphql/urql-client";
 import { useSettingsSubscription } from "@/lib/hooks/use-settings-subscription";
 import { buildAppUrl } from "@/lib/runtime-config";
@@ -156,7 +160,11 @@ const BACKUPS_INSET_CLASS =
   "rounded-[12px] border border-[var(--scry-line2)] bg-[var(--scry-card2)]";
 const BACKUPS_MUTED_TEXT_CLASS = "text-[var(--scry-muted3)]";
 
-function mutationErrorMessage(error: unknown, fallback: string, translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2]): string {
+function mutationErrorMessage(
+  error: unknown,
+  fallback: string,
+  translate?: Parameters<typeof userFacingGraphQlErrorMessage>[2],
+): string {
   return userFacingGraphQlErrorMessage(error, fallback, translate);
 }
 
@@ -168,14 +176,21 @@ function sortBackups(backups: BackupInfoRecord[]): BackupInfoRecord[] {
   return [...backups].sort((left, right) => {
     const leftTime = Date.parse(left.createdAt);
     const rightTime = Date.parse(right.createdAt);
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    if (
+      Number.isFinite(leftTime) &&
+      Number.isFinite(rightTime) &&
+      leftTime !== rightTime
+    ) {
       return rightTime - leftTime;
     }
     return right.filename.localeCompare(left.filename);
   });
 }
 
-function upsertBackup(backups: BackupInfoRecord[], nextBackup: BackupInfoRecord): BackupInfoRecord[] {
+function upsertBackup(
+  backups: BackupInfoRecord[],
+  nextBackup: BackupInfoRecord,
+): BackupInfoRecord[] {
   return sortBackups([
     nextBackup,
     ...backups.filter((backup) => backup.filename !== nextBackup.filename),
@@ -221,7 +236,10 @@ function formatBytes(sizeBytes: number): string {
   return `${current.toFixed(current >= 100 ? 0 : current >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
-function formatDateTime(value: string, dateTimeFormat: UiDateTimeFormat): string {
+function formatDateTime(
+  value: string,
+  dateTimeFormat: UiDateTimeFormat,
+): string {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
     return value;
@@ -279,32 +297,43 @@ export function SettingsBackupsContainer() {
   const [savedBackupSettings, setSavedBackupSettings] =
     React.useState<BackupSettings>(DEFAULT_BACKUP_SETTINGS);
   const [backupPathDraft, setBackupPathDraft] = React.useState("");
-  const [backupSettingsLoading, setBackupSettingsLoading] = React.useState(true);
+  const [backupSettingsLoading, setBackupSettingsLoading] =
+    React.useState(true);
   const [backupSettingsSaving, setBackupSettingsSaving] = React.useState(false);
   const [folderBrowserOpen, setFolderBrowserOpen] = React.useState(false);
   const [autoBackupKey, setAutoBackupKey] = React.useState("");
   const [showAutoBackupKey, setShowAutoBackupKey] = React.useState(false);
   // The key's problem shows only once the field is left with a key that
   // fails it, and hides again while the key is being edited.
-  const [autoBackupKeyErrorShown, setAutoBackupKeyErrorShown] = React.useState(false);
-  const [clearAutoBackupKeyConfirmOpen, setClearAutoBackupKeyConfirmOpen] = React.useState(false);
-  const [resetBackupPathConfirmOpen, setResetBackupPathConfirmOpen] = React.useState(false);
+  const [autoBackupKeyErrorShown, setAutoBackupKeyErrorShown] =
+    React.useState(false);
+  const [clearAutoBackupKeyConfirmOpen, setClearAutoBackupKeyConfirmOpen] =
+    React.useState(false);
+  const [resetBackupPathConfirmOpen, setResetBackupPathConfirmOpen] =
+    React.useState(false);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [creatingRequest, setCreatingRequest] = React.useState(false);
-  const [selectedBackupFilenames, setSelectedBackupFilenames] = React.useState<Set<string>>(
+  const [selectedBackupFilenames, setSelectedBackupFilenames] = React.useState<
+    Set<string>
+  >(() => new Set());
+  const [pendingDeleteFilenames, setPendingDeleteFilenames] = React.useState<
+    string[]
+  >([]);
+  const [deletingFilenames, setDeletingFilenames] = React.useState<Set<string>>(
     () => new Set(),
   );
-  const [pendingDeleteFilenames, setPendingDeleteFilenames] = React.useState<string[]>([]);
-  const [deletingFilenames, setDeletingFilenames] = React.useState<Set<string>>(() => new Set());
-  const [downloadingFilename, setDownloadingFilename] = React.useState<string | null>(null);
+  const [downloadingFilename, setDownloadingFilename] = React.useState<
+    string | null
+  >(null);
   const hasCreatingManualBackup = backups.some(
     (backup) => backup.status === "creating" && backup.trigger === "manual",
   );
   const passwordRequired = password.trim().length === 0;
   const confirmPasswordRequired = confirmPassword.length === 0;
-  const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+  const passwordMismatch =
+    confirmPassword.length > 0 && password !== confirmPassword;
   // Each automatic backup control saves its own change: the switch and the
   // clear-key box at once, the time when its picker closes and the key when
   // its field loses focus. A draft that cannot be saved yet, such as backups
@@ -312,15 +341,20 @@ export function SettingsBackupsContainer() {
   const autoBackupDraftError = (draft: AutoBackupDraft): string | null => {
     const replacementKeyPresent = draft.key.trim().length > 0;
     const willHaveKey =
-      !draft.clearKey && (replacementKeyPresent || savedAutoBackupSettings.autoBackupKeyPresent);
+      !draft.clearKey &&
+      (replacementKeyPresent || savedAutoBackupSettings.autoBackupKeyPresent);
     if (draft.enabled && !willHaveKey) {
-      return t("settings.autoBackupsKeyRequired", { count: AUTO_BACKUP_KEY_MIN_LENGTH });
+      return t("settings.autoBackupsKeyRequired", {
+        count: AUTO_BACKUP_KEY_MIN_LENGTH,
+      });
     }
     if (
       replacementKeyPresent &&
       nonWhitespaceCharacterCount(draft.key) < AUTO_BACKUP_KEY_MIN_LENGTH
     ) {
-      return t("settings.autoBackupsKeyTooShort", { count: AUTO_BACKUP_KEY_MIN_LENGTH });
+      return t("settings.autoBackupsKeyTooShort", {
+        count: AUTO_BACKUP_KEY_MIN_LENGTH,
+      });
     }
     return null;
   };
@@ -330,7 +364,9 @@ export function SettingsBackupsContainer() {
     key: autoBackupKey,
     clearKey: false,
   };
-  const autoBackupKeyValidationMessage = autoBackupDraftError(currentAutoBackupDraft);
+  const autoBackupKeyValidationMessage = autoBackupDraftError(
+    currentAutoBackupDraft,
+  );
   const normalizedBackupPathDraft = normalizeBackupPathDraft(backupPathDraft);
   const savedCustomBackupPath = savedBackupSettings.customBackupPath ?? null;
   const backupPathDirty = normalizedBackupPathDraft !== savedCustomBackupPath;
@@ -343,7 +379,8 @@ export function SettingsBackupsContainer() {
     !passwordMismatch;
   const pageLoading = loading || autoBackupLoading || backupSettingsLoading;
   const selectableBackups = backups.filter(
-    (backup) => backup.status !== "creating" && !deletingFilenames.has(backup.filename),
+    (backup) =>
+      backup.status !== "creating" && !deletingFilenames.has(backup.filename),
   );
   const selectedBackups = selectableBackups.filter((backup) =>
     selectedBackupFilenames.has(backup.filename),
@@ -372,37 +409,53 @@ export function SettingsBackupsContainer() {
   // when nothing is typed. The server keeps a key while backups are on.
   const autoBackupKeyTyped = autoBackupKey.trim().length > 0;
   const autoBackupKeyAction: "save" | "clear" =
-    !autoBackupKeyTyped && autoBackupSettings.autoBackupKeyPresent ? "clear" : "save";
+    !autoBackupKeyTyped && autoBackupSettings.autoBackupKeyPresent
+      ? "clear"
+      : "save";
   const autoBackupTriggerLabel = (trigger: BackupTrigger) =>
-    trigger === "auto" ? t("settings.backupsAutomatic") : t("settings.backupsManual");
+    trigger === "auto"
+      ? t("settings.backupsAutomatic")
+      : t("settings.backupsManual");
   const autoBackupDirty =
     !autoBackupSettingsEqual(autoBackupSettings, savedAutoBackupSettings) ||
     autoBackupKey.length > 0;
   const shouldBlockNavigation =
-    (autoBackupDirty || backupPathDirty) && !autoBackupSaving && !backupSettingsSaving;
+    (autoBackupDirty || backupPathDirty) &&
+    !autoBackupSaving &&
+    !backupSettingsSaving;
   const autoBackupNavigationBlocker = useBlocker(shouldBlockNavigation);
 
   useBeforeUnload(
-    React.useCallback((event: BeforeUnloadEvent) => {
-      if (!shouldBlockNavigation) {
-        return;
-      }
-      event.preventDefault();
-      event.returnValue = "";
-    }, [shouldBlockNavigation]),
+    React.useCallback(
+      (event: BeforeUnloadEvent) => {
+        if (!shouldBlockNavigation) {
+          return;
+        }
+        event.preventDefault();
+        event.returnValue = "";
+      },
+      [shouldBlockNavigation],
+    ),
   );
 
   const fetchBackups = React.useCallback(async () => {
     try {
       const { data, error } = await client
-        .query<BackupsQueryResult>(backupsQuery, {}, { requestPolicy: "network-only" })
+        .query<BackupsQueryResult>(
+          backupsQuery,
+          {},
+          { requestPolicy: "network-only" },
+        )
         .toPromise();
       if (error) {
         throw error;
       }
       setBackups(sortBackups(data?.backups ?? []));
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        mutationErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setLoading(false);
     }
@@ -420,11 +473,15 @@ export function SettingsBackupsContainer() {
       if (error) {
         throw error;
       }
-      const nextSettings = data?.autoBackupSettings ?? DEFAULT_AUTO_BACKUP_SETTINGS;
+      const nextSettings =
+        data?.autoBackupSettings ?? DEFAULT_AUTO_BACKUP_SETTINGS;
       setSavedAutoBackupSettings(nextSettings);
       setAutoBackupSettings(nextSettings);
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        mutationErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setAutoBackupLoading(false);
     }
@@ -446,7 +503,10 @@ export function SettingsBackupsContainer() {
       setSavedBackupSettings(nextSettings);
       setBackupPathDraft(nextSettings.customBackupPath ?? "");
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
+      setGlobalStatus(
+        mutationErrorMessage(error, t("status.failedToLoad"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setBackupSettingsLoading(false);
     }
@@ -528,7 +588,10 @@ export function SettingsBackupsContainer() {
       setCreateDialogOpen(false);
       setGlobalStatus(t("settings.backupsQueued"));
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        mutationErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setCreatingRequest(false);
     }
@@ -575,7 +638,11 @@ export function SettingsBackupsContainer() {
           deletedFilenames.add(filename);
         } catch (error) {
           failedFilenames.add(filename);
-          firstFailureMessage ??= mutationErrorMessage(error, t("status.failedToDelete"), t);
+          firstFailureMessage ??= mutationErrorMessage(
+            error,
+            t("status.failedToDelete"),
+            t,
+          );
         }
       }
 
@@ -595,7 +662,9 @@ export function SettingsBackupsContainer() {
       if (failedFilenames.size > 0) {
         setGlobalStatus(
           firstFailureMessage ??
-            t("settings.backupsDeleteFailedCount", { count: failedFilenames.size }),
+            t("settings.backupsDeleteFailedCount", {
+              count: failedFilenames.size,
+            }),
           { level: "ERROR" },
         );
       } else {
@@ -610,40 +679,53 @@ export function SettingsBackupsContainer() {
     }
   }, [client, pendingDeleteFilenames, setGlobalStatus, t]);
 
-  const handleDownloadBackup = React.useCallback(async (backup: BackupInfoRecord) => {
-    setDownloadingFilename(backup.filename);
-    try {
-      const { data, error } = await client
-        .mutation<PrepareBackupDownloadMutationResult>(prepareBackupDownloadMutation, {
-          input: { filename: backup.filename },
-        })
-        .toPromise();
-      const downloadUrl = data?.prepareBackupDownload?.downloadUrl;
-      const downloadAuthorizationToken = data?.prepareBackupDownload?.downloadAuthorizationToken;
-      if (error || !downloadUrl || !downloadAuthorizationToken) {
-        throw error ?? new Error(t("status.failedToLoad"));
-      }
+  const handleDownloadBackup = React.useCallback(
+    async (backup: BackupInfoRecord) => {
+      setDownloadingFilename(backup.filename);
+      try {
+        const { data, error } = await client
+          .mutation<PrepareBackupDownloadMutationResult>(
+            prepareBackupDownloadMutation,
+            {
+              input: { filename: backup.filename },
+            },
+          )
+          .toPromise();
+        const downloadUrl = data?.prepareBackupDownload?.downloadUrl;
+        const downloadAuthorizationToken =
+          data?.prepareBackupDownload?.downloadAuthorizationToken;
+        if (error || !downloadUrl || !downloadAuthorizationToken) {
+          throw error ?? new Error(t("status.failedToLoad"));
+        }
 
-      const response = await scryerFetch(buildAppUrl(downloadUrl), {
-        headers: {
-          Authorization: `Bearer ${downloadAuthorizationToken}`,
-        },
-      });
-      if (!response.ok) {
-        throw new Error(
-          await readResponseErrorMessage(response, t("status.failedToLoad")),
+        const response = await scryerFetch(buildAppUrl(downloadUrl), {
+          headers: {
+            Authorization: `Bearer ${downloadAuthorizationToken}`,
+          },
+        });
+        if (!response.ok) {
+          throw new Error(
+            await readResponseErrorMessage(response, t("status.failedToLoad")),
+          );
+        }
+
+        await saveDownloadResponse(response, backup.filename);
+      } catch (error) {
+        setGlobalStatus(
+          mutationErrorMessage(error, t("status.failedToLoad"), t),
+          { level: "ERROR" },
         );
+      } finally {
+        setDownloadingFilename(null);
       }
+    },
+    [client, setGlobalStatus, t],
+  );
 
-      await saveDownloadResponse(response, backup.filename);
-    } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
-    } finally {
-      setDownloadingFilename(null);
-    }
-  }, [client, setGlobalStatus, t]);
-
-  const saveAutoBackupDraft = async (draft: AutoBackupDraft, successMessage?: string) => {
+  const saveAutoBackupDraft = async (
+    draft: AutoBackupDraft,
+    successMessage?: string,
+  ) => {
     const replacementKeyPresent = draft.key.trim().length > 0;
     const unchanged =
       draft.enabled === savedAutoBackupSettings.enabled &&
@@ -657,14 +739,18 @@ export function SettingsBackupsContainer() {
     setAutoBackupSaving(true);
     try {
       const { data, error } = await client
-        .mutation<UpdateAutoBackupSettingsMutationResult>(updateAutoBackupSettingsMutation, {
-          input: {
-            enabled: draft.enabled,
-            dailyTimeLocal: draft.dailyTimeLocal,
-            setAutoBackupKey: !draft.clearKey && replacementKeyPresent ? draft.key : null,
-            clearAutoBackupKey: draft.clearKey,
+        .mutation<UpdateAutoBackupSettingsMutationResult>(
+          updateAutoBackupSettingsMutation,
+          {
+            input: {
+              enabled: draft.enabled,
+              dailyTimeLocal: draft.dailyTimeLocal,
+              setAutoBackupKey:
+                !draft.clearKey && replacementKeyPresent ? draft.key : null,
+              clearAutoBackupKey: draft.clearKey,
+            },
           },
-        })
+        )
         .toPromise();
       if (error || !data?.updateAutoBackupSettings) {
         throw error ?? new Error(t("status.failedToUpdate"));
@@ -674,9 +760,14 @@ export function SettingsBackupsContainer() {
       setAutoBackupSettings(data.updateAutoBackupSettings);
       setAutoBackupKey("");
       setShowAutoBackupKey(false);
-      setGlobalStatus(successMessage ?? t("settings.autoBackupsSaved"), { level: "SUCCESS" });
+      setGlobalStatus(successMessage ?? t("settings.autoBackupsSaved"), {
+        level: "SUCCESS",
+      });
     } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
+      setGlobalStatus(
+        mutationErrorMessage(error, t("status.failedToUpdate"), t),
+        { level: "ERROR" },
+      );
     } finally {
       setAutoBackupSaving(false);
     }
@@ -698,29 +789,40 @@ export function SettingsBackupsContainer() {
     void saveAutoBackupDraft(currentAutoBackupDraft);
   };
 
-  const saveBackupPath = React.useCallback(async (pathDraft: string) => {
-    setBackupSettingsSaving(true);
-    try {
-      const customBackupPath = normalizeBackupPathDraft(pathDraft);
-      const { data, error } = await client
-        .mutation<UpdateBackupSettingsMutationResult>(updateBackupSettingsMutation, {
-          input: { customBackupPath },
-        })
-        .toPromise();
-      if (error || !data?.updateBackupSettings) {
-        throw error ?? new Error(t("status.failedToUpdate"));
-      }
+  const saveBackupPath = React.useCallback(
+    async (pathDraft: string) => {
+      setBackupSettingsSaving(true);
+      try {
+        const customBackupPath = normalizeBackupPathDraft(pathDraft);
+        const { data, error } = await client
+          .mutation<UpdateBackupSettingsMutationResult>(
+            updateBackupSettingsMutation,
+            {
+              input: { customBackupPath },
+            },
+          )
+          .toPromise();
+        if (error || !data?.updateBackupSettings) {
+          throw error ?? new Error(t("status.failedToUpdate"));
+        }
 
-      setSavedBackupSettings(data.updateBackupSettings);
-      setBackupPathDraft(data.updateBackupSettings.customBackupPath ?? "");
-      await fetchBackups();
-      setGlobalStatus(t("settings.backupLocationSaved"), { level: "SUCCESS" });
-    } catch (error) {
-      setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
-    } finally {
-      setBackupSettingsSaving(false);
-    }
-  }, [client, fetchBackups, setGlobalStatus, t]);
+        setSavedBackupSettings(data.updateBackupSettings);
+        setBackupPathDraft(data.updateBackupSettings.customBackupPath ?? "");
+        await fetchBackups();
+        setGlobalStatus(t("settings.backupLocationSaved"), {
+          level: "SUCCESS",
+        });
+      } catch (error) {
+        setGlobalStatus(
+          mutationErrorMessage(error, t("status.failedToUpdate"), t),
+          { level: "ERROR" },
+        );
+      } finally {
+        setBackupSettingsSaving(false);
+      }
+    },
+    [client, fetchBackups, setGlobalStatus, t],
+  );
 
   const handleSaveBackupSettings = () => saveBackupPath(backupPathDraft);
 
@@ -741,7 +843,9 @@ export function SettingsBackupsContainer() {
 
   if (pageLoading) {
     return (
-      <div className={`flex items-center gap-2 text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}>
+      <div
+        className={`flex items-center gap-2 text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}
+      >
         <LoadingMark className="h-4 w-4" />
         {t("label.loading")}
       </div>
@@ -772,7 +876,10 @@ export function SettingsBackupsContainer() {
                       ...current,
                       enabled: nextValue,
                     }));
-                    void saveAutoBackupDraft({ ...currentAutoBackupDraft, enabled: nextValue });
+                    void saveAutoBackupDraft({
+                      ...currentAutoBackupDraft,
+                      enabled: nextValue,
+                    });
                   }}
                 />
               </div>
@@ -780,7 +887,9 @@ export function SettingsBackupsContainer() {
           </div>
           <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-4`}>
             <div className="grid gap-4 md:grid-cols-2 md:items-stretch xl:grid-cols-3">
-              <div className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
+              <div
+                className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}
+              >
                 <Label
                   htmlFor="auto-backups-time"
                   className="text-sm font-medium text-[var(--scry-ink2)]"
@@ -800,12 +909,16 @@ export function SettingsBackupsContainer() {
                         dailyTimeLocal: nextValue,
                       }))
                     }
-                    onClose={() => void saveAutoBackupDraft(currentAutoBackupDraft)}
+                    onClose={() =>
+                      void saveAutoBackupDraft(currentAutoBackupDraft)
+                    }
                   />
                 </div>
               </div>
 
-              <div className={`flex h-full flex-col gap-3 p-4 ${BACKUPS_INSET_CLASS}`}>
+              <div
+                className={`flex h-full flex-col gap-3 p-4 ${BACKUPS_INSET_CLASS}`}
+              >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-[var(--scry-ink2)]">
                     {t("settings.autoBackupsKeyLabel")}
@@ -833,7 +946,8 @@ export function SettingsBackupsContainer() {
                         }}
                         onBlur={() => {
                           setAutoBackupKeyErrorShown(
-                            autoBackupKeyTyped && autoBackupKeyValidationMessage !== null,
+                            autoBackupKeyTyped &&
+                              autoBackupKeyValidationMessage !== null,
                           );
                         }}
                         onKeyDown={(event) => {
@@ -852,7 +966,9 @@ export function SettingsBackupsContainer() {
                             : t("settings.autoBackupsShowKey")
                         }
                         disabled={autoBackupSaving}
-                        onClick={() => setShowAutoBackupKey((current) => !current)}
+                        onClick={() =>
+                          setShowAutoBackupKey((current) => !current)
+                        }
                       >
                         {showAutoBackupKey ? (
                           <EyeOff className="h-4 w-4" />
@@ -879,7 +995,9 @@ export function SettingsBackupsContainer() {
                         disabled={autoBackupSaving || !autoBackupKeyTyped}
                         onClick={saveAutoBackupKey}
                       >
-                        {autoBackupSaving ? <LoadingMark className="h-4 w-4" /> : null}
+                        {autoBackupSaving ? (
+                          <LoadingMark className="h-4 w-4" />
+                        ) : null}
                         {t("label.save")}
                       </Button>
                     )}
@@ -892,7 +1010,9 @@ export function SettingsBackupsContainer() {
                 </div>
               </div>
 
-              <div className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
+              <div
+                className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}
+              >
                 <p className="text-sm font-medium text-[var(--scry-ink2)]">
                   {t("settings.autoBackupsNextRun")}
                 </p>
@@ -911,7 +1031,10 @@ export function SettingsBackupsContainer() {
             </h2>
           </div>
           <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-2`}>
-            <Label htmlFor="backup-location-path" className="text-[var(--scry-ink2)]">
+            <Label
+              htmlFor="backup-location-path"
+              className="text-[var(--scry-ink2)]"
+            >
               {t("settings.backupLocationCustomPath")}
             </Label>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -952,7 +1075,9 @@ export function SettingsBackupsContainer() {
                   onClick={() => void handleSaveBackupSettings()}
                   disabled={!canSaveBackupSettings}
                 >
-                  {backupSettingsSaving ? <LoadingMark className="h-4 w-4" /> : null}
+                  {backupSettingsSaving ? (
+                    <LoadingMark className="h-4 w-4" />
+                  ) : null}
                   {t("label.save")}
                 </Button>
               </div>
@@ -963,7 +1088,8 @@ export function SettingsBackupsContainer() {
                 id="backup-location-effective-path"
                 className="font-[var(--font-code)] text-[var(--scry-ink2)]"
               >
-                {savedBackupSettings.effectiveBackupPath || savedBackupSettings.defaultBackupPath}
+                {savedBackupSettings.effectiveBackupPath ||
+                  savedBackupSettings.defaultBackupPath}
               </span>
             </p>
           </div>
@@ -980,7 +1106,9 @@ export function SettingsBackupsContainer() {
                     variant="outline"
                     className="text-[var(--scry-danger-text-soft)] hover:text-[var(--scry-danger-text)]"
                     onClick={() =>
-                      setPendingDeleteFilenames(selectedBackups.map((backup) => backup.filename))
+                      setPendingDeleteFilenames(
+                        selectedBackups.map((backup) => backup.filename),
+                      )
                     }
                   >
                     <Trash2 className="h-4 w-4" />
@@ -1003,7 +1131,9 @@ export function SettingsBackupsContainer() {
           </div>
           {backups.length === 0 ? (
             <div className={`${BACKUPS_PANEL_BODY_CLASS}`}>
-              <div className={`rounded-[12px] border border-dashed border-[var(--scry-border3)] px-4 py-8 text-center text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}>
+              <div
+                className={`rounded-[12px] border border-dashed border-[var(--scry-border3)] px-4 py-8 text-center text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}
+              >
                 {t("settings.backupsEmpty")}
               </div>
             </div>
@@ -1027,13 +1157,29 @@ export function SettingsBackupsContainer() {
                         }
                       />
                     </TableCheckboxHead>
-                    <TableHead className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}>Bundle</TableHead>
-                    <TableHead className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}>Created</TableHead>
-                    <TableHead className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}>
+                    <TableHead
+                      className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}
+                    >
+                      Bundle
+                    </TableHead>
+                    <TableHead
+                      className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}
+                    >
+                      Created
+                    </TableHead>
+                    <TableHead
+                      className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}
+                    >
                       {t("label.status")}
                     </TableHead>
-                    <TableHead className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}>Size</TableHead>
-                    <TableHead className={`text-right font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}>
+                    <TableHead
+                      className={`font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}
+                    >
+                      Size
+                    </TableHead>
+                    <TableHead
+                      className={`text-right font-semibold ${BACKUPS_MUTED_TEXT_CLASS}`}
+                    >
                       {t("label.actions")}
                     </TableHead>
                   </TableRow>
@@ -1041,33 +1187,50 @@ export function SettingsBackupsContainer() {
                 <TableBody>
                   {backups.map((backup) => {
                     const isDeleting = deletingFilenames.has(backup.filename);
-                    const isDownloading = downloadingFilename === backup.filename;
-                    const disableActions = backup.status === "creating" || isDeleting;
+                    const isDownloading =
+                      downloadingFilename === backup.filename;
+                    const disableActions =
+                      backup.status === "creating" || isDeleting;
                     const statusLabel =
                       backup.status === "creating"
                         ? t("settings.backupsCreating")
                         : backup.status === "invalid"
                           ? t("settings.backupsInvalid")
-                        : backup.status === "failed"
-                          ? t("settings.backupsFailed")
-                          : t("settings.backupsReady");
+                          : backup.status === "failed"
+                            ? t("settings.backupsFailed")
+                            : t("settings.backupsReady");
 
                     return (
                       <TableRow
                         data-ui="settings-table-row"
                         key={backup.filename}
-                        id={selectorId("settings-backup-row", "created-at", backup.createdAt)}
+                        id={selectorId(
+                          "settings-backup-row",
+                          "created-at",
+                          backup.createdAt,
+                        )}
                         className="border-[var(--scry-border3)] hover:bg-[var(--scry-rowHover)]"
                       >
                         <TableCheckboxCell>
                           <Checkbox
-                            id={selectorId("settings-backup-select", "created-at", backup.createdAt)}
+                            id={selectorId(
+                              "settings-backup-select",
+                              "created-at",
+                              backup.createdAt,
+                            )}
                             size="table"
-                            checked={selectedBackupFilenames.has(backup.filename)}
+                            checked={selectedBackupFilenames.has(
+                              backup.filename,
+                            )}
                             disabled={disableActions}
-                            aria-label={t("settings.backupsSelect", { name: backup.filename })}
+                            aria-label={t("settings.backupsSelect", {
+                              name: backup.filename,
+                            })}
                             onCheckedChange={(checked) =>
-                              toggleBackupSelection([backup.filename], checked === true)
+                              toggleBackupSelection(
+                                [backup.filename],
+                                checked === true,
+                              )
                             }
                           />
                         </TableCheckboxCell>
@@ -1083,7 +1246,9 @@ export function SettingsBackupsContainer() {
                             >
                               {backup.filename}
                             </div>
-                            <div className={`flex flex-wrap items-center gap-2 text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
+                            <div
+                              className={`flex flex-wrap items-center gap-2 text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}
+                            >
                               <span className="rounded-full border border-[var(--scry-border3)] bg-[var(--scry-inset)] px-2 py-0.5">
                                 {backup.encrypted
                                   ? t("settings.backupsEncrypted")
@@ -1094,14 +1259,20 @@ export function SettingsBackupsContainer() {
                               </span>
                               <span>{backup.formatVersion}</span>
                               <span>{backup.sourceEngine}</span>
-                              {backup.sourceMigrationKey ? <span>{backup.sourceMigrationKey}</span> : null}
+                              {backup.sourceMigrationKey ? (
+                                <span>{backup.sourceMigrationKey}</span>
+                              ) : null}
                             </div>
                             {backup.errorMessage ? (
-                              <p className="text-xs text-destructive">{backup.errorMessage}</p>
+                              <p className="text-xs text-destructive">
+                                {backup.errorMessage}
+                              </p>
                             ) : null}
                           </div>
                         </TableCell>
-                        <TableCell className={`whitespace-nowrap ${BACKUPS_MUTED_TEXT_CLASS}`}>
+                        <TableCell
+                          className={`whitespace-nowrap ${BACKUPS_MUTED_TEXT_CLASS}`}
+                        >
                           {formatDateTime(backup.createdAt, dateTimeFormat)}
                         </TableCell>
                         <TableCell>
@@ -1116,7 +1287,9 @@ export function SettingsBackupsContainer() {
                             label={statusLabel}
                           />
                         </TableCell>
-                        <TableCell className={`align-middle font-[var(--font-code)] text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
+                        <TableCell
+                          className={`align-middle font-[var(--font-code)] text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}
+                        >
                           {formatBytes(backup.sizeBytes)}
                         </TableCell>
                         <TableCell>
@@ -1131,7 +1304,9 @@ export function SettingsBackupsContainer() {
                                 label={t("settings.backupsDownload")}
                                 tone="install"
                                 disabled={isDownloading || isDeleting}
-                                onClick={() => void handleDownloadBackup(backup)}
+                                onClick={() =>
+                                  void handleDownloadBackup(backup)
+                                }
                               >
                                 {isDownloading ? (
                                   <LoadingMark className="h-4 w-4" />
@@ -1141,11 +1316,17 @@ export function SettingsBackupsContainer() {
                               </IconButton>
                             ) : null}
                             <IconButton
-                              id={selectorId("settings-backup-delete", "created-at", backup.createdAt)}
+                              id={selectorId(
+                                "settings-backup-delete",
+                                "created-at",
+                                backup.createdAt,
+                              )}
                               label={t("settings.backupsDelete")}
                               tone="delete"
                               disabled={disableActions}
-                              onClick={() => setPendingDeleteFilenames([backup.filename])}
+                              onClick={() =>
+                                setPendingDeleteFilenames([backup.filename])
+                              }
                             >
                               {isDeleting ? (
                                 <LoadingMark className="h-4 w-4" />
@@ -1192,10 +1373,15 @@ export function SettingsBackupsContainer() {
           }
         }}
       >
-        <DialogContent id={selectorId("settings-backups-create-dialog")} className="sm:max-w-md">
+        <DialogContent
+          id={selectorId("settings-backups-create-dialog")}
+          className="sm:max-w-md"
+        >
           <DialogHeader>
             <DialogTitle>{t("settings.backupsCreateTitle")}</DialogTitle>
-            <DialogDescription>{t("settings.backupsCreateDescription")}</DialogDescription>
+            <DialogDescription>
+              {t("settings.backupsCreateDescription")}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <label className="block space-y-2 text-sm">
@@ -1218,7 +1404,9 @@ export function SettingsBackupsContainer() {
               />
             </label>
             <label className="block space-y-2 text-sm">
-              <span className="font-medium">{t("settings.backupsConfirmPassword")}</span>
+              <span className="font-medium">
+                {t("settings.backupsConfirmPassword")}
+              </span>
               <Input
                 id={selectorId("settings-backups-create-confirm-password")}
                 type="password"

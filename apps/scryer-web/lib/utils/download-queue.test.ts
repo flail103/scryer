@@ -7,8 +7,14 @@ import { createServer, type ViteDevServer } from "vite";
 const WEB_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 type DownloadQueueModule = {
-  buildQueueStatusDetail: (item: DownloadQueueItem, t?: (key: string) => string) => string;
-  importRetrySucceeded: (result: { decision?: string; skipReason?: string | null } | null | undefined) => boolean;
+  buildQueueStatusDetail: (
+    item: DownloadQueueItem,
+    t?: (key: string) => string,
+  ) => string;
+  importRetrySucceeded: (
+    result:
+      { decision?: string; skipReason?: string | null } | null | undefined,
+  ) => boolean;
   IMPORT_ATTENTION_STATUSES: string[];
   sameDownloadQueueItem: (
     current: DownloadQueueItem,
@@ -53,7 +59,9 @@ after(async () => {
   await server.close();
 });
 
-function queueItem(overrides: Partial<DownloadQueueItem> = {}): DownloadQueueItem {
+function queueItem(
+  overrides: Partial<DownloadQueueItem> = {},
+): DownloadQueueItem {
   return {
     id: "qbittorrent:abc",
     titleId: "title-1",
@@ -114,11 +122,19 @@ test("HTTP queue refusals translate the code and preserve legacy sentences", () 
     attentionReason: "HTTP_RELEASE_UNKNOWN_CONTAINER",
     trackedStatusMessages: ["changed server wording"],
   });
-  assert.equal(downloadQueue.buildQueueStatusDetail(item, (key) => key),
-    "httpRelease.refusal.unknownContainer");
-  assert.equal(downloadQueue.buildQueueStatusDetail(queueItem({
-    attentionReason: "legacy server wording",
-  }), (key) => key), "legacy server wording");
+  assert.equal(
+    downloadQueue.buildQueueStatusDetail(item, (key) => key),
+    "httpRelease.refusal.unknownContainer",
+  );
+  assert.equal(
+    downloadQueue.buildQueueStatusDetail(
+      queueItem({
+        attentionReason: "legacy server wording",
+      }),
+      (key) => key,
+    ),
+    "legacy server wording",
+  );
 });
 
 test("queue item equality ignores regenerated equivalent payload objects", () => {
@@ -140,20 +156,41 @@ test("queue item equality ignores regenerated equivalent payload objects", () =>
 
   assert.equal(downloadQueue.sameDownloadQueueItem(current, next), true);
   assert.equal(
-    downloadQueue.sameDownloadQueueItem(
-      current,
-      { ...next, progressPercent: next.progressPercent + 1 },
-    ),
+    downloadQueue.sameDownloadQueueItem(current, {
+      ...next,
+      progressPercent: next.progressPercent + 1,
+    }),
     false,
   );
 });
 
 test("a returned import ID does not turn a failed password retry into success", () => {
-  const result = { importId: "attempt-1", decision: "FAILED", skipReason: "PASSWORD_REQUIRED" };
+  const result = {
+    importId: "attempt-1",
+    decision: "FAILED",
+    skipReason: "PASSWORD_REQUIRED",
+  };
   assert.equal(downloadQueue.importRetrySucceeded(result), false);
-  assert.equal(downloadQueue.importRetrySucceeded({ ...result, decision: "SKIPPED" }), false);
-  assert.equal(downloadQueue.importRetrySucceeded({ ...result, decision: "IMPORTED", skipReason: null }), true);
-  assert.equal(downloadQueue.importRetrySucceeded({ ...result, decision: "SKIPPED", skipReason: "ALREADY_IMPORTED" }), true);
+  assert.equal(
+    downloadQueue.importRetrySucceeded({ ...result, decision: "SKIPPED" }),
+    false,
+  );
+  assert.equal(
+    downloadQueue.importRetrySucceeded({
+      ...result,
+      decision: "IMPORTED",
+      skipReason: null,
+    }),
+    true,
+  );
+  assert.equal(
+    downloadQueue.importRetrySucceeded({
+      ...result,
+      decision: "SKIPPED",
+      skipReason: "ALREADY_IMPORTED",
+    }),
+    true,
+  );
   assert.equal(downloadQueue.importRetrySucceeded(undefined), false);
 });
 
@@ -174,7 +211,10 @@ test("queue reconciliation refreshes password failure and retry attempt changes"
 
 test("queue reconciliation retains unchanged rows and list identity", () => {
   const first = queueItem();
-  const second = queueItem({ id: "qbittorrent:def", downloadClientItemId: "def" });
+  const second = queueItem({
+    id: "qbittorrent:def",
+    downloadClientItemId: "def",
+  });
   const current = [first, second];
 
   const unchanged = downloadQueue.reconcileDownloadQueueItems(current, [

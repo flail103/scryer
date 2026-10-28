@@ -139,10 +139,14 @@ function toSeriesMovieChoices(
       externalIds,
     });
   }
-  return [...byKey.values()].sort((left, right) => left.key.localeCompare(right.key));
+  return [...byKey.values()].sort((left, right) =>
+    left.key.localeCompare(right.key),
+  );
 }
 
-function defaultSelection(choices: SeriesMonitorChoices): MonitorSelectionDraft {
+function defaultSelection(
+  choices: SeriesMonitorChoices,
+): MonitorSelectionDraft {
   return normalizeMonitorSelection({
     // Specials stay off by default, matching the non-advanced default.
     seasonNumbers: choices.seasons
@@ -188,7 +192,9 @@ export function MonitorSelectionPicker({
     : normalizedTvdbId
       ? `tvdb:${normalizedTvdbId}`
       : "";
-  const [choices, setChoices] = React.useState<SeriesMonitorChoices | null>(null);
+  const [choices, setChoices] = React.useState<SeriesMonitorChoices | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [retryCount, setRetryCount] = React.useState(0);
@@ -258,7 +264,10 @@ export function MonitorSelectionPicker({
         // Only seed defaults when the caller opened with nothing picked; a
         // prefilled draft (an existing request being approved or edited) is the
         // user's own selection and must survive.
-        if (!hasSelectionRef.current && seededSelectionRef.current !== cacheKey) {
+        if (
+          !hasSelectionRef.current &&
+          seededSelectionRef.current !== cacheKey
+        ) {
           seededSelectionRef.current = cacheKey;
           onChangeRef.current(defaultSelection(loaded));
         }
@@ -279,7 +288,14 @@ export function MonitorSelectionPicker({
     return () => {
       active = false;
     };
-  }, [client, normalizedSmgId, normalizedTvdbId, retryCount, seriesIdentityKey, t]);
+  }, [
+    client,
+    normalizedSmgId,
+    normalizedTvdbId,
+    retryCount,
+    seriesIdentityKey,
+    t,
+  ]);
 
   const selectedSeasons = React.useMemo(
     () => new Set(value.seasonNumbers),
@@ -295,12 +311,9 @@ export function MonitorSelectionPicker({
     [value.seriesMovies],
   );
 
-  const emit = React.useCallback(
-    (next: MonitorSelectionDraft) => {
-      onChangeRef.current(normalizeMonitorSelection(next));
-    },
-    [],
-  );
+  const emit = React.useCallback((next: MonitorSelectionDraft) => {
+    onChangeRef.current(normalizeMonitorSelection(next));
+  }, []);
 
   const toggleSeason = (seasonNumber: number, checked: boolean) => {
     emit({
@@ -379,7 +392,9 @@ export function MonitorSelectionPicker({
           className="flex flex-wrap items-center gap-2 text-sm text-[var(--scry-danger)]"
         >
           <AlertTriangle className="h-4 w-4 flex-none" />
-          <span className="min-w-0 flex-1">{t("monitorSelection.loadFailed")}</span>
+          <span className="min-w-0 flex-1">
+            {t("monitorSelection.loadFailed")}
+          </span>
           <button
             type="button"
             id={`${idPrefix}-monitor-selection-retry`}
@@ -408,7 +423,9 @@ export function MonitorSelectionPicker({
                     onClick={() =>
                       emit({
                         ...value,
-                        seasonNumbers: choices.seasons.map((season) => season.number),
+                        seasonNumbers: choices.seasons.map(
+                          (season) => season.number,
+                        ),
                       })
                     }
                   >
@@ -497,7 +514,9 @@ export function MonitorSelectionPicker({
                     label={movieLabel(movie)}
                     checked={selectedMovieKeys.has(movie.key)}
                     disabled={disabled}
-                    onCheckedChange={(checked) => toggleMovie(movie, checked === true)}
+                    onCheckedChange={(checked) =>
+                      toggleMovie(movie, checked === true)
+                    }
                   />
                 ))}
               </div>

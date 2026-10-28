@@ -30,12 +30,21 @@ export type RestoreJobFailure = {
  * A failed or interrupted restore attempt in the same shape as a refused
  * request, so one translation path explains both.
  */
-export function restoreJobError(job: RestoreJobFailure, fallback: string): Error {
-  const error = new Error(job.message ?? fallback) as Error & { graphQLErrors: unknown[] };
-  error.graphQLErrors = [{
-    message: job.message ?? fallback,
-    extensions: job.reason ? { code: "VALIDATION_ERROR", reason: job.reason } : {},
-  }];
+export function restoreJobError(
+  job: RestoreJobFailure,
+  fallback: string,
+): Error {
+  const error = new Error(job.message ?? fallback) as Error & {
+    graphQLErrors: unknown[];
+  };
+  error.graphQLErrors = [
+    {
+      message: job.message ?? fallback,
+      extensions: job.reason
+        ? { code: "VALIDATION_ERROR", reason: job.reason }
+        : {},
+    },
+  ];
   return error;
 }
 
@@ -53,7 +62,11 @@ export function restoreRefusalKey(error: unknown): string | null {
  * with the server's own sentence as its fallback, and `fallback` when the
  * failure carries no usable sentence.
  */
-export function restoreErrorMessage(error: unknown, t: Translate, fallback: string): string {
+export function restoreErrorMessage(
+  error: unknown,
+  t: Translate,
+  fallback: string,
+): string {
   const key = restoreRefusalKey(error);
   return key ? t(key) : userFacingGraphQlErrorMessage(error, fallback, t);
 }

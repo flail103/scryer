@@ -504,8 +504,7 @@ export function SettingsIndexersContainer({
           }
           if (error) throw error;
           const answer = data?.pluginConfigFields as
-            | DynamicConfigFields
-            | undefined;
+            DynamicConfigFields | undefined;
           applyDynamicConfigFields(
             normalizedDraftProviderType,
             answer &&
@@ -524,7 +523,9 @@ export function SettingsIndexersContainer({
             state: "error",
             message: userFacingGraphQlErrorMessage(
               error,
-              t("status.failedToLoad"), t),
+              t("status.failedToLoad"),
+              t,
+            ),
           });
         }
       })();
@@ -661,9 +662,7 @@ export function SettingsIndexersContainer({
           }
           if (error) throw error;
           const challenge = data?.pluginConfigFields?.loginChallenge as
-            | { contentType: string; imageData: string }
-            | null
-            | undefined;
+            { contentType: string; imageData: string } | null | undefined;
           setLoginChallenge(
             challenge
               ? {
@@ -844,7 +843,9 @@ export function SettingsIndexersContainer({
           ...previous,
           [scope]: indexerRoutingEntriesToMap(data?.updateIndexerRouting),
         }));
-        setGlobalStatus(t("settings.qualitySettingsSaved"), { level: "SUCCESS" });
+        setGlobalStatus(t("settings.qualitySettingsSaved"), {
+          level: "SUCCESS",
+        });
       } catch (error) {
         setIndexerRoutingByScope((previous) => ({
           ...previous,
@@ -1630,7 +1631,9 @@ export function SettingsIndexersContainer({
         })
         .toPromise();
       if (error) throw error;
-      setGlobalStatus(t("status.indexerDeleted", { name: indexer.name }), { level: "SUCCESS" });
+      setGlobalStatus(t("status.indexerDeleted", { name: indexer.name }), {
+        level: "SUCCESS",
+      });
       await refreshIndexers();
       if (editingIndexerId === indexer.id) {
         resetIndexerDraft();

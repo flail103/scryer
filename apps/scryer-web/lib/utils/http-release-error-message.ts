@@ -13,7 +13,8 @@ export const HTTP_RELEASE_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   HTTP_RELEASE_LIVE: "httpRelease.refusal.live",
   HTTP_RELEASE_UPCOMING: "httpRelease.refusal.upcoming",
   HTTP_RELEASE_REMOVED: "httpRelease.refusal.removed",
-  HTTP_RELEASE_UNSUPPORTED_TRANSPORT: "httpRelease.refusal.unsupportedTransport",
+  HTTP_RELEASE_UNSUPPORTED_TRANSPORT:
+    "httpRelease.refusal.unsupportedTransport",
   HTTP_RELEASE_SEPARATE_TRACKS: "httpRelease.refusal.separateTracks",
   HTTP_RELEASE_NO_MEDIA_RESOURCE: "httpRelease.refusal.noMediaResource",
   HTTP_RELEASE_NO_SUBTITLE_RESOURCE: "httpRelease.refusal.noSubtitleResource",
@@ -38,7 +39,11 @@ export function httpReleaseRefusalKey(error: unknown): string | null {
  * the viewer's language, otherwise whatever a plugin failure or the server's
  * own sentence says.
  */
-export function grabErrorMessage(error: unknown, t: Translate, fallback: string): string {
+export function grabErrorMessage(
+  error: unknown,
+  t: Translate,
+  fallback: string,
+): string {
   const key = httpReleaseRefusalKey(error);
   return key ? t(key) : pluginErrorMessage(error, t, fallback);
 }

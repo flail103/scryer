@@ -59,7 +59,9 @@ export function MaintenanceSubjectPicker({
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          setError(userFacingGraphQlErrorMessage(error, t("status.apiError"), t));
+          setError(
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
+          );
           return;
         }
         setCollections(
@@ -89,7 +91,9 @@ export function MaintenanceSubjectPicker({
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          setError(userFacingGraphQlErrorMessage(error, t("status.apiError"), t));
+          setError(
+            userFacingGraphQlErrorMessage(error, t("status.apiError"), t),
+          );
           return;
         }
         setEpisodes(data?.collectionById?.episodes ?? []);

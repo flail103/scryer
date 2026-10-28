@@ -20,7 +20,10 @@ import {
 } from "lucide-react";
 
 import { LibraryMultiSelect } from "@/components/common/library-multi-select";
-import { UnderlineFilterButton, type UnderlineFilterButtonTone } from "@/components/common/underline-filter-button";
+import {
+  UnderlineFilterButton,
+  type UnderlineFilterButtonTone,
+} from "@/components/common/underline-filter-button";
 import type { Translate } from "@/components/root/types";
 import { useTitleTagDefinitions } from "@/lib/hooks/use-title-tag-definitions";
 import { availableTitleTagLabels } from "@/lib/utils/title-tags";
@@ -245,9 +248,9 @@ export function CatalogFiltersPanel({
   const eligibleLibraryIds = React.useMemo(() => {
     const explicitLibraryIds = selectedLibraryIds.filter(Boolean);
     return new Set(
-        explicitLibraryIds.length > 0
-          ? explicitLibraryIds
-          : libraries.map((library) => library.id),
+      explicitLibraryIds.length > 0
+        ? explicitLibraryIds
+        : libraries.map((library) => library.id),
     );
   }, [libraries, selectedLibraryIds]);
   const rootGroups = React.useMemo<MultiSelectGroup[]>(
@@ -450,7 +453,10 @@ export function CatalogFiltersPanel({
               title={option.title}
               count={option.count}
               tone={option.tone}
-              className={splitFilterSegmentClassName(option.selected, index > 0)}
+              className={splitFilterSegmentClassName(
+                option.selected,
+                index > 0,
+              )}
             />
           ))}
         </div>
@@ -469,7 +475,10 @@ export function CatalogFiltersPanel({
               title={option.title}
               count={option.count}
               tone={option.tone}
-              className={splitFilterSegmentClassName(option.selected, index > 0)}
+              className={splitFilterSegmentClassName(
+                option.selected,
+                index > 0,
+              )}
             />
           ))}
         </div>
@@ -498,7 +507,11 @@ export function CatalogFiltersPanel({
 
       <div className="grid gap-x-4 md:grid-cols-2">
         <div className="mb-4 min-w-0">
-          <FilterLabel icon={<LibraryBig className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+          <FilterLabel
+            icon={
+              <LibraryBig className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            }
+          >
             {t("settings.librariesLabel")}
           </FilterLabel>
           <LibraryMultiSelect
@@ -511,7 +524,11 @@ export function CatalogFiltersPanel({
           />
         </div>
         <div className="mb-4 min-w-0">
-          <FilterLabel icon={<Folder className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+          <FilterLabel
+            icon={
+              <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            }
+          >
             {t("title.rootFolder")}
           </FilterLabel>
           <MultiSelectDropdown
@@ -529,7 +546,9 @@ export function CatalogFiltersPanel({
 
       <div className="grid gap-x-4 md:grid-cols-2">
         <div className="mb-4 min-w-0">
-          <FilterLabel icon={<Film className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+          <FilterLabel
+            icon={<Film className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+          >
             {t("discovery.genres")}
           </FilterLabel>
           <MultiSelectDropdown
@@ -566,7 +585,11 @@ export function CatalogFiltersPanel({
             to be labelled with the generic "Tags" wording, which now belongs to
             the administrator-defined registry below. */}
         <div className="mb-4 min-w-0">
-          <FilterLabel icon={<Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+          <FilterLabel
+            icon={
+              <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            }
+          >
             {t("title.catalogFilters.themes")}
           </FilterLabel>
           <MultiSelectDropdown
@@ -605,7 +628,9 @@ export function CatalogFiltersPanel({
           empty registry has nothing to offer and no free text to fall back on,
           so the control says where tags come from instead. */}
       <div className="mb-4 min-w-0">
-        <FilterLabel icon={<Tag className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+        <FilterLabel
+          icon={<Tag className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+        >
           {t("title.catalogFilters.userTags")}
         </FilterLabel>
         {userTagOptions.length === 0 && !tagDefinitionsLoading ? (
@@ -646,7 +671,11 @@ export function CatalogFiltersPanel({
       </div>
 
       <div className="mb-2.5 flex items-center justify-between">
-        <FilterLabel icon={<CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+        <FilterLabel
+          icon={
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          }
+        >
           {t("discovery.releaseYear")}
         </FilterLabel>
         <span className="mb-2.5 text-[11.5px] text-[var(--scry-faint)]">
@@ -701,7 +730,9 @@ export function CatalogFiltersPanel({
       </div>
 
       <div className="mb-2.5 flex items-center justify-between">
-        <FilterLabel icon={<Star className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}>
+        <FilterLabel
+          icon={<Star className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+        >
           {t("discovery.minimumRating")}
         </FilterLabel>
         <span className="mb-2.5 text-[11.5px] font-bold text-[var(--scry-accent-ring)]">

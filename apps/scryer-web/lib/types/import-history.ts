@@ -13,20 +13,10 @@ export type ImportType =
   | "RENAME_STALE_PLAN";
 
 export type ImportRecordStatus =
-  | "PENDING"
-  | "RUNNING"
-  | "PROCESSING"
-  | "COMPLETED"
-  | "FAILED"
-  | "SKIPPED";
+  "PENDING" | "RUNNING" | "PROCESSING" | "COMPLETED" | "FAILED" | "SKIPPED";
 
 export type ImportDecision =
-  | "IMPORTED"
-  | "REJECTED"
-  | "SKIPPED"
-  | "CONFLICT"
-  | "UNMATCHED"
-  | "FAILED";
+  "IMPORTED" | "REJECTED" | "SKIPPED" | "CONFLICT" | "UNMATCHED" | "FAILED";
 
 export type ImportSkipReason =
   | "ALREADY_IMPORTED"

@@ -11,7 +11,10 @@ export type IndexerClientRequestOutcome =
   | "UNAVAILABLE"
   | "FAILED";
 
-export type IndexerClientGrant = { indexerId: string; categories: string[] | null };
+export type IndexerClientGrant = {
+  indexerId: string;
+  categories: string[] | null;
+};
 export type IndexerClientConfiguration = {
   name: string;
   enabled: boolean;
