@@ -22,6 +22,8 @@ mod full_admin_manage_lists_upgrade_tests;
 pub mod hook_ids;
 #[cfg(test)]
 mod imdb_user_list_follows_upgrade_tests;
+#[cfg(test)]
+mod initial_auth_tests;
 pub mod known_bad;
 #[cfg(test)]
 mod legacy_monitor_snapshot_upgrade_tests;
@@ -201,6 +203,7 @@ pub async fn replay_catalog_into_fresh_db(
         through_version,
         enable_baselines,
         &MigrationHookContext::default(),
+        false,
     )
     .await
 }
@@ -212,6 +215,7 @@ async fn replay_catalog_into_fresh_db_with_context(
     through_version: Option<i64>,
     enable_baselines: bool,
     hook_context: &MigrationHookContext,
+    initialize_authentication: bool,
 ) -> AppResult<()> {
     ensure_migration_ledger_shape(conn).await?;
 
@@ -232,7 +236,14 @@ async fn replay_catalog_into_fresh_db_with_context(
         && let Some(baseline) =
             catalog.latest_baseline_at_or_below(target_version, EngineScope::Sqlite)
     {
-        apply_baseline(conn, catalog, payload_bytes, baseline).await?;
+        apply_baseline(
+            conn,
+            catalog,
+            payload_bytes,
+            baseline,
+            initialize_authentication,
+        )
+        .await?;
         start_version = baseline.through_version + 1;
     }
 
@@ -298,6 +309,7 @@ pub async fn run_migrations_with_hook_context(
                 None,
                 true,
                 &hook_context,
+                true,
             )
             .await?;
         }
@@ -697,6 +709,7 @@ async fn apply_baseline(
     catalog: &CompiledMigrationCatalog,
     payload_bytes: &[u8],
     baseline: &CompiledBaseline,
+    initialize_authentication: bool,
 ) -> AppResult<()> {
     let sql = baseline
         .payload
@@ -718,6 +731,17 @@ async fn apply_baseline(
             .execute(&mut *tx)
             .await
             .map_err(|error| AppError::Repository(error.to_string()))?;
+    }
+
+    // Persist the first-run requirement with the fresh schema, before any later
+    // migration can fail and cause the next boot to take the upgrade path.
+    if initialize_authentication {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(
+            include_str!("initial_auth_seed.sql").to_owned(),
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Repository(error.to_string()))?;
     }
 
     for migration in catalog

@@ -3,6 +3,18 @@ const GROUPS: readonly {
   codes: readonly string[];
   reasons: readonly string[];
 }[] = [
+  {
+    codes: ["VALIDATION_ERROR"],
+    reasons: [
+      "INITIAL_AUTH_REQUIRED",
+      "INITIAL_AUTH_ALREADY_COMPLETED",
+      "INITIAL_AUTH_PASSWORD_REPLACEMENT_REQUIRED",
+      "INITIAL_AUTH_CODE_INVALID",
+      "INITIAL_AUTH_CODE_RATE_LIMITED",
+      "INITIAL_AUTH_MODE_CONFLICT",
+      "INITIAL_AUTH_ACKNOWLEDGEMENT_REQUIRED",
+    ],
+  },
   { codes: ["AUTHENTICATION_REQUIRED"], reasons: ["AUTHENTICATION_REQUIRED"] },
   { codes: ["INTERNAL_ERROR"], reasons: ["INTERNAL_ERROR"] },
   {

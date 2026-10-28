@@ -799,6 +799,7 @@ impl ServerSupervisor {
             // server must not also open a browser tab.
             .env("SCRYER_OPEN_BROWSER", "false")
             .env("SCRYER_TRAY_SUPERVISED", "1");
+        configure_server_console(&mut command, &self.logs_dir())?;
         configure_server_command(&mut command);
         let child = command.spawn().map_err(|error| {
             format!(
@@ -1168,6 +1169,27 @@ fn remove_path(path: &Path) -> std::io::Result<()> {
         // Windows removes a link to a folder as a folder.
         std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))
     }
+}
+
+/// Preserve operator-only process output when the desktop has no console.
+/// This stream is separate from tracing and the web-accessible log ring.
+fn configure_server_console(command: &mut Command, logs_dir: &Path) -> Result<(), String> {
+    let path = logs_dir.join("console.log");
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let output = options.open(&path).map_err(|error| {
+        format!(
+            "failed to capture server console at {}: {error}",
+            path.display()
+        )
+    })?;
+    command.stderr(output);
+    Ok(())
 }
 
 /// Keep the server out of the user's face. On Windows a console subsystem
@@ -1554,6 +1576,59 @@ mod tests {
     }
 
     // -- the environment the supervised server is not allowed to inherit ------
+
+    #[test]
+    fn desktop_console_child() {
+        if std::env::var("SCRYER_TEST_DESKTOP_CONSOLE_CHILD").as_deref() != Ok("1") {
+            return;
+        }
+        use std::io::Write;
+        writeln!(std::io::stderr(), "Scryer one-time setup code: ABC-234").unwrap();
+    }
+
+    #[tokio::test]
+    async fn desktop_console_captures_setup_output_without_overwriting_previous_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        for _ in 0..2 {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "shared::tests::desktop_console_child",
+                    "--nocapture",
+                ])
+                .env("SCRYER_TEST_DESKTOP_CONSOLE_CHILD", "1")
+                .stdout(std::process::Stdio::piped());
+            super::configure_server_console(&mut command, dir.path()).unwrap();
+            super::configure_server_command(&mut command);
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                tokio::process::Command::from(command)
+                    .kill_on_drop(true)
+                    .spawn()
+                    .unwrap()
+                    .wait_with_output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert!(output.stderr.is_empty());
+        }
+        let output_path = dir.path().join("console.log");
+        assert_eq!(
+            std::fs::read_to_string(&output_path).unwrap(),
+            "Scryer one-time setup code: ABC-234\n".repeat(2)
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(output_path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
 
     #[test]
     fn desktop_environment_child() {

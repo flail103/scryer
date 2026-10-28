@@ -719,6 +719,23 @@ impl AppUseCase {
                 )
                 .await?;
         }
+        if let Some(pending_admin) = self
+            .services
+            .identity
+            .users
+            .prepare_initial_authentication_recovery(&recovery_admin.id)
+            .await?
+        {
+            recovery_admin = pending_admin;
+            self.services.config.settings.invalidate_cache();
+            self.emit_configuration_changed_event(
+                None,
+                "initial_authentication",
+                Some(recovery_admin.id.clone()),
+                ConfigurationChangeAction::Updated,
+            )
+            .await;
+        }
         self.refresh_cached_jwt_signing_key(&recovery_admin).await?;
         Ok(recovery_admin)
     }

@@ -202,6 +202,11 @@ mod tests {
             let catalog = title_store(&services);
             let images = TitleImageStore::new(services.datastore());
             let settings = settings_store(&services);
+            let initial_setup: String = sqlx::query_scalar("SELECT CAST(value_json AS TEXT) FROM settings_values WHERE id = 'initial-authentication-setup'")
+                .fetch_one(services.pool()).await.map_err(|error| AppError::Repository(error.to_string()))?;
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&initial_setup).unwrap(), serde_json::json!({"stage": "choice"}));
+            crate::postgres::migrations::run_migrations(services.pool(), MigrationMode::Apply).await?;
+            assert_eq!(user_store(&services).initial_authentication_state().await?, Some(scryer_application::initial_auth::SetupState::Choice));
             let info = settings.datastore_info().await?;
             assert_eq!(info.engine, "postgres");
             let current_migration_key = info.current_migration_key.as_deref().ok_or_else(|| {

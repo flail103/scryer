@@ -776,6 +776,9 @@ fn from_auth_runtime_state(
     default_persist_session: bool,
 ) -> AuthRuntimeStatePayload {
     AuthRuntimeStatePayload {
+        initial_authentication_stage: None,
+        initial_authentication_code_required: false,
+        password_min_length: security_settings.password_min_length,
         effective_form_login_enabled: auth_runtime.effective_form_login_enabled,
         skip_login_for_local_ips: auth_runtime.skip_login_for_local_ips,
         passkey_enabled: auth_runtime.passkey_enabled,
@@ -1151,11 +1154,22 @@ impl SettingsQueries {
         let app = app_from_ctx(ctx)?;
         let auth_runtime = auth_runtime_from_ctx(ctx);
         let security_settings = app.security_settings().await.map_err(to_gql_error)?;
-        Ok(from_auth_runtime_state(
+        let setup = app
+            .initial_authentication_state()
+            .await
+            .map_err(to_gql_error)?;
+        let mut payload = from_auth_runtime_state(
             &auth_runtime.snapshot(),
             security_settings,
             default_persist_session_from_ctx(ctx),
-        ))
+        );
+        payload.initial_authentication_stage = setup.as_ref().map(|state| state.stage().to_owned());
+        payload.initial_authentication_code_required =
+            matches!(
+                setup,
+                Some(scryer_application::initial_auth::SetupState::Choice)
+            ) && auth_runtime.initial_authentication.code_required();
+        Ok(payload)
     }
 
     /// Lists the authenticated actor's passkey summaries without credential material.

@@ -1031,6 +1031,12 @@ async fn upsert_setting_definition_tx(
     definition: SettingDefinitionSeed,
     now: chrono::DateTime<Utc>,
 ) -> AppResult<()> {
+    if definition.key_name.trim() == scryer_application::initial_auth::SETTING_KEY {
+        return Err(AppError::validation_refused(
+            scryer_application::initial_auth::refusal::MODE_CONFLICT,
+            "initial authentication state is managed by setup",
+        ));
+    }
     let id = format!(
         "{}:{}:{}",
         definition.category.trim(),
@@ -1089,6 +1095,12 @@ async fn upsert_setting_value_tx(
 ) -> AppResult<SettingsValueRecord> {
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
+    if key_name == scryer_application::initial_auth::SETTING_KEY {
+        return Err(AppError::validation_refused(
+            scryer_application::initial_auth::refusal::MODE_CONFLICT,
+            "initial authentication state is managed by setup",
+        ));
+    }
     if scope.is_empty() || key_name.is_empty() {
         return Err(AppError::validation_refused(
             crate::error_reasons::CONFIGURATION_SETTING_UPDATE_IDENTITY_REQUIRED,
@@ -1221,6 +1233,12 @@ async fn delete_setting_value_tx(
 ) -> AppResult<()> {
     let scope = scope.trim().to_string();
     let key_name = key_name.trim().to_string();
+    if key_name == scryer_application::initial_auth::SETTING_KEY {
+        return Err(AppError::validation_refused(
+            scryer_application::initial_auth::refusal::MODE_CONFLICT,
+            "initial authentication state is managed by setup",
+        ));
+    }
     if scope.is_empty() || key_name.is_empty() {
         return Err(AppError::validation_refused(
             crate::error_reasons::CONFIGURATION_SETTING_DELETE_IDENTITY_REQUIRED,

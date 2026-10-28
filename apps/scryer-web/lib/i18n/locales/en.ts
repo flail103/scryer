@@ -1,6 +1,50 @@
 import type { LocaleDictionary } from "../types";
 
 const en: LocaleDictionary = {
+  "initialAuth.title": "Set up access to Scryer",
+  "initialAuth.description":
+    "Before continuing, choose whether this instance requires sign-in.",
+  "initialAuth.choose": "How should people access Scryer?",
+  "initialAuth.passwordMode": "Require an administrator password",
+  "initialAuth.noAuthMode": "Continue without authentication",
+  "initialAuth.environment":
+    "Your startup environment restricts the available authentication mode.",
+  "initialAuth.admin":
+    "Set the password for admin. Use at least {{minLength}} characters.",
+  "initialAuth.password": "New password",
+  "initialAuth.confirm": "Confirm password",
+  "initialAuth.mismatch": "The passwords do not match.",
+  "initialAuth.acknowledge":
+    "I understand that anyone allowed to reach this unauthenticated instance can act as administrator. Existing network restrictions still apply.",
+  "initialAuth.code": "Setup code",
+  "initialAuth.codeHelp":
+    "Find the one-time code in the server console or container/service output. Restarting Scryer replaces the code.",
+  "initialAuth.continue": "Save password and continue",
+  "initialAuth.continueWithout": "Confirm no authentication and continue",
+  "initialAuth.saving": "Saving…",
+  "initialAuth.loadFailed":
+    "Authentication setup status could not be loaded. Retry to continue.",
+  "initialAuth.retry": "Retry",
+  "initialAuth.saveFailed": "Authentication setup could not be saved.",
+  "initialAuth.required": "Complete authentication setup before continuing.",
+  "initialAuth.alreadyCompleted":
+    "Authentication setup has already been completed. Refresh to continue.",
+  "initialAuth.replaceRequired":
+    "Sign in with the temporary administrator password and replace it.",
+  "initialAuth.invalidCode": "Enter the setup code from the server console.",
+  "initialAuth.rateLimited":
+    "Too many incorrect setup codes. Wait one minute and try again.",
+  "initialAuth.modeConflict":
+    "This choice conflicts with the startup environment or the supplied password.",
+  "initialAuth.acknowledgeRequired":
+    "Confirm that you want to continue without authentication.",
+  "initialAuth.sessionExpired":
+    "This temporary session has expired. Sign in again to continue.",
+  "initialAuth.replacementTitle": "Choose a new password",
+  "initialAuth.replacementDescription":
+    "Sign-in used a temporary administrator password. Replace it with a different password that only you know.",
+  "initialAuth.showPasswords": "Show passwords",
+  "initialAuth.signOut": "Sign out",
   "error.reason.EXTERNAL_ACCOUNT_LINK_FAILED":
     "The external account could not be linked.",
   "error.reason.CATALOG_TAG_INVALID": "The title tag is invalid.",

@@ -287,6 +287,19 @@ async function computeAuthBootstrapSnapshot(): Promise<AuthBootstrapSnapshot> {
     // runtime-state probe is temporarily unavailable.
   }
 
+  if (runtimeState?.initialAuthenticationStage === "choice") {
+    return {
+      token: null,
+      user: null,
+      passwordChangeRequired: false,
+      effectiveFormLoginEnabled,
+      passkeyEnabled,
+      defaultPersistSession,
+      mfaRequirePasswordLogin,
+      mfaRequireConfigStepUp,
+      mfaRequireJellyfinLogin,
+    };
+  }
   if (runtimeState?.effectiveFormLoginEnabled === false) {
     clearPersistedAuthToken();
     return {

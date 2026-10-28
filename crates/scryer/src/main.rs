@@ -67,6 +67,7 @@ mod http_error;
 mod http_metrics;
 mod indexer_search_routes;
 mod init;
+mod initial_auth;
 mod list_account_origin;
 mod log_buffer;
 mod log_delivery;
@@ -2319,7 +2320,16 @@ async fn bootstrap_application(
             "SCRYER_DEV_AUTO_LOGIN is deprecated; use SCRYER_AUTH_ENABLED=false instead"
         );
     }
-    if auth_runtime.snapshot().effective_form_login_enabled {
+    let initial_auth_state = app_use_case.initial_authentication_state().await?;
+    if let Some(state) = &initial_auth_state {
+        state.validate_runtime_mode(auth_runtime.snapshot().effective_form_login_enabled)?;
+    }
+    let initial_auth_pending = initial_auth_state
+        .as_ref()
+        .is_some_and(|state| state.is_pending());
+    if initial_auth_pending {
+        tracing::info!("initial authentication setup must be completed before application access");
+    } else if auth_runtime.snapshot().effective_form_login_enabled {
         if auth_mode.recovery_active() {
             tracing::warn!(
                 env = RECOVERY_ADMIN_PASSWORD_ENV,
@@ -2467,6 +2477,17 @@ async fn bootstrap_application(
         std::process::exit(1);
     }
     let rate_limiter = ScryerRateLimiter::from_env(app_use_case.trusted_proxy_runtime());
+    if matches!(
+        initial_auth_state,
+        Some(scryer_application::initial_auth::SetupState::Choice)
+    ) {
+        // A loopback peer can be a reverse proxy without forwarding headers.
+        // Every browser choice therefore requires operator-controlled proof.
+        let code = auth_runtime.initial_authentication.initialize()?;
+        // Operator-only output: deliberately bypass tracing and its web log ring.
+        use std::io::Write;
+        writeln!(std::io::stderr(), "Scryer one-time setup code: {code}")?;
+    }
     let authless_access_policy = AuthlessAccessPolicy {
         allow_unauthenticated_public_access: auth_mode.allow_unauthenticated_public_access,
     };
@@ -2595,6 +2616,10 @@ async fn bootstrap_application(
         .layer(axum::middleware::from_fn_with_state(
             authless_access_guard_state,
             enforce_authless_access_guard,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            auth_state.clone(),
+            initial_auth::admit_http,
         ))
         .layer(axum::middleware::from_fn(move |request, next| {
             cors_handler(request, next, cors_for_layer.clone())

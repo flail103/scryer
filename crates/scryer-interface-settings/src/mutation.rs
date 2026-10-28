@@ -2607,6 +2607,59 @@ impl SettingsMutations {
         }
     }
 
+    /// Completes the mandatory authentication decision on a new database.
+    async fn complete_initial_authentication(
+        &self,
+        ctx: &Context<'_>,
+        input: CompleteInitialAuthenticationInput,
+    ) -> GqlResult<InitialAuthenticationPayload> {
+        use scryer_application::initial_auth::refusal;
+        ctx.data::<scryer_interface_core::InitialAuthenticationRequest>()?;
+        let app = app_from_ctx(ctx)?;
+        let runtime = auth_runtime_from_ctx(ctx);
+        runtime
+            .initial_authentication
+            .verify(input.setup_code.as_deref())
+            .map_err(to_gql_error)?;
+        let password_mode = input.mode == InitialAuthenticationMode::Password;
+        if password_mode != input.password.is_some()
+            || (runtime.snapshot().env_override_active
+                && runtime.snapshot().effective_form_login_enabled != password_mode)
+        {
+            return Err(to_gql_error(AppError::validation_refused(
+                refusal::MODE_CONFLICT,
+                "the authentication choice conflicts with its password or environment configuration",
+            )));
+        }
+        let user = app
+            .complete_initial_authentication(input.password, input.acknowledge_no_authentication)
+            .await
+            .map_err(to_gql_error)?;
+        runtime.apply_saved_security_settings(password_mode, false);
+        runtime.invalidate_connections();
+        runtime.initial_authentication.consume();
+        let login = if password_mode {
+            Some(
+                login_payload_from_user(
+                    &app,
+                    user,
+                    None,
+                    None,
+                    default_persist_session_from_ctx(ctx),
+                    None,
+                    false,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        Ok(InitialAuthenticationPayload {
+            completed: true,
+            login,
+        })
+    }
+
     /// Replaces an administrator-provided temporary password and issues the full session.
     async fn complete_required_password_change(
         &self,
@@ -2617,6 +2670,19 @@ impl SettingsMutations {
         let app = app_from_ctx(ctx)?;
         let claims = mfa_verification_from_ctx(ctx);
         let actor = password_change_required_actor_from_ctx(ctx)?;
+        if let Some(state) = app
+            .initial_authentication_state()
+            .await
+            .map_err(to_gql_error)?
+        {
+            state
+                .validate_runtime_mode(
+                    auth_runtime_from_ctx(ctx)
+                        .snapshot()
+                        .effective_form_login_enabled,
+                )
+                .map_err(to_gql_error)?;
+        }
         let (user, auth_session_version) = app
             .complete_required_password_change(&actor, input.password, &claims.auth_session_version)
             .await

@@ -874,12 +874,12 @@ export default function LoginPage() {
     async (event: React.FormEvent) => {
       event.preventDefault();
       if (!replacementPassword) {
-        setError("Enter a new password.");
+        setError(t("setup.passwordRequired"));
         replacementPasswordInput.current?.focus();
         return;
       }
       if (replacementPassword !== replacementPasswordConfirmation) {
-        setError("The new passwords do not match.");
+        setError(t("initialAuth.mismatch"));
         return;
       }
 
@@ -893,7 +893,7 @@ export default function LoginPage() {
           )
           .toPromise();
         if (error || !data?.completeRequiredPasswordChange) {
-          throw error ?? new Error("Password replacement failed.");
+          throw error ?? new Error(t("initialAuth.saveFailed"));
         }
         const result = data.completeRequiredPasswordChange;
         adoptSession(result.token, result.user ?? null, result.persistSession);
@@ -903,13 +903,11 @@ export default function LoginPage() {
       } catch (err) {
         if (graphQlErrorCode(err) === "PASSWORD_CHANGE_REQUIRED") {
           logout();
-          setError(
-            "This temporary session has expired. Sign in again to continue.",
-          );
+          setError(t("initialAuth.sessionExpired"));
           return;
         }
         setError(
-          "Your new password could not be saved. Check the requirements and try again.",
+          userFacingGraphQlErrorMessage(err, t("initialAuth.saveFailed"), t),
         );
       } finally {
         setSubmitting(false);
@@ -922,6 +920,7 @@ export default function LoginPage() {
       redirectTarget,
       replacementPassword,
       replacementPasswordConfirmation,
+      t,
     ],
   );
 
@@ -1195,10 +1194,11 @@ export default function LoginPage() {
       <div className={AUTH_PAGE_CLASS}>
         <div className={AUTH_PANEL_CLASS}>
           <div className="space-y-2 text-center">
-            <h1 className={AUTH_HEADING_CLASS}>Choose a new password</h1>
+            <h1 className={AUTH_HEADING_CLASS}>
+              {t("initialAuth.replacementTitle")}
+            </h1>
             <p className={AUTH_MUTED_TEXT_CLASS}>
-              Your administrator supplied a temporary password. Choose a new
-              password that only you know.
+              {t("initialAuth.replacementDescription")}
             </p>
           </div>
 
@@ -1214,7 +1214,7 @@ export default function LoginPage() {
           <form onSubmit={handleRequiredPasswordChange} className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="required-password" className={AUTH_LABEL_CLASS}>
-                New password
+                {t("initialAuth.password")}
               </label>
               <Input
                 ref={replacementPasswordInput}
@@ -1232,7 +1232,7 @@ export default function LoginPage() {
                 htmlFor="required-password-confirmation"
                 className={AUTH_LABEL_CLASS}
               >
-                Confirm new password
+                {t("initialAuth.confirm")}
               </label>
               <Input
                 id="required-password-confirmation"
@@ -1254,7 +1254,7 @@ export default function LoginPage() {
                   setShowReplacementPassword(event.target.checked)
                 }
               />
-              Show passwords
+              {t("initialAuth.showPasswords")}
             </label>
             <button
               id="complete-required-password-change"
@@ -1263,7 +1263,7 @@ export default function LoginPage() {
               className={AUTH_PRIMARY_BUTTON_CLASS}
             >
               {submitting ? <LoadingMark className="h-4 w-4" /> : null}
-              {submitting ? "Saving password" : "Save new password"}
+              {t(submitting ? "initialAuth.saving" : "initialAuth.continue")}
             </button>
           </form>
 
@@ -1273,7 +1273,7 @@ export default function LoginPage() {
             disabled={submitting}
             className={AUTH_SECONDARY_BUTTON_CLASS}
           >
-            Sign out
+            {t("initialAuth.signOut")}
           </button>
         </div>
       </div>

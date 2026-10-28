@@ -1002,6 +1002,18 @@ Effective authentication runtime flags after configuration and environment overr
 """
 type AuthRuntimeStatePayload {
 	"""
+	Initial authentication stage; null means this predates mandatory setup.
+	"""
+	initialAuthenticationStage: String
+	"""
+	Whether the pending initial choice requires the operator's console code.
+	"""
+	initialAuthenticationCodeRequired: Boolean!
+	"""
+	Minimum length for the administrator's new password.
+	"""
+	passwordMinLength: Int!
+	"""
 	Effective form-login state.
 	"""
 	effectiveFormLoginEnabled: Boolean!
@@ -1915,6 +1927,16 @@ enum CollectionTypeValue {
 	A specials grouping.
 	"""
 	SPECIALS
+}
+
+"""
+The operator's explicit first-run authentication decision.
+"""
+input CompleteInitialAuthenticationInput {
+	mode: InitialAuthenticationMode!
+	password: String
+	acknowledgeNoAuthentication: Boolean!
+	setupCode: String
 }
 
 """
@@ -9290,6 +9312,19 @@ type IndexerSearchResultPayload {
 	Human-readable automatic acquisition decision summary, or null when not evaluated.
 	"""
 	autoDecisionSummary: String
+}
+
+"""
+Authentication mode explicitly selected during initial setup.
+"""
+enum InitialAuthenticationMode {
+	PASSWORD
+	NO_AUTHENTICATION
+}
+
+type InitialAuthenticationPayload {
+	completed: Boolean!
+	login: LoginPayload
 }
 
 """
@@ -19794,6 +19829,10 @@ type MutationRoot {
 		"""
 		input: LoginInput!
 	): LoginPayload!
+	"""
+	Completes the mandatory authentication decision on a new database.
+	"""
+	completeInitialAuthentication(input: CompleteInitialAuthenticationInput!): InitialAuthenticationPayload!
 	"""
 	Replaces an administrator-provided temporary password and issues the full session.
 	"""
