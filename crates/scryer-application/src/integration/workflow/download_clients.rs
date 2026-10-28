@@ -135,6 +135,26 @@ impl AppUseCase {
     }
 }
 impl AppUseCase {
+    /// End a client's failure run, as an answering refresh does: the status
+    /// row goes and the router stops skipping the client. A status write that
+    /// fails is logged and leaves the run to the next refresh.
+    pub(crate) async fn end_download_client_failure_run(&self, client_id: &str) {
+        if let Err(error) = self
+            .services
+            .integrations
+            .download_client_status
+            .record_success(client_id)
+            .await
+        {
+            tracing::warn!(
+                client_id,
+                error = %error,
+                "failed to clear the download client's failure backoff"
+            );
+        }
+    }
+}
+impl AppUseCase {
     async fn enabled_download_clients_by_priority(&self) -> AppResult<Vec<DownloadClientConfig>> {
         let mut enabled_clients = self
             .services
@@ -463,6 +483,12 @@ impl AppUseCase {
             })
             .await?;
         drop(proxy_assignment);
+        // A save is the operator's correction: an enabled client is routed
+        // again at once instead of after its backoff, and the next refresh
+        // judges the saved configuration afresh.
+        if updated.is_enabled {
+            self.end_download_client_failure_run(&updated.id).await;
+        }
         self.refresh_download_client_category_admission_best_effort()
             .await;
         self.emit_configuration_changed_event(

@@ -841,6 +841,7 @@ impl ConfigMutations {
 
         let client_type = input.client_type.trim().to_lowercase();
         let config_json = provider_config_values_to_json(input.config).map_err(to_gql_error)?;
+        let client_id = input.id.as_ref().map(|id| id.to_string());
         let config_json = if let Some(id) = input.id {
             let existing = app
                 .get_download_client_config(&actor, id.as_ref())
@@ -862,6 +863,7 @@ impl ConfigMutations {
         };
         app.test_download_client_connection(
             &actor,
+            client_id.as_deref(),
             &client_type,
             &config_json,
             input.proxy_config_id.as_ref().map(|id| id.as_str()),

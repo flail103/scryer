@@ -62,7 +62,27 @@ impl AppUseCase {
     }
 }
 impl AppUseCase {
+    /// Probe a download client. When the test names a stored client and the
+    /// client answers, its failure run ends the way an answering refresh ends
+    /// it, so a corrected client is routed again without waiting out its
+    /// backoff. A failed test leaves the failure run as it was.
     pub async fn test_download_client_connection(
+        &self,
+        actor: &User,
+        client_id: Option<&str>,
+        client_type: &str,
+        config_json: &str,
+        proxy_config_id: Option<&str>,
+    ) -> AppResult<()> {
+        self.probe_download_client_connection(actor, client_type, config_json, proxy_config_id)
+            .await?;
+        if let Some(client_id) = client_id.map(str::trim).filter(|id| !id.is_empty()) {
+            self.end_download_client_failure_run(client_id).await;
+        }
+        Ok(())
+    }
+
+    async fn probe_download_client_connection(
         &self,
         actor: &User,
         client_type: &str,

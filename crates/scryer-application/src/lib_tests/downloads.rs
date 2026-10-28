@@ -18955,6 +18955,10 @@ impl crate::ports::DownloadClientStatusRepository for RecordingDownloadClientSta
             .lock()
             .expect("successes mutex")
             .push(client_config_id.to_string());
+        self.blocked
+            .lock()
+            .expect("blocked mutex")
+            .remove(client_config_id);
         Ok(())
     }
 
@@ -18963,8 +18967,156 @@ impl crate::ports::DownloadClientStatusRepository for RecordingDownloadClientSta
             .lock()
             .expect("cleared mutex")
             .push(client_config_id.to_string());
+        self.blocked
+            .lock()
+            .expect("blocked mutex")
+            .remove(client_config_id);
         Ok(())
     }
+}
+
+impl RecordingDownloadClientStatusRepo {
+    fn block(&self, client_id: &str) {
+        self.blocked.lock().expect("blocked mutex").insert(
+            client_id.to_string(),
+            Utc::now() + chrono::Duration::hours(1),
+        );
+    }
+
+    async fn is_blocked(&self, client_id: &str) -> bool {
+        use crate::ports::DownloadClientStatusRepository as _;
+        self.list()
+            .await
+            .expect("list download client statuses")
+            .get(client_id)
+            .is_some_and(|status| status.is_blocked(Utc::now()))
+    }
+}
+
+/// A native-client probe that answers with a fixed outcome.
+struct FixedOutcomeConnectionTester {
+    answers: bool,
+}
+
+#[async_trait::async_trait]
+impl crate::BuiltinDownloadClientConnectionTester for FixedOutcomeConnectionTester {
+    async fn test_connection(
+        &self,
+        _client_type: &str,
+        _config_json: &str,
+        _proxy_config: Option<&scryer_domain::ProxyConfig>,
+    ) -> crate::AppResult<()> {
+        if self.answers {
+            Ok(())
+        } else {
+            Err(crate::AppError::Repository(
+                "synthetic client did not answer".to_string(),
+            ))
+        }
+    }
+}
+
+async fn app_with_blocked_download_client(
+    tester_answers: bool,
+) -> (
+    AppUseCase,
+    User,
+    Arc<RecordingDownloadClientStatusRepo>,
+    DownloadClientConfig,
+) {
+    let download_client = Arc::new(StubDownloadClient::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let pending_releases = Arc::new(TrackingPendingReleaseRepo::default());
+    let (base_app, user) =
+        bootstrap_with_cleanup_tracking(download_client, download_submissions, pending_releases);
+    let status = Arc::new(RecordingDownloadClientStatusRepo::default());
+    let app = base_app.with_test_overrides(|services| {
+        services
+            .with_download_client_status(status.clone())
+            .with_builtin_download_client_connection_tester(Arc::new(
+                FixedOutcomeConnectionTester {
+                    answers: tester_answers,
+                },
+            ))
+    });
+    let config =
+        create_enabled_download_client_config(&app, &user, "Fixture Backoff", "nzbget").await;
+    status.block(&config.id);
+    assert!(status.is_blocked(&config.id).await);
+    (app, user, status, config)
+}
+
+/// A stored client the operator tests and that answers is routed again at
+/// once, the way an answering refresh would end its failure run.
+#[tokio::test]
+async fn a_successful_connection_test_ends_the_clients_failure_backoff() {
+    let (app, user, status, config) = app_with_blocked_download_client(true).await;
+
+    app.test_download_client_connection(
+        &user,
+        Some(&config.id),
+        &config.client_type,
+        &config.config_json,
+        None,
+    )
+    .await
+    .expect("connection test answers");
+
+    assert!(
+        !status.is_blocked(&config.id).await,
+        "an answering test ends the failure backoff"
+    );
+    assert_eq!(
+        status.successes.lock().expect("successes mutex").as_slice(),
+        std::slice::from_ref(&config.id),
+        "the test records the same success an answering refresh does"
+    );
+}
+
+/// A test that fails is no new evidence the client is back.
+#[tokio::test]
+async fn a_failed_connection_test_keeps_the_clients_failure_backoff() {
+    let (app, user, status, config) = app_with_blocked_download_client(false).await;
+
+    app.test_download_client_connection(
+        &user,
+        Some(&config.id),
+        &config.client_type,
+        &config.config_json,
+        None,
+    )
+    .await
+    .expect_err("connection test fails");
+
+    assert!(
+        status.is_blocked(&config.id).await,
+        "a failed test leaves the failure backoff in place"
+    );
+    assert!(status.successes.lock().expect("successes mutex").is_empty());
+    assert!(status.failures.lock().expect("failures mutex").is_empty());
+}
+
+/// Saving an enabled client is the operator's correction; the next refresh
+/// judges the saved configuration instead of the backoff refusing grabs.
+#[tokio::test]
+async fn saving_an_enabled_download_client_ends_its_failure_backoff() {
+    let (app, user, status, config) = app_with_blocked_download_client(false).await;
+
+    app.update_download_client_config(
+        &user,
+        crate::DownloadClientConfigUpdate {
+            id: config.id.clone(),
+            config_json: Some(r#"{"host":"synthetic-client.invalid"}"#.to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("save download client config");
+
+    assert!(
+        !status.is_blocked(&config.id).await,
+        "saving an enabled client ends its failure backoff"
+    );
 }
 
 /// Sonarr records one refresh outcome per client per tick. A client that
