@@ -6292,6 +6292,11 @@ const en: LocaleDictionary = {
   "settings.autoBackupsSetKey": "Set automatic backup key",
   "settings.autoBackupsKeyAlreadySetHint": "(backup key already set)",
   "settings.autoBackupsKeyCleared": "Backup key cleared.",
+  "settings.autoBackupsClearKeyTitle": "Clear backup key?",
+  "settings.autoBackupsClearKeyConfirm":
+    "The saved automatic backup key will be removed. Existing backups made with it still need it to restore.",
+  "settings.autoBackupsClearKeyConfirmBackupsOff":
+    "The saved automatic backup key will be removed and automatic backups will turn off until a new key is saved. Existing backups made with it still need it to restore.",
   "settings.autoBackupsKeyClearedBackupsOff":
     "Backup key cleared. Automatic backups are off until a new key is saved.",
   "settings.autoBackupsKeyHelp":

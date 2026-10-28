@@ -288,6 +288,7 @@ export function SettingsBackupsContainer() {
   // The key's problem shows only once the field is left with a key that
   // fails it, and hides again while the key is being edited.
   const [autoBackupKeyErrorShown, setAutoBackupKeyErrorShown] = React.useState(false);
+  const [clearAutoBackupKeyConfirmOpen, setClearAutoBackupKeyConfirmOpen] = React.useState(false);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -685,6 +686,17 @@ export function SettingsBackupsContainer() {
     }
   };
 
+  // Backups cannot run without a key, so clearing it also switches them off.
+  const clearAutoBackupKeyConfirmed = async () => {
+    await saveAutoBackupDraft(
+      { ...currentAutoBackupDraft, enabled: false, key: "", clearKey: true },
+      autoBackupSettings.enabled
+        ? t("settings.autoBackupsKeyClearedBackupsOff")
+        : t("settings.autoBackupsKeyCleared"),
+    );
+    setClearAutoBackupKeyConfirmOpen(false);
+  };
+
   const saveAutoBackupKey = () => {
     setAutoBackupKeyErrorShown(autoBackupKeyValidationMessage !== null);
     void saveAutoBackupDraft(currentAutoBackupDraft);
@@ -857,23 +869,9 @@ export function SettingsBackupsContainer() {
                         <Button
                           id="auto-backups-clear-key"
                           type="button"
-                          variant="outline"
+                          variant="destructive"
                           disabled={autoBackupSaving}
-                          // Backups cannot run without a key, so clearing it
-                          // also switches them off.
-                          onClick={() =>
-                            void saveAutoBackupDraft(
-                              {
-                                ...currentAutoBackupDraft,
-                                enabled: false,
-                                key: "",
-                                clearKey: true,
-                              },
-                              autoBackupSettings.enabled
-                                ? t("settings.autoBackupsKeyClearedBackupsOff")
-                                : t("settings.autoBackupsKeyCleared"),
-                            )
-                          }
+                          onClick={() => setClearAutoBackupKeyConfirmOpen(true)}
                         >
                           {t("label.clear")}
                         </Button>
@@ -1295,6 +1293,24 @@ export function SettingsBackupsContainer() {
             return;
           }
           setPendingDeleteFilenames([]);
+        }}
+      />
+      <ConfirmDialog
+        open={clearAutoBackupKeyConfirmOpen}
+        title={t("settings.autoBackupsClearKeyTitle")}
+        description={
+          autoBackupSettings.enabled
+            ? t("settings.autoBackupsClearKeyConfirmBackupsOff")
+            : t("settings.autoBackupsClearKeyConfirm")
+        }
+        confirmLabel={t("label.clear")}
+        cancelLabel={t("label.cancel")}
+        isBusy={autoBackupSaving}
+        onConfirm={() => void clearAutoBackupKeyConfirmed()}
+        onCancel={() => {
+          if (!autoBackupSaving) {
+            setClearAutoBackupKeyConfirmOpen(false);
+          }
         }}
       />
       <ConfirmDialog
