@@ -49,6 +49,48 @@ export function dashboardDropRegions(
   return mergeRuns(reachable, columns);
 }
 
+/**
+ * The free position nearest to `rect` for a panel of its size among `others`
+ * on a grid `columns` wide, or `rect`'s own position when it is already free.
+ * Distance is measured on screen: `cellAspect` is a column step's width over a
+ * row step's height, so a column away counts as far as it looks. The rows
+ * below every panel are always free, so there is always an answer.
+ */
+export function nearestOpenSpot(
+  others: readonly GridRect[],
+  rect: GridRect,
+  columns: number,
+  cellAspect = 1,
+): { x: number; y: number } {
+  const w = Math.min(Math.max(1, rect.w), columns);
+  const h = Math.max(1, rect.h);
+  const bottom = others.reduce((max, other) => Math.max(max, other.y + other.h), 0);
+  const rows = Math.max(bottom, rect.y) + h;
+  const occupied = Array.from({ length: rows }, () => new Array<boolean>(columns).fill(false));
+  for (const other of others) {
+    for (let y = Math.max(0, other.y); y < Math.min(rows, other.y + other.h); y += 1) {
+      for (let x = Math.max(0, other.x); x < Math.min(columns, other.x + other.w); x += 1) {
+        occupied[y][x] = true;
+      }
+    }
+  }
+
+  let best = { x: Math.min(Math.max(0, rect.x), columns - w), y: Math.max(0, bottom) };
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let y = 0; y + h <= rows; y += 1) {
+    for (let x = 0; x + w <= columns; x += 1) {
+      const dx = (x - rect.x) * cellAspect;
+      const dy = y - rect.y;
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance && fits(occupied, x, y, w, h)) {
+        best = { x, y };
+        bestDistance = distance;
+      }
+    }
+  }
+  return best;
+}
+
 function fits(occupied: boolean[][], x: number, y: number, w: number, h: number): boolean {
   for (let dy = 0; dy < h; dy += 1) {
     for (let dx = 0; dx < w; dx += 1) {

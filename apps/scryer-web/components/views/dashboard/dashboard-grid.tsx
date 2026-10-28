@@ -8,6 +8,7 @@ import {
   noCompactor,
   useContainerWidth,
   verticalCompactor,
+  type Compactor,
   type Layout,
   type LayoutItem,
 } from "react-grid-layout";
@@ -65,7 +66,11 @@ import {
   type DashboardPanelId,
 } from "@/lib/utils/dashboard-layout";
 import { dashboardLayoutErrorMessage } from "@/lib/utils/dashboard-layout-error-message";
-import { dashboardDropRegions, type GridRect } from "@/lib/utils/dashboard-drop-targets";
+import {
+  dashboardDropRegions,
+  nearestOpenSpot,
+  type GridRect,
+} from "@/lib/utils/dashboard-drop-targets";
 
 /**
  * Behind the grid during a move, resize or tray drag: a crosshair at every
@@ -175,6 +180,32 @@ function DashboardDropTargets({
  */
 const FREE_PLACEMENT_COMPACTOR = { ...noCompactor, preventCollision: true };
 
+/**
+ * While a panel moves or comes in from the tray it may pass over others
+ * instead of being refused there: its outline goes to the nearest cells where
+ * it fits, so the outline stays with the pointer rather than waiting at the
+ * last free spot. Nothing else moves. `cellAspect` is a column step's width
+ * over a row step's height, so "nearest" matches what is on screen.
+ */
+function snapToOpenCompactor(draggedId: string, cellAspect: number): Compactor {
+  return {
+    ...noCompactor,
+    allowOverlap: true,
+    compact(layout: Layout, cols: number): Layout {
+      const dragged = layout.find((item) => item.i === draggedId);
+      if (!dragged) {
+        return layout;
+      }
+      const others = layout.filter((item) => item.i !== draggedId);
+      const spot = nearestOpenSpot(others, dragged, cols, cellAspect);
+      if (spot.x === dragged.x && spot.y === dragged.y) {
+        return layout;
+      }
+      return layout.map((item) => (item === dragged ? { ...item, ...spot } : item));
+    },
+  };
+}
+
 const DRAG_HANDLE_CLASS = "scry-dashboard-drag-handle";
 const NO_DRAG_CLASS = "scry-dashboard-no-drag";
 const GESTURE_CLASS = "scry-dashboard-gesture";
@@ -282,13 +313,14 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     return () => document.body.classList.remove(...classes);
   }, [gesture]);
 
-  // react-grid-layout keeps a resizing panel's live size in a ref and redraws
-  // the panel only when its child element changes, so on its own the panel
-  // freezes between grid snaps while the outline moves on. Each resize step
-  // hands just that panel a fresh element, so it follows the pointer; the
-  // other panels keep their memoised elements and do not redraw.
+  // react-grid-layout keeps a moving or resizing panel's live position and
+  // size in refs and redraws the panel only when its props or child element
+  // change, so on its own the panel freezes between grid snaps, and over other
+  // panels, while the outline moves on. Each step hands just that panel a
+  // fresh element, so it follows the pointer; the other panels keep their
+  // memoised elements and do not redraw.
   const [resizingPanelId, setResizingPanelId] = React.useState<string | null>(null);
-  const [resizeFrame, setResizeFrame] = React.useState(0);
+  const [gestureFrame, setGestureFrame] = React.useState(0);
   // While a panel moves, resizes or comes in from the tray, the grid area
   // reaches a full screen past the bottom of the window, so the drop zones and
   // crosshairs carry on below what is visible instead of stopping at the last
@@ -308,14 +340,16 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     },
     [rowsPastViewport],
   );
-  const handleResize = React.useCallback(() => setResizeFrame((frame) => frame + 1), []);
+  const handleGestureStep = React.useCallback(() => setGestureFrame((frame) => frame + 1), []);
   // The area a moved panel can land in. Other panels never move during a
   // drag, since collisions are refused, so it is worked out once at the start.
   const [moveTargets, setMoveTargets] = React.useState<GridRect[] | null>(null);
+  const [movingPanelId, setMovingPanelId] = React.useState<string | null>(null);
   const handleDragStart = React.useCallback(
     (layout: Layout, oldItem: LayoutItem | null) => {
       window.getSelection()?.removeAllRanges();
       setGesture("move");
+      setMovingPanelId(oldItem?.i ?? null);
       const rows = rowsPastViewport();
       setGestureRows(rows);
       if (oldItem && !stacked) {
@@ -335,6 +369,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     setGesture(null);
     setGestureRows(null);
     setMoveTargets(null);
+    setMovingPanelId(null);
     setResizingPanelId(null);
   }, []);
   const items = layouts[breakpoint];
@@ -422,6 +457,26 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
   );
   const dropTargets = moveTargets ?? trayTargets;
   const extentRows = editing && !stacked ? (gestureRows ?? trayRows) : null;
+
+  const columns = DASHBOARD_COLUMNS[breakpoint];
+  const snapPanelId = stacked
+    ? null
+    : gesture === "move"
+      ? movingPanelId
+      : trayDragging
+        ? DROPPING_ITEM_ID
+        : null;
+  const gridCompactor = React.useMemo(() => {
+    if (stacked) {
+      return verticalCompactor;
+    }
+    if (!snapPanelId) {
+      return FREE_PLACEMENT_COMPACTOR;
+    }
+    const marginX = DASHBOARD_MARGIN[0];
+    const stepX = (width - marginX * (columns - 1)) / columns + marginX;
+    return snapToOpenCompactor(snapPanelId, stepX / DASHBOARD_ROW_STEP);
+  }, [columns, snapPanelId, stacked, width]);
 
   const handleDropDragOver = React.useCallback(() => {
     if (!dragPanelId || placed.has(dragPanelId)) {
@@ -605,7 +660,7 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             width={width}
             layout={gridLayout}
             gridConfig={gridConfig}
-            compactor={stacked ? verticalCompactor : FREE_PLACEMENT_COMPACTOR}
+            compactor={gridCompactor}
             dragConfig={{
               enabled: editing,
               handle: `.${DRAG_HANDLE_CLASS}`,
@@ -620,7 +675,8 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
               touchEnabled: true,
             }}
             onResizeStart={handleResizeStart}
-            onResize={handleResize}
+            onResize={handleGestureStep}
+            onDrag={handleGestureStep}
             onResizeStop={handleGestureStop}
             onDragStart={handleDragStart}
             onDragStop={handleGestureStop}
@@ -628,8 +684,8 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
             onDrop={handleDrop}
           >
             {panelElements.map((element) =>
-              element.key === resizingPanelId
-                ? React.cloneElement(element, { "data-resize-frame": resizeFrame })
+              element.key === (resizingPanelId ?? movingPanelId)
+                ? React.cloneElement(element, { "data-gesture-frame": gestureFrame })
                 : element,
             )}
           </ReactGridLayout>
