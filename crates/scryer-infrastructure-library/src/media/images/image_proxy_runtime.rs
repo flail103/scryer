@@ -70,6 +70,69 @@ pub struct ImageProxyRuntime {
     budget_gate: Arc<Mutex<()>>,
     budget_dirty: Arc<AtomicBool>,
     jpeg_wake: Arc<Notify>,
+    conversions: Arc<ActiveConversions>,
+    #[cfg(test)]
+    jpeg_source_reads: Arc<AtomicU64>,
+}
+
+/// Only in-flight conversions are tracked; no permanent per-cache-entry state.
+#[derive(Default)]
+struct ActiveConversions {
+    entries: std::sync::Mutex<HashMap<PathBuf, Vec<Weak<AtomicBool>>>>,
+}
+
+impl ActiveConversions {
+    fn watch(self: &Arc<Self>, path: PathBuf) -> ConversionWatch {
+        let valid = Arc::new(AtomicBool::new(true));
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(path.clone())
+            .or_default()
+            .push(Arc::downgrade(&valid));
+        ConversionWatch {
+            registry: self.clone(),
+            path,
+            valid,
+        }
+    }
+
+    fn invalidate(&self, path: Option<&Path>) {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for (_, watchers) in entries
+            .iter()
+            .filter(|(key, _)| path.is_none_or(|path| key.as_path() == path))
+        {
+            for valid in watchers.iter().filter_map(Weak::upgrade) {
+                valid.store(false, Ordering::Release);
+            }
+        }
+    }
+}
+
+struct ConversionWatch {
+    registry: Arc<ActiveConversions>,
+    path: PathBuf,
+    valid: Arc<AtomicBool>,
+}
+
+impl Drop for ConversionWatch {
+    fn drop(&mut self) {
+        let mut entries = self
+            .registry
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(watchers) = entries.get_mut(&self.path) {
+            watchers.retain(|watcher| !std::ptr::eq(watcher.as_ptr(), Arc::as_ptr(&self.valid)));
+            if watchers.is_empty() {
+                entries.remove(&self.path);
+            }
+        }
+    }
 }
 
 impl ImageProxyRuntime {
@@ -95,6 +158,9 @@ impl ImageProxyRuntime {
             budget_gate: Arc::new(Mutex::new(())),
             budget_dirty: Arc::new(AtomicBool::new(false)),
             jpeg_wake: Arc::new(Notify::new()),
+            conversions: Arc::new(ActiveConversions::default()),
+            #[cfg(test)]
+            jpeg_source_reads: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -174,6 +240,7 @@ impl ImageProxyRuntime {
 
     pub async fn clear_cache(&self) -> AppResult<()> {
         let _lifecycle_guard = self.cache_lifecycle.write().await;
+        self.conversions.invalidate(None);
         if tokio::fs::try_exists(&self.cache_dir)
             .await
             .unwrap_or(false)
@@ -640,6 +707,7 @@ impl ImageProxyRuntime {
     }
 
     async fn write_cache_file_at(&self, path: &Path, bytes: &[u8]) -> AppResult<()> {
+        self.conversions.invalidate(Some(path));
         tokio::fs::create_dir_all(&self.cache_dir)
             .await
             .map_err(|error| {
@@ -734,6 +802,7 @@ impl ImageProxyRuntime {
     }
 
     async fn remove_cache_file(&self, path: &Path) -> AppResult<()> {
+        self.conversions.invalidate(Some(path));
         match tokio::fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -808,8 +877,9 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
         entry: ImageProxyCacheEntryRecord,
         processor: Arc<dyn TitleImageProcessor>,
     ) -> AppResult<bool> {
-        let (bytes, width) = {
+        let (bytes, width, conversion) = {
             let _guard = self.cache_lifecycle.read().await;
+            let _publication = self.cache_publication.read().await;
             let Some(current) = self
                 .repository
                 .get_image_proxy_cache_entry(&entry.token, &entry.variant)
@@ -842,7 +912,11 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
                     ));
                 }
             };
-            let bytes = match tokio::fs::read(self.cache_path(&entry.token, &entry.variant)).await {
+            let source_path = self.cache_path(&entry.token, &entry.variant);
+            let conversion = self.conversions.watch(source_path.clone());
+            #[cfg(test)]
+            self.jpeg_source_reads.fetch_add(1, Ordering::Relaxed);
+            let bytes = match tokio::fs::read(source_path).await {
                 Ok(bytes) => bytes,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
                 Err(error) => {
@@ -854,9 +928,8 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
             if bytes.len() as i64 != entry.byte_size {
                 return Ok(false);
             }
-            (bytes, width)
+            (bytes, width, conversion)
         };
-        let original_digest = blake3::hash(&bytes);
         let encoded = processor.encode_cached_jpeg(bytes, width).await?;
         if !valid_raster_bytes("image/avif", &encoded) {
             return Err(AppError::validation_refused(
@@ -875,16 +948,10 @@ impl ImageProxyCacheControl for ImageProxyRuntime {
         else {
             return Ok(false);
         };
-        if !same_cached_image(&entry, &current) {
+        if !conversion.valid.load(Ordering::Acquire) || !same_cached_image(&entry, &current) {
             return Ok(false);
         }
         let legacy = self.cache_path(&entry.token, &entry.variant);
-        let Ok(original) = tokio::fs::read(&legacy).await else {
-            return Ok(false);
-        };
-        if blake3::hash(&original) != original_digest {
-            return Ok(false);
-        }
         current.content_type = "image/avif".into();
         current.byte_size = encoded.len() as i64;
         self.write_cache_file_at(&self.entry_cache_path(&current), &encoded)
@@ -1094,6 +1161,7 @@ fn outbound_error(error: OutboundHttpError) -> AppError {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     /// Polls `condition` until it holds, panicking after a 30 s hang guard.
     async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
@@ -1115,9 +1183,10 @@ mod tests {
     }
 
     use super::{
-        IMAGE_PROXY_HOST_RPS, IMAGE_PROXY_HOST_RPS_BURST, IMAGE_PROXY_HOST_RPS_LANE,
-        ImageProxyRuntime, image_fetch_policy, image_outbound_http_client,
-        image_upstream_variant_url, valid_raster_bytes, valid_token, variant_allowed,
+        DEFAULT_CACHE_BYTES, IMAGE_PROXY_HOST_RPS, IMAGE_PROXY_HOST_RPS_BURST,
+        IMAGE_PROXY_HOST_RPS_LANE, ImageProxyRuntime, image_fetch_policy,
+        image_outbound_http_client, image_upstream_variant_url, valid_raster_bytes, valid_token,
+        variant_allowed,
     };
     use async_trait::async_trait;
     use chrono::Utc;
@@ -1220,6 +1289,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn jpeg_conversion_reads_once_and_rejects_replaced_or_recreated_sources() {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            for change in ["replace", "clear", "evict"] {
+                let (_temp, runtime, repo, entry, processor) = jpeg_fixture(false).await;
+                let task_runtime = runtime.clone();
+                let task_entry = entry.clone();
+                let task_processor = processor.clone();
+                let task = tokio::spawn(async move {
+                    task_runtime
+                        .optimize_cached_jpeg(task_entry, task_processor)
+                        .await
+                });
+                processor.started.notified().await;
+                assert_eq!(runtime.jpeg_source_reads.load(Ordering::Relaxed), 1);
+                match change {
+                    "clear" => runtime.clear_cache().await.unwrap(),
+                    "evict" => {
+                        runtime.set_configured_max_bytes(0).await.unwrap();
+                        runtime
+                            .set_configured_max_bytes(DEFAULT_CACHE_BYTES)
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+                // Even identical metadata must not let a stale conversion
+                // overwrite a newly published source with the same byte count.
+                runtime
+                    .write_cache_file(&entry.token, &entry.variant, b"new!")
+                    .await
+                    .unwrap();
+                repo.upsert_image_proxy_cache_entry(&entry).await.unwrap();
+                processor.release.add_permits(1);
+                assert!(!task.await.unwrap().unwrap(), "{change}");
+                assert_eq!(runtime.jpeg_source_reads.load(Ordering::Relaxed), 1);
+                assert_eq!(
+                    tokio::fs::read(runtime.cache_path(&entry.token, &entry.variant))
+                        .await
+                        .unwrap(),
+                    b"new!"
+                );
+                assert!(runtime.conversions.entries.lock().unwrap().is_empty());
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn jpeg_conversion_failed_publication_preserves_source() {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            let (_temp, runtime, _repo, entry, processor) = jpeg_fixture(false).await;
+            tokio::fs::create_dir(
+                runtime
+                    .cache_path(&entry.token, &entry.variant)
+                    .with_extension("avif"),
+            )
+            .await
+            .unwrap();
+            processor.release.add_permits(1);
+            assert!(
+                runtime
+                    .optimize_cached_jpeg(entry.clone(), processor)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(runtime.jpeg_source_reads.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                tokio::fs::read(runtime.cache_path(&entry.token, &entry.variant))
+                    .await
+                    .unwrap(),
+                b"jpeg"
+            );
+            assert!(runtime.conversions.entries.lock().unwrap().is_empty());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn jpeg_conversion_survives_restart_and_obeys_cache_budget() {
         let (temp, runtime, repo, entry, processor) = jpeg_fixture(false).await;
         processor.release.add_permits(1);
@@ -1240,6 +1389,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(converted.content_type, "image/avif");
+        assert_eq!(runtime.jpeg_source_reads.load(Ordering::Relaxed), 1);
+        assert!(runtime.conversions.entries.lock().unwrap().is_empty());
         assert_eq!(converted.upstream_etag, entry.upstream_etag);
         assert_eq!(converted.fetched_at, entry.fetched_at);
         assert!(

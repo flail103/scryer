@@ -1160,6 +1160,20 @@ impl AppUseCase {
         Ok(rx)
     }
 
+    /// Admit one image-maintenance invocation. Mutex waiters are FIFO, and a
+    /// queued image invocation prevents backfill's nonblocking acquisition.
+    /// Call only at the invocation boundary, never from nested cache operations.
+    pub async fn acquire_image_maintenance(
+        &self,
+        shutdown: &tokio_util::sync::CancellationToken,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => None,
+            guard = self.runtime.jobs.background_disk_maintenance.clone().lock_owned() => Some(guard),
+        }
+    }
+
     pub async fn trigger_job(&self, actor: &User, job_key: JobKey) -> AppResult<JobRun> {
         self.require_app_permission(actor, scryer_domain::AppPermission::ManageSystemSettings)
             .await?;
@@ -2096,10 +2110,12 @@ impl AppUseCase {
                 use futures_util::FutureExt;
                 // Keep a panicking backfill from leaving an active tracker
                 // entry that would block every later manual/scheduled retry.
-                let summary = std::panic::AssertUnwindSafe(self.run_full_hash_backfill_job())
-                    .catch_unwind()
-                    .await
-                    .map_err(|_| AppError::Repository("Full-hash backfill panicked".into()))??;
+                let summary = std::panic::AssertUnwindSafe(
+                    self.run_full_hash_backfill_job(run.trigger_source),
+                )
+                .catch_unwind()
+                .await
+                .map_err(|_| AppError::Repository("Full-hash backfill panicked".into()))??;
                 let mut outcome = JobExecutionOutcome::new(
                     Some(summary.summary_text()),
                     serde_json::to_string(&summary).ok(),

@@ -2314,6 +2314,8 @@ pub struct AppRuntimeJobState {
     pub job_run_tracker: JobRunTracker,
     pub(crate) full_hash_start_lock: Arc<tokio::sync::Mutex<()>>,
     pub(crate) full_hash_execution_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Image maintenance queues FIFO; hash backfill only tries immediate admission.
+    pub(crate) background_disk_maintenance: Arc<tokio::sync::Mutex<()>>,
     pub(crate) full_hash_shutdown: tokio_util::sync::CancellationToken,
     pub discovery_sync_wake: Arc<tokio::sync::Notify>,
     pub backup_execution_guards: BackupExecutionGuardTable,
@@ -2700,6 +2702,7 @@ impl AppRuntimeState {
                 job_run_tracker: JobRunTracker::new(),
                 full_hash_start_lock: Arc::new(tokio::sync::Mutex::new(())),
                 full_hash_execution_lock: Arc::new(tokio::sync::Mutex::new(())),
+                background_disk_maintenance: Arc::new(tokio::sync::Mutex::new(())),
                 full_hash_shutdown: tokio_util::sync::CancellationToken::new(),
                 discovery_sync_wake: Arc::new(tokio::sync::Notify::new()),
                 backup_execution_guards: BackupExecutionGuardTable::default(),

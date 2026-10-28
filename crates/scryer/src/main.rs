@@ -1279,6 +1279,35 @@ async fn drain_indexer_accounting_on_shutdown(accounting: &IndexerAccountingShut
     }
 }
 
+async fn run_image_cache_maintenance(
+    app: &AppUseCase,
+    runtime: Arc<ImageProxyRuntime>,
+    shutdown: &CancellationToken,
+) {
+    let Some(admission) = app.acquire_image_maintenance(shutdown).await else {
+        return;
+    };
+    // Keep admission until blocking I/O settles, even if the supervisor drops
+    // the invocation during shutdown.
+    if let Err(error) = tokio::spawn(async move {
+        let _admission = admission;
+        let started = std::time::Instant::now();
+        let result = runtime.prune().await;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            success = result.is_ok(),
+            "image cache maintenance finished"
+        );
+        if let Err(error) = result {
+            tracing::warn!(%error, "image cache maintenance failed");
+        }
+    })
+    .await
+    {
+        tracing::warn!(%error, "image cache maintenance task failed");
+    }
+}
+
 /// Runs the full application bootstrap: DB init, migrations, service construction, and router
 /// building. Returns the fully-constructed Axum router or an error.
 #[expect(clippy::too_many_arguments)]
@@ -1932,9 +1961,12 @@ async fn bootstrap_application(
     if let Err(error) = app_use_case.sync_image_cache_runtime_limit().await {
         tracing::warn!(error = %error, "failed to apply configured image cache limit");
     }
-    if let Err(error) = image_proxy_runtime.prune().await {
-        tracing::warn!(error = %error, "failed to run startup image cache maintenance");
-    }
+    run_image_cache_maintenance(
+        &app_use_case,
+        image_proxy_runtime.clone(),
+        &restore_workers.shutdown_workers,
+    )
+    .await;
     {
         let source_repository = app_use_case.image_proxy_repository();
         let source_flush_shutdown = restore_workers.shutdown_workers.child_token();
@@ -1961,6 +1993,7 @@ async fn bootstrap_application(
     }
     {
         let runtime = image_proxy_runtime.clone();
+        let maintenance_app = app_use_case.clone();
         let maintenance_shutdown = restore_workers.shutdown_workers.child_token();
         restore_workers.spawn_worker(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 60 * 60));
@@ -1970,9 +2003,9 @@ async fn bootstrap_application(
                 tokio::select! {
                     _ = maintenance_shutdown.cancelled() => break,
                     _ = interval.tick() => {
-                        if let Err(error) = runtime.prune().await {
-                            tracing::warn!(error = %error, "periodic image cache maintenance failed");
-                        }
+                        run_image_cache_maintenance(
+                            &maintenance_app, runtime.clone(), &maintenance_shutdown,
+                        ).await;
                     }
                 }
             }
