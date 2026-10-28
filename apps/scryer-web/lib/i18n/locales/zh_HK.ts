@@ -3235,7 +3235,6 @@ const zh_HK: LocaleDictionary = {
   "settings.autoBackupsKeyHelpLabel": "關於自動備份金鑰",
   "settings.autoBackupsSetKey": "設定自動備份金鑰",
   "settings.autoBackupsKeyAlreadySetHint": "（備份金鑰已設定）",
-  "settings.autoBackupsClearKey": "清除已儲存的自動備份金鑰",
   "settings.autoBackupsKeyHelp": "將欄位留空以保留現有已儲存的金鑰。輸入至少 {{count}} 個非空白字元的新值以進行替換。",
   "settings.autoBackupsKeyRequired": "自動備份需要至少 {{count}} 個非空白字元的已儲存備份金鑰。",
   "settings.autoBackupsKeyTooShort": "自動備份金鑰必須至少包含 {{count}} 個非空白字元。",

@@ -284,7 +284,6 @@ export function SettingsBackupsContainer() {
   const [folderBrowserOpen, setFolderBrowserOpen] = React.useState(false);
   const [autoBackupExpanded, setAutoBackupExpanded] = React.useState(false);
   const [autoBackupKey, setAutoBackupKey] = React.useState("");
-  const [clearAutoBackupKey, setClearAutoBackupKey] = React.useState(false);
   const [showAutoBackupKey, setShowAutoBackupKey] = React.useState(false);
   // The key's problem shows only once the field is left with a key that
   // fails it, and hides again while the key is being edited.
@@ -328,7 +327,7 @@ export function SettingsBackupsContainer() {
     enabled: autoBackupSettings.enabled,
     dailyTimeLocal: autoBackupSettings.dailyTimeLocal,
     key: autoBackupKey,
-    clearKey: clearAutoBackupKey,
+    clearKey: false,
   };
   const autoBackupKeyValidationMessage = autoBackupDraftError(currentAutoBackupDraft);
   const normalizedBackupPathDraft = normalizeBackupPathDraft(backupPathDraft);
@@ -365,17 +364,19 @@ export function SettingsBackupsContainer() {
       : autoBackupWaitingForKey
         ? t("settings.autoBackupsNextRunNeedsKey")
         : t("label.disabled");
-  const autoBackupKeyPlaceholder = clearAutoBackupKey
-    ? ""
-    : autoBackupSettings.autoBackupKeyPresent
-      ? t("settings.autoBackupsKeyAlreadySetHint")
-      : t("settings.autoBackupsSetKey");
+  const autoBackupKeyPlaceholder = autoBackupSettings.autoBackupKeyPresent
+    ? t("settings.autoBackupsKeyAlreadySetHint")
+    : t("settings.autoBackupsSetKey");
+  // The button beside the key saves a typed key, or clears the saved one
+  // when nothing is typed. The server keeps a key while backups are on.
+  const autoBackupKeyTyped = autoBackupKey.trim().length > 0;
+  const autoBackupKeyAction: "save" | "clear" =
+    !autoBackupKeyTyped && autoBackupSettings.autoBackupKeyPresent ? "clear" : "save";
   const autoBackupTriggerLabel = (trigger: BackupTrigger) =>
     trigger === "auto" ? t("settings.backupsAutomatic") : t("settings.backupsManual");
   const autoBackupDirty =
     !autoBackupSettingsEqual(autoBackupSettings, savedAutoBackupSettings) ||
-    autoBackupKey.length > 0 ||
-    clearAutoBackupKey;
+    autoBackupKey.length > 0;
   const shouldBlockNavigation =
     (autoBackupDirty || backupPathDirty) && !autoBackupSaving && !backupSettingsSaving;
   const autoBackupNavigationBlocker = useBlocker(shouldBlockNavigation);
@@ -675,7 +676,6 @@ export function SettingsBackupsContainer() {
       setSavedAutoBackupSettings(data.updateAutoBackupSettings);
       setAutoBackupSettings(data.updateAutoBackupSettings);
       setAutoBackupKey("");
-      setClearAutoBackupKey(false);
       setShowAutoBackupKey(false);
       setGlobalStatus(t("settings.autoBackupsSaved"), { level: "SUCCESS" });
     } catch (error) {
@@ -683,6 +683,11 @@ export function SettingsBackupsContainer() {
     } finally {
       setAutoBackupSaving(false);
     }
+  };
+
+  const saveAutoBackupKey = () => {
+    setAutoBackupKeyErrorShown(autoBackupKeyValidationMessage !== null);
+    void saveAutoBackupDraft(currentAutoBackupDraft);
   };
 
   const handleSaveBackupSettings = React.useCallback(async () => {
@@ -805,44 +810,82 @@ export function SettingsBackupsContainer() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <div className="relative">
-                      <Input
-                        type={showAutoBackupKey ? "text" : "password"}
-                        ignorePasswordManagers
-                        value={autoBackupKey}
-                        placeholder={autoBackupKeyPlaceholder}
-                        className="pr-11"
-                        disabled={autoBackupSaving || clearAutoBackupKey}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setAutoBackupKey(nextValue);
-                          setAutoBackupKeyErrorShown(false);
-                          if (nextValue.trim().length > 0) {
-                            setClearAutoBackupKey(false);
+                    <div className="flex items-center gap-2">
+                      <div className="relative min-w-0 flex-1">
+                        <Input
+                          type={showAutoBackupKey ? "text" : "password"}
+                          ignorePasswordManagers
+                          value={autoBackupKey}
+                          placeholder={autoBackupKeyPlaceholder}
+                          className="pr-11"
+                          disabled={autoBackupSaving}
+                          onChange={(event) => {
+                            setAutoBackupKey(event.target.value);
+                            setAutoBackupKeyErrorShown(false);
+                          }}
+                          onBlur={() => {
+                            setAutoBackupKeyErrorShown(
+                              autoBackupKeyTyped && autoBackupKeyValidationMessage !== null,
+                            );
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && autoBackupKeyTyped) {
+                              event.preventDefault();
+                              saveAutoBackupKey();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={
+                            showAutoBackupKey
+                              ? t("settings.autoBackupsHideKey")
+                              : t("settings.autoBackupsShowKey")
                           }
-                        }}
-                        onBlur={() => {
-                          setAutoBackupKeyErrorShown(autoBackupKeyValidationMessage !== null);
-                          void saveAutoBackupDraft(currentAutoBackupDraft);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                        aria-label={
-                          showAutoBackupKey
-                            ? t("settings.autoBackupsHideKey")
-                            : t("settings.autoBackupsShowKey")
-                        }
-                        disabled={autoBackupSaving || clearAutoBackupKey}
-                        onClick={() => setShowAutoBackupKey((current) => !current)}
-                      >
-                        {showAutoBackupKey ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
+                          disabled={autoBackupSaving}
+                          onClick={() => setShowAutoBackupKey((current) => !current)}
+                        >
+                          {showAutoBackupKey ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                      {autoBackupKeyAction === "clear" ? (
+                        <Button
+                          id="auto-backups-clear-key"
+                          type="button"
+                          variant="outline"
+                          disabled={autoBackupSaving || autoBackupSettings.enabled}
+                          title={
+                            autoBackupSettings.enabled
+                              ? t("settings.autoBackupsClearKeyNeedsDisabled")
+                              : undefined
+                          }
+                          onClick={() =>
+                            void saveAutoBackupDraft({
+                              ...currentAutoBackupDraft,
+                              key: "",
+                              clearKey: true,
+                            })
+                          }
+                        >
+                          {t("label.clear")}
+                        </Button>
+                      ) : (
+                        <Button
+                          id="auto-backups-save-key"
+                          type="button"
+                          variant="primary"
+                          disabled={autoBackupSaving || !autoBackupKeyTyped}
+                          onClick={saveAutoBackupKey}
+                        >
+                          {autoBackupSaving ? <LoadingMark className="h-4 w-4" /> : null}
+                          {t("label.save")}
+                        </Button>
+                      )}
                     </div>
                     {autoBackupKeyErrorShown && autoBackupKeyValidationMessage ? (
                       <p className="text-xs text-destructive">
@@ -850,38 +893,6 @@ export function SettingsBackupsContainer() {
                       </p>
                     ) : null}
                   </div>
-                  {autoBackupSettings.autoBackupKeyPresent ? (
-                    <div className="flex min-w-0 items-center gap-3">
-                      <Checkbox
-                        id="auto-backups-clear-key"
-                        checked={clearAutoBackupKey}
-                        disabled={
-                          autoBackupSaving || autoBackupSettings.enabled || autoBackupKey.length > 0
-                        }
-                        onCheckedChange={(checked) => {
-                          const shouldClear = checked === true;
-                          setClearAutoBackupKey(shouldClear);
-                          if (shouldClear) {
-                            setAutoBackupKey("");
-                            setShowAutoBackupKey(false);
-                          }
-                          void saveAutoBackupDraft({
-                            ...currentAutoBackupDraft,
-                            key: shouldClear ? "" : currentAutoBackupDraft.key,
-                            clearKey: shouldClear,
-                          });
-                        }}
-                      />
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Label
-                          htmlFor="auto-backups-clear-key"
-                          className="truncate text-[var(--scry-ink2)]"
-                        >
-                          {t("settings.autoBackupsClearKey")}
-                        </Label>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}>

@@ -4683,8 +4683,6 @@ const ru: LocaleDictionary = {
     "settings.autoBackupsKeyAbsent":
         "Ключ автоматического резервного копирования не сохранён. Автоматическое резервное копирование невозможно без настроенного ключа.",
 
-    "settings.autoBackupsClearKey":
-        "Удалить сохранённый ключ автоматического резервного копирования",
 
 
     "settings.autoBackupsKeySummary":

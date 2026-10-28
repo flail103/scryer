@@ -3416,7 +3416,6 @@ const nl: LocaleDictionary = {
   "settings.autoBackupsKeyHelpLabel": "Over de automatische backupsleutel",
   "settings.autoBackupsSetKey": "Automatische backupsleutel instellen",
   "settings.autoBackupsKeyAlreadySetHint": "(backupsleutel al ingesteld)",
-  "settings.autoBackupsClearKey": "Opgeslagen automatische backupsleutel wissen",
   "settings.autoBackupsKeyHelp":
     "Laat het veld leeg om de bestaande opgeslagen sleutel te behouden. Voer een nieuwe waarde in van minstens {{count}} niet-witruimtetekens om ze te vervangen.",
   "settings.autoBackupsKeyRequired":
