@@ -81,10 +81,16 @@ export function FolderBrowserDialog({
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [newFolderError, setNewFolderError] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  // Only a create still tied to the open row may land. Leaving the folder,
+  // editing the path, cancelling or closing the dialog closes the row, and a
+  // late answer must not pull the picker back into the folder it made.
+  const createRequest = useRef(0);
 
   const closeNewFolder = useCallback(() => {
+    createRequest.current += 1;
     setNewFolderName(null);
     setNewFolderError(null);
+    setCreatingFolder(false);
   }, []);
 
   const browse = useCallback(
@@ -119,8 +125,10 @@ export function FolderBrowserDialog({
   useEffect(() => {
     if (open) {
       browse(initialPath || "/");
+    } else {
+      closeNewFolder();
     }
-  }, [open, initialPath, browse]);
+  }, [open, initialPath, browse, closeNewFolder]);
 
   // Keep the deepest segment in view; the row scrolls but has no visible
   // affordance on platforms with overlay scrollbars.
@@ -139,11 +147,15 @@ export function FolderBrowserDialog({
     if (newFolderName === null || creatingFolder || browsedPath === null) {
       return;
     }
+    const request = ++createRequest.current;
     setCreatingFolder(true);
     setNewFolderError(null);
     const { data, error: gqlError } = await client
       .mutation(createFolderMutation, { parentPath: browsedPath, name: newFolderName })
       .toPromise();
+    if (request !== createRequest.current) {
+      return;
+    }
     setCreatingFolder(false);
     const created = data?.createFolder as DirectoryEntry | undefined;
     if (gqlError || !created) {
@@ -261,6 +273,7 @@ export function FolderBrowserDialog({
                 id="folder-browser-path-input"
                 value={currentPath}
                 onChange={(e) => {
+                  closeNewFolder();
                   setCurrentPath(e.target.value);
                   setEntries([]);
                   setError(null);
