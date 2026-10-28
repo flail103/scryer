@@ -100,23 +100,22 @@ fn standard_namespace(prefix: &str) -> Option<&'static str> {
     }
 }
 
-/// Rewrites are decided by field name only, as Prowlarr's serializer does:
-/// the GUID becomes the opaque external GUID, download fields carry the Scryer
-/// retrieval link, and magnet fields are omitted because they cannot legally
-/// hold an HTTP link. Every other attribute, including URL-valued ones such as
-/// `comments`, `details` and `infourl`, and the release `password`, passes
-/// through verbatim.
+/// Keep acquisition links local and remove upstream credentials from metadata.
+/// Archive passwords are release payload, not upstream account credentials.
 fn public_attribute_value<'a>(
     attribute: &'a PluginReleaseAttribute,
     item: &'a NabFeedItem<'_, impl AsRef<str>>,
-) -> Option<&'a str> {
+) -> Option<Cow<'a, str>> {
     match attribute.name.to_ascii_lowercase().as_str() {
         "magneturl" | "magnet" => None,
-        "guid" => Some(item.external_guid.as_ref()),
+        "guid" => Some(Cow::Borrowed(item.external_guid.as_ref())),
         "url" | "link" | "downloadurl" | "download_url" | "nzburl" | "torrenturl" => {
-            Some(item.retrieval_url.as_ref())
+            Some(Cow::Borrowed(item.retrieval_url.as_ref()))
         }
-        _ => Some(&attribute.value),
+        "password" => Some(Cow::Borrowed(&attribute.value)),
+        _ => Some(Cow::Owned(
+            scryer_application::url_redaction::redact_url_credentials(&attribute.value),
+        )),
     }
 }
 
@@ -306,7 +305,7 @@ fn carried(item: &NabFeedItem<'_, impl AsRef<str>>, name: &str) -> bool {
         .any(|attribute| {
             (attribute.name.eq_ignore_ascii_case(name) || (imdb(name) && imdb(&attribute.name)))
                 && public_attribute_value(attribute, item)
-                    .is_some_and(|value| writable_attribute(attribute, value))
+                    .is_some_and(|value| writable_attribute(attribute, &value))
         })
 }
 
@@ -417,8 +416,8 @@ pub fn try_write_xml_feed<'a, Link: AsRef<str>>(
         writer.write_event(Event::Empty(enclosure))?;
         for attribute in &item.result.response_attributes.original {
             if let Some(value) = public_attribute_value(attribute, &item) {
-                if writable_attribute(attribute, value) {
-                    write_attribute(&mut writer, attribute, value)?;
+                if writable_attribute(attribute, &value) {
+                    write_attribute(&mut writer, attribute, &value)?;
                 } else {
                     dropped_attributes += 1;
                 }
@@ -549,12 +548,12 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
             },
         )?;
         let mut groups = BTreeMap::<String, Vec<Attributes<Attribute<'_>>>>::new();
-        let mut elements = BTreeMap::<String, Vec<&str>>::new();
+        let mut elements = BTreeMap::<String, Vec<Cow<'_, str>>>::new();
         for attribute in &item.result.response_attributes.original {
             let Some(value) = public_attribute_value(attribute, &item) else {
                 continue;
             };
-            if !writable_attribute(attribute, value) {
+            if !writable_attribute(attribute, &value) {
                 dropped_attributes += 1;
                 continue;
             }
@@ -571,7 +570,7 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
                     groups.entry(key).or_default().push(Attributes {
                         attributes: Attribute {
                             name: &attribute.name,
-                            value: Cow::Borrowed(value),
+                            value,
                         },
                     })
                 }
@@ -607,7 +606,7 @@ pub fn try_write_json_feed<'a, Link: AsRef<str>>(
             elements
                 .entry("category".into())
                 .or_default()
-                .push(category);
+                .push(Cow::Borrowed(category));
         }
         for (key, values) in groups {
             output.write_all(b",")?;

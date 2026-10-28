@@ -368,6 +368,36 @@ fn part_paths_name_each_attempt_separately() {
 }
 
 #[test]
+fn http_queue_errors_keep_codes_and_explanations_separate() {
+    for code in [
+        None,
+        Some("HTTP_FUTURE_CONDITION"),
+        Some(http_release_refusal::UNKNOWN_CONTAINER),
+    ] {
+        let mut job = seeded_job(Path::new("/synthetic"), "https://media.invalid/a.mp4", 0);
+        job.state = HttpJobState::Failed;
+        job.error = Some("Readable failure explanation".into());
+        job.error_reason = code.map(str::to_string);
+        let item = job_to_queue_item(&job, None);
+        assert_eq!(
+            item.attention_reason.as_deref(),
+            Some("Readable failure explanation")
+        );
+        assert_eq!(item.attention_reason_code.as_deref(), code);
+        assert_eq!(
+            item.tracked_status_messages,
+            code.map(|_| "Readable failure explanation")
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        job.state = HttpJobState::Completed;
+        let item = job_to_queue_item(&job, None);
+        assert!(item.attention_reason.is_none());
+        assert!(item.attention_reason_code.is_none());
+    }
+}
+
+#[test]
 fn a_new_attempt_forgets_the_old_representation() {
     let mut job = seeded_job(Path::new("/srv/dl"), "https://media.invalid/a.mp4", 4);
     let file = &mut job.files[0];
@@ -1813,6 +1843,80 @@ async fn gated_server(split: usize, gate: Arc<tokio::sync::Notify>) -> String {
 }
 
 #[tokio::test]
+async fn http_host_admission_skips_blocked_jobs_and_releases_cancelled_reservations() {
+    tokio::time::timeout(WAIT_BOUND, async {
+        let mut gates = Vec::new();
+        let mut urls = Vec::new();
+        for index in 0..4 {
+            let gate = Arc::new(tokio::sync::Notify::new());
+            let base = gated_server(17, gate.clone()).await;
+            urls.push(if index == 3 {
+                base.replace("127.0.0.1", "localhost")
+            } else {
+                base
+            });
+            gates.push(gate);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(
+            dir.path(),
+            serde_json::json!({
+                "max_concurrent_downloads": 3, "max_connections_per_host": 1
+            }),
+        );
+        let client = client(&config);
+        client.engine().set_enabled(false);
+        let mut ids = Vec::new();
+        for (index, url) in urls.iter().enumerate() {
+            let mut input = request(source(vec![muxed(&format!("{url}/media.mp4"), 720)]));
+            input.source_title = Some(format!("Synthetic.Show.S01E{:02}.WEB", index + 1));
+            input.release_title = input.source_title.clone();
+            input.http.as_mut().unwrap().policy.output_basename =
+                format!("Synthetic.Show.S01E{:02}", index + 1);
+            ids.push(client.submit_download(&input).await.unwrap().job_id);
+        }
+        client.engine().set_enabled(true);
+        wait_for_live_bytes(&client, &ids[0], 17).await;
+        wait_for_live_bytes(&client, &ids[3], 17).await;
+        for id in &ids[1..3] {
+            assert_eq!(
+                client.engine().job(id).await.unwrap().unwrap().state,
+                HttpJobState::Queued
+            );
+        }
+        // Cancellation releases admission, so the next A can start while B
+        // remains admitted. Neither consumes another actual-request permit.
+        client.engine().pause(&ids[0]).await.unwrap();
+        gates[0].notify_one();
+        wait_for_live_bytes(&client, &ids[1], 17).await;
+        assert_eq!(
+            client.engine().job(&ids[2]).await.unwrap().unwrap().state,
+            HttpJobState::Queued
+        );
+        client.engine().set_limits(engine::HttpEngineLimits {
+            max_concurrent_downloads: 3,
+            max_connections_per_host: 2,
+            bandwidth_limit_kbps: None,
+        });
+        // A config update alone does not trigger scheduling; resuming a job
+        // invokes the existing scheduler with the new limit.
+        client.engine().pause(&ids[2]).await.unwrap();
+        client.engine().resume(&ids[2]).await.unwrap();
+        wait_for_live_bytes(&client, &ids[2], 17).await;
+        for gate in &gates {
+            gate.notify_one();
+        }
+        for id in &ids[1..] {
+            wait_for_job(&client, id, |job| job.state.is_terminal()).await;
+        }
+        client.engine().begin_shutdown();
+        client.engine().workers().wait().await;
+    })
+    .await
+    .expect("host admission regression timed out");
+}
+
+#[tokio::test]
 async fn buffered_bytes_show_live_but_are_recorded_only_after_a_sync() {
     let split = 17;
     let gate = Arc::new(tokio::sync::Notify::new());
@@ -2989,9 +3093,10 @@ async fn http_unknown_container_preserves_payload_and_reports_reason() {
         assert_eq!(std::fs::read(done.files[0].part_path()).unwrap(), BODY);
         let item = job_to_queue_item(&done, None);
         assert_eq!(
-            item.attention_reason.as_deref(),
+            item.attention_reason_code.as_deref(),
             Some(http_release_refusal::UNKNOWN_CONTAINER)
         );
+        assert_eq!(item.attention_reason, done.error);
         assert_eq!(item.tracked_status_messages, vec![done.error.unwrap()]);
     })
     .await

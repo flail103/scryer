@@ -211,6 +211,7 @@ pub(crate) struct RawSearchGeneration {
     client: Arc<dyn IndexerClient>,
     cancel: CancellationToken,
     registry: Option<Weak<super::InteractiveReleaseSearchRegistry>>,
+    coordinator: Arc<crate::RestoreCoordinator>,
 }
 
 fn request_heap(request: &RawTextSearchRequest) -> usize {
@@ -279,6 +280,7 @@ impl RawSearchGeneration {
         budget: Arc<RawSearchBudget>,
         cancel: CancellationToken,
         registry: Option<Weak<super::InteractiveReleaseSearchRegistry>>,
+        coordinator: Arc<crate::RestoreCoordinator>,
     ) -> AppResult<Arc<Self>> {
         let mut state = State {
             sources: sources
@@ -322,6 +324,7 @@ impl RawSearchGeneration {
             client,
             cancel,
             registry,
+            coordinator,
         }))
     }
 
@@ -464,6 +467,7 @@ impl RawSearchGeneration {
                             generation.budget.clone(),
                             generation.cancel.clone(),
                             generation.registry.clone(),
+                            generation.coordinator.clone(),
                         )
                         .await?;
                         *successor = Arc::downgrade(&rebuilt);
@@ -555,7 +559,8 @@ impl RawSearchGeneration {
     }
 
     fn can_read(&self, source: &SourceState) -> bool {
-        !source.pending
+        !self.cancel.is_cancelled()
+            && !source.pending
             && !source.exhausted
             && !source.stopped
             && source.buffer.is_none()
@@ -584,11 +589,17 @@ impl RawSearchGeneration {
             source.pending = true;
             source.attempted = true;
             let generation = self.clone();
-            tokio::spawn(async move {
+            self.coordinator.spawn_task(async move {
                 let started = Instant::now();
-                let response = tokio::select! {
-                    response = generation.client.search_raw_text(request, generation.cancel.child_token()) => response,
-                    _ = generation.cancel.cancelled() => return,
+                // Cancellation belongs to the source call: keep tracking it
+                // through persistence cleanup, even if it ignores cancellation.
+                let response = if generation.cancel.is_cancelled() {
+                    Err(AppError::canceled("raw source cancelled before admission"))
+                } else {
+                    generation
+                        .client
+                        .search_raw_text(request, generation.cancel.child_token())
+                        .await
                 };
                 // The source's existing timeout, pacing and accounting stay
                 // inside IndexerClient. No HTTP-request cancellation enters.

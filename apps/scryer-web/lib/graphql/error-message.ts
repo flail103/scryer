@@ -487,6 +487,22 @@ export function userFacingGraphQlErrorMessage(
         : undefined;
       const codeKey =
         typeof code === "string" ? ERROR_CODE_KEYS[code] : undefined;
+      if (key && reason === "SECURITY_PASSWORD_OUT_OF_RANGE") {
+        const value = entry.extensions.minLength;
+        const minLength =
+          typeof value === "number" ||
+          (typeof value === "string" && /^[0-9]+$/.test(value))
+            ? Number(value)
+            : NaN;
+        if (Number.isSafeInteger(minLength) && minLength > 0) {
+          return translate(key, { minLength });
+        }
+        // Older servers have the requirement only in their sentence.
+        if (typeof entry.message === "string" && entry.message.trim()) {
+          return normalizeGraphQlErrorMessage(entry.message);
+        }
+        return fallback.trim();
+      }
       if (key || codeKey) return translate(key ?? codeKey!);
     }
   }

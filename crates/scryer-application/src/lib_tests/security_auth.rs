@@ -147,7 +147,11 @@ async fn empty_local_login_inputs_use_masked_failure_delay() {
 
 #[tokio::test]
 async fn existing_short_password_remains_valid_after_minimum_is_raised() {
-    let (app, admin) = bootstrap();
+    let (app, admin) = bootstrap_with_settings_repo_and_profiles(
+        Arc::new(StoredSettingsRepo::default()),
+        Arc::new(MockQualityProfileRepo),
+        Arc::new(MockIndexerClient),
+    );
     let short_password = "short7!";
     let user = User {
         id: "existing-short-password-user".to_string(),
@@ -183,6 +187,25 @@ async fn existing_short_password_remains_valid_after_minimum_is_raised() {
     )
     .await
     .expect("raise password minimum");
+
+    let refusal = app
+        .validate_new_local_password("too-short")
+        .await
+        .unwrap_err();
+    let AppError::ValidationRefused { reason, facts, .. } = refusal else {
+        panic!("expected password refusal facts");
+    };
+    assert_eq!(
+        reason,
+        crate::error_reasons::security::PASSWORD_OUT_OF_RANGE
+    );
+    assert_eq!(facts, vec![crate::RefusalFact::new("minLength", "12")]);
+    app.validate_new_local_password(&"x".repeat(11))
+        .await
+        .unwrap_err();
+    app.validate_new_local_password(&"x".repeat(12))
+        .await
+        .unwrap();
 
     let authenticated = app
         .authenticate_credentials("existing_short_password", short_password)

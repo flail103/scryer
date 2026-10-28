@@ -59,6 +59,7 @@ struct EngineInner {
 struct RunningJob {
     cancel: CancellationToken,
     live: Arc<LiveProgress>,
+    admission_host: Option<String>,
 }
 
 /// In-memory progress of a running job, for queue listings only.
@@ -544,6 +545,31 @@ impl HttpEngine {
             if inner.running.len() >= limits.max_concurrent_downloads.max(1) {
                 break;
             }
+            let admission_host = inner
+                .document
+                .jobs
+                .iter()
+                .find(|job| job.id == id)
+                .and_then(|job| {
+                    job.files
+                        .iter()
+                        .find(|file| !file.complete && file.skipped_error.is_none())
+                })
+                .and_then(|file| url::Url::parse(&file.resource.url).ok())
+                .and_then(|url| {
+                    url.host_str()
+                        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+                });
+            if admission_host.as_ref().is_some_and(|host| {
+                inner
+                    .running
+                    .values()
+                    .filter(|job| job.admission_host.as_ref() == Some(host))
+                    .count()
+                    >= limits.max_connections_per_host.max(1)
+            }) {
+                continue;
+            }
             let cancel = self.shutdown.child_token();
             let live = Arc::new(LiveProgress {
                 file_index: AtomicU64::new(0),
@@ -562,6 +588,7 @@ impl HttpEngine {
                 RunningJob {
                     cancel: cancel.clone(),
                     live: Arc::clone(&live),
+                    admission_host,
                 },
             );
             let engine = Arc::clone(self);

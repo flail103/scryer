@@ -21,6 +21,66 @@ function coded(
   return { graphQLErrors: [{ message, extensions: { code, reason } }] };
 }
 
+test("password refusals interpolate validated minima and retain missing-fact sentences", () => {
+  for (const minLength of [8, 24, "16"]) {
+    const error = {
+      graphQLErrors: [
+        {
+          message: "server requirement",
+          extensions: {
+            code: "VALIDATION_ERROR",
+            reason: "SECURITY_PASSWORD_OUT_OF_RANGE",
+            minLength,
+          },
+        },
+      ],
+    };
+    assert.equal(
+      userFacingGraphQlErrorMessage(error, "Failed"),
+      `Password must be at least ${minLength} characters.`,
+    );
+    assert.equal(
+      userFacingGraphQlErrorMessage(
+        error,
+        "Failed",
+        (_key, facts) => `Mindestens ${facts?.minLength} Zeichen`,
+      ),
+      `Mindestens ${minLength} Zeichen`,
+    );
+  }
+  for (const minLength of [
+    undefined,
+    null,
+    true,
+    "",
+    "eight",
+    0,
+    -1,
+    1.5,
+    Infinity,
+    "8e2",
+  ]) {
+    assert.equal(
+      userFacingGraphQlErrorMessage(
+        {
+          graphQLErrors: [
+            {
+              message: "Password must have the configured minimum",
+              extensions: {
+                code: "VALIDATION_ERROR",
+                reason: "SECURITY_PASSWORD_OUT_OF_RANGE",
+                minLength,
+              },
+            },
+          ],
+        },
+        "Failed",
+      ),
+      "Password must have the configured minimum",
+    );
+  }
+});
+
 test("missing titles use their reason even after the sentence changes", () => {
   assert.equal(
     userFacingGraphQlErrorMessage(

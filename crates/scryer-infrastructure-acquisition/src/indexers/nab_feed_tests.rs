@@ -186,7 +186,7 @@ fn namespace_rebinding_is_preserved_per_attribute() {
 }
 
 #[test]
-fn only_download_fields_are_rewritten_and_password_metadata_survives() {
+fn download_fields_are_replaced_credentials_redacted_and_password_metadata_survives() {
     let output = xml(
         &result(vec![
             attribute(None, "magneturl", "magnet:?xt=urn:btih:123"),
@@ -216,7 +216,7 @@ fn only_download_fields_are_rewritten_and_password_metadata_survives() {
     assert_eq!(values[1].2, "opaque-source-release");
     assert_eq!(
         values[2].2,
-        "https://source.example/comments?api_key=secret"
+        "https://source.example/comments?api_key=[redacted]"
     );
     assert_eq!(
         values[3].2,
@@ -494,9 +494,7 @@ fn malformed_item_does_not_hide_later_items_or_duplicate_structural_fields() {
 }
 
 #[test]
-fn rewrites_are_decided_by_field_name_not_by_url_content() {
-    // A comments link on the source host, carrying userinfo and an API key
-    // query, is still a comments link: only download fields are rewritten.
+fn non_download_urls_keep_their_target_without_credentials() {
     let comments = "https://member:pass@source.example/details/9?apikey=comment-key";
     let mut attributes = vec![
         attribute(Some("newznab"), "comments", comments),
@@ -530,9 +528,12 @@ fn rewrites_are_decided_by_field_name_not_by_url_content() {
     assert_eq!(values.len(), 3 + download_family.len() + 1);
     assert_eq!(values.last(), Some(&size_attribute()));
     assert_eq!(values[0].0.as_deref(), Some(NEWZNAB_NAMESPACE));
-    assert_eq!(values[0].2, comments);
+    assert_eq!(
+        values[0].2,
+        scryer_application::url_redaction::redact_url_credentials(comments)
+    );
     assert_eq!(values[1].2, "https://source.example/key/secret/details");
-    assert_eq!(values[2].2, "https://other.example/info?token=info-token");
+    assert_eq!(values[2].2, "https://other.example/info?token=[redacted]");
     for (value, name) in values[3..].iter().zip(download_family) {
         assert_eq!(value.1, name);
         assert_eq!(value.2, retrieval);
@@ -547,6 +548,62 @@ fn rewrites_are_decided_by_field_name_not_by_url_content() {
             "<enclosure url=\"https://scryer.example/torznab/api?t=get&amp;id=reference\""
         )
     );
+}
+
+#[test]
+fn xml_and_json_redact_unknown_attributes_and_preserve_archive_passwords() {
+    let values = [
+        (
+            "custom",
+            "https://member:login-secret@source.example/a?x=1&api_key=query-secret",
+        ),
+        (
+            "custom",
+            "https://source.example/?next=https%3A%2F%2Fother.example%2F%3Ftoken%3Dencoded-secret%26x%3D1",
+        ),
+        ("custom", "ordinary & metadata"),
+        (
+            "password",
+            "https://archive.example/?token=archive-password",
+        ),
+    ];
+    let source = result(
+        values
+            .iter()
+            .map(|(name, value)| attribute(Some("newznab"), name, value))
+            .collect(),
+    );
+    let xml_output = xml(&source, None);
+    let json = json_item(&source);
+    let json_output = json.to_string();
+    for output in [&xml_output, &json_output] {
+        for secret in ["login-secret", "query-secret", "encoded-secret"] {
+            assert!(!output.contains(secret), "{output}");
+        }
+        assert!(output.contains("archive-password"));
+    }
+    let expected: Vec<_> = values
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.to_string(),
+                if *name == "password" {
+                    value.to_string()
+                } else {
+                    scryer_application::url_redaction::redact_url_credentials(value)
+                },
+            )
+        })
+        .collect();
+    assert_eq!(
+        parsed_attributes(&xml_output)
+            .into_iter()
+            .take(4)
+            .map(|(_, name, value)| (name, value))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(json_attributes(&json, "newznab:attr"), expected);
 }
 
 fn json_item(result: &IndexerSearchResult) -> serde_json::Value {

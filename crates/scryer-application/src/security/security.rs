@@ -374,9 +374,10 @@ impl AppUseCase {
     pub(crate) async fn validate_new_local_password(&self, password: &str) -> AppResult<()> {
         let min_length = self.password_min_length().await?;
         if password.chars().count() < min_length as usize {
-            return Err(AppError::validation_refused(
+            return Err(AppError::validation_refused_with_facts(
                 crate::error_reasons::security::PASSWORD_OUT_OF_RANGE,
                 format!("password must be at least {min_length} characters"),
+                vec![crate::RefusalFact::new("minLength", min_length.to_string())],
             ));
         }
 

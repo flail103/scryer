@@ -20,6 +20,7 @@ export type DownloadQueueDisplayStateInput = Pick<
   DownloadQueueItem,
   | "state"
   | "attentionReason"
+  | "attentionReasonCode"
   | "importStatus"
   | "importErrorMessage"
   | "deleteStatus"
@@ -58,6 +59,7 @@ const QUEUE_ITEM_VALUE_KEYS: readonly QueueItemValueKey[] = [
   "lastUpdatedAt",
   "attentionRequired",
   "attentionReason",
+  "attentionReasonCode",
   "downloadClientItemId",
   "downloadId",
   "passwordFailureCode",
@@ -337,6 +339,8 @@ function fillMissingQueueItemFields(
     lastUpdatedAt: primary.lastUpdatedAt ?? secondary.lastUpdatedAt,
     attentionRequired: primary.attentionRequired || secondary.attentionRequired,
     attentionReason: primary.attentionReason ?? secondary.attentionReason,
+    attentionReasonCode:
+      primary.attentionReasonCode ?? secondary.attentionReasonCode,
     importStatus: primary.importStatus ?? secondary.importStatus,
     importTransferPhase: primaryHasImportOverlay
       ? primary.importTransferPhase
@@ -485,12 +489,13 @@ export function buildQueueStatusDetail(
   t?: Translate,
 ): string {
   const reason = queueItem.attentionReason;
+  const code = queueItem.attentionReasonCode;
   const key =
-    reason && Object.hasOwn(QUEUE_ATTENTION_REASON_KEYS, reason)
-      ? QUEUE_ATTENTION_REASON_KEYS[reason]
+    code && Object.hasOwn(QUEUE_ATTENTION_REASON_KEYS, code)
+      ? QUEUE_ATTENTION_REASON_KEYS[code]
       : null;
   const messages = [
-    ...(reason && t && Object.hasOwn(HTTP_RELEASE_REFUSAL_KEYS, reason)
+    ...(code && t && Object.hasOwn(HTTP_RELEASE_REFUSAL_KEYS, code)
       ? []
       : (queueItem.trackedStatusMessages ?? [])),
     key && t ? t(key) : reason,

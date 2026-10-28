@@ -119,7 +119,8 @@ function queueItem(
 
 test("HTTP queue refusals translate the code and preserve legacy sentences", () => {
   const item = queueItem({
-    attentionReason: "HTTP_RELEASE_UNKNOWN_CONTAINER",
+    attentionReasonCode: "HTTP_RELEASE_UNKNOWN_CONTAINER",
+    attentionReason: "changed server wording",
     trackedStatusMessages: ["changed server wording"],
   });
   assert.equal(
@@ -134,6 +135,25 @@ test("HTTP queue refusals translate the code and preserve legacy sentences", () 
       (key) => key,
     ),
     "legacy server wording",
+  );
+});
+
+test("unknown queue codes preserve explanations and code changes invalidate equality", () => {
+  const item = queueItem({
+    attentionReasonCode: "HTTP_FUTURE",
+    attentionReason: "future explanation",
+    trackedStatusMessages: ["future explanation"],
+  });
+  assert.equal(
+    downloadQueue.buildQueueStatusDetail(item, (key) => key),
+    "future explanation",
+  );
+  assert.equal(
+    downloadQueue.sameDownloadQueueItem(item, {
+      ...item,
+      attentionReasonCode: "HTTP_OTHER",
+    }),
+    false,
   );
 });
 
