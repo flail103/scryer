@@ -6313,6 +6313,9 @@ const en: LocaleDictionary = {
   "settings.backupLocationBrowse": "Browse",
   "settings.backupLocationEffectivePath": "Backups are saved to",
   "settings.backupLocationReset": "Use default",
+  "settings.backupLocationResetTitle": "Use the default backup folder?",
+  "settings.backupLocationResetConfirm":
+    "New backups will be saved to {{path}}. Existing backups stay where they are and are hidden until you switch back.",
   "settings.backupLocationPickerTitle": "Select backup folder",
   "settings.backupLocationSaved": "Backup location saved.",
   "settings.backupsSection":
