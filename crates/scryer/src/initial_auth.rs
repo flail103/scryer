@@ -9,6 +9,15 @@ use axum::{
 };
 use scryer_application::initial_auth::{SetupState, refusal};
 
+// Format the complete operator-only record before writing. Formatting directly
+// into stderr emits fragments that container logs can interleave with stdout.
+pub(crate) fn write_setup_code(
+    output: &mut impl std::io::Write,
+    code: &str,
+) -> std::io::Result<()> {
+    output.write_all(format!("Scryer one-time setup code: {code}\n").as_bytes())
+}
+
 #[derive(Clone)]
 pub(crate) struct PendingSetup;
 
@@ -176,6 +185,45 @@ mod tests {
     use crate::middleware::{self, integration_test_common::TestContext};
     use scryer_application::UserRepository;
     use tower::ServiceExt;
+
+    #[test]
+    fn setup_code_is_written_as_one_complete_operator_record() {
+        #[derive(Default)]
+        struct RecordWriter(Vec<Vec<u8>>);
+        impl std::io::Write for RecordWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if !bytes.ends_with(b"\n") {
+                    return Err(std::io::ErrorKind::InvalidData.into());
+                }
+                self.0.push(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut output = RecordWriter::default();
+        write_setup_code(&mut output, "ABC-234").unwrap();
+        assert_eq!(
+            output.0,
+            [b"Scryer one-time setup code: ABC-234\n".to_vec()]
+        );
+    }
+
+    #[test]
+    fn setup_code_output_failure_is_propagated() {
+        struct UnavailableWriter;
+        impl std::io::Write for UnavailableWriter {
+            fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let error = write_setup_code(&mut UnavailableWriter, "ABC-234").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
 
     #[test]
     fn initial_auth_graphql_admission_checks_actual_fields_and_stage() {

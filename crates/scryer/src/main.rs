@@ -2485,8 +2485,7 @@ async fn bootstrap_application(
         // Every browser choice therefore requires operator-controlled proof.
         let code = auth_runtime.initial_authentication.initialize()?;
         // Operator-only output: deliberately bypass tracing and its web log ring.
-        use std::io::Write;
-        writeln!(std::io::stderr(), "Scryer one-time setup code: {code}")?;
+        initial_auth::write_setup_code(&mut std::io::stderr(), &code)?;
     }
     let authless_access_policy = AuthlessAccessPolicy {
         allow_unauthenticated_public_access: auth_mode.allow_unauthenticated_public_access,
