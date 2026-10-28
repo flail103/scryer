@@ -79,9 +79,6 @@ type Props = {
   hideSponsorButton: boolean;
   savingSponsorPreference: boolean;
   onHideSponsorButtonChange: (value: boolean) => void;
-  noGlow: boolean;
-  savingGlowPreference: boolean;
-  onNoGlowChange: (value: boolean) => void;
   currentPassword: string;
   newPassword: string;
   confirmPassword: string;
@@ -218,9 +215,6 @@ export function SettingsProfileSection({
   hideSponsorButton,
   savingSponsorPreference,
   onHideSponsorButtonChange,
-  noGlow,
-  savingGlowPreference,
-  onNoGlowChange,
   currentPassword,
   newPassword,
   confirmPassword,
@@ -555,28 +549,6 @@ export function SettingsProfileSection({
               disabled={savingSponsorPreference}
               onChange={(visible) => onHideSponsorButtonChange(!visible)}
               ariaLabel="Show Sponsor button"
-            />
-          </div>
-        </div>
-        <div className={PROFILE_ROW_CARD_CLASS}>
-          <div className="space-y-1">
-            <div className="font-medium text-[var(--scry-ink2)]">
-              {t("profile.glow")}
-            </div>
-            <p className={`${PROFILE_MUTED_TEXT_CLASS} max-w-xs`}>
-              {t("profile.glowDescription")}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {savingGlowPreference ? (
-              <LoadingMark className="h-4 w-4 text-[var(--scry-muted3)]" />
-            ) : null}
-            <SettingsToggleSwitch
-              id="settings-profile-glow"
-              checked={!noGlow}
-              disabled={savingGlowPreference}
-              onChange={(glow) => onNoGlowChange(!glow)}
-              ariaLabel={t("profile.glowToggle")}
             />
           </div>
         </div>

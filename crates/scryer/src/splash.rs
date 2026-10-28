@@ -451,12 +451,8 @@ const SPLASH_STYLE: &str = r#"
 body {
   min-height: 100vh;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-  /* The web UI's dark shell background: indigo, sky and emerald glows over the page gradient. */
-  background:
-    radial-gradient(circle at 14% 10%, rgba(91, 100, 255, 0.1), transparent 26rem),
-    radial-gradient(circle at 86% 14%, rgba(56, 189, 248, 0.06), transparent 28rem),
-    radial-gradient(circle at 60% 92%, rgba(16, 185, 129, 0.05), transparent 34rem),
-    linear-gradient(180deg, #070d1d 0%, #040814 42%, #02050c 100%);
+  /* The web UI's dark shell background. */
+  background: linear-gradient(180deg, #070d1d 0%, #040814 42%, #02050c 100%);
   background-attachment: fixed;
   color: #dbe5ff;
   display: grid;
@@ -472,7 +468,7 @@ main {
   max-width: 70vw;
   height: auto;
   margin: 0 auto 1.5rem;
-  filter: drop-shadow(0 6px 14px rgba(2, 6, 23, 0.7)) drop-shadow(0 0 18px rgba(91, 100, 255, 0.18));
+  filter: drop-shadow(0 6px 14px rgba(2, 6, 23, 0.7));
 }
 .status {
   font-size: 0.95rem;

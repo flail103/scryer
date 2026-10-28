@@ -6912,127 +6912,70 @@ async fn migration_0304_keeps_rule_states_when_experimental_features_are_on() {
     }
 }
 
-/// Runs the user backfill from 0306 against a fully migrated schema holding a
-/// user with a saved glow choice and a user without saved settings. The
-/// instance's state is set by `setup_complete` (the stored `value_json`, or no
-/// value) and `with_title`. Returns the preference rows afterwards as
-/// `(user_id, no_glow)`.
-async fn ui_settings_after_0306(
-    setup_complete: Option<&str>,
-    with_title: bool,
-) -> Vec<(String, i64)> {
+#[tokio::test]
+async fn migration_0317_drops_saved_glow_preferences_and_keeps_the_rest() {
     let directory = tempfile::tempdir().expect("synthetic schema fixture");
-    let services = SqliteServices::new(directory.path().join("glow-0306.db").to_string_lossy())
+    let services = SqliteServices::new(directory.path().join("glow-0317.db").to_string_lossy())
         .await
         .expect("migrations should apply");
     let pool = services.pool().clone();
-    let mut conn = pool.acquire().await.expect("glow backfill connection");
+    let mut conn = pool.acquire().await.expect("glow removal connection");
+
+    let columns: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('user_ui_settings')")
+            .fetch_all(&mut *conn)
+            .await
+            .expect("read migrated columns");
+    assert!(
+        !columns.iter().any(|(name,)| name == "no_glow"),
+        "a fully migrated schema has no glow column"
+    );
+
+    // Put back the column 0306 added, with a saved glow choice beside other
+    // preferences, and replay the removal.
     sqlx::query("PRAGMA foreign_keys = OFF")
         .execute(&mut *conn)
         .await
         .expect("relax foreign keys for the seeded rows");
-
-    sqlx::query("DELETE FROM user_ui_settings")
+    sqlx::query("ALTER TABLE user_ui_settings ADD COLUMN no_glow INTEGER NOT NULL DEFAULT 0")
         .execute(&mut *conn)
         .await
-        .expect("start without saved preferences");
-    sqlx::query("DELETE FROM users")
-        .execute(&mut *conn)
-        .await
-        .expect("start without users");
+        .expect("restore the 0306 column");
     sqlx::query(
-        "INSERT INTO users (id, username, status, created_at, updated_at)
-         VALUES ('user-saved', 'synthetic-saved', 'active',
-                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-                ('user-unsaved', 'synthetic-unsaved', 'active',
-                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        "INSERT INTO user_ui_settings (user_id, hide_sponsor_button, reduce_motion, no_glow)
+         VALUES ('user-glow-on', 1, 0, 0), ('user-glow-off', 0, 1, 1)",
     )
     .execute(&mut *conn)
     .await
-    .expect("seed users");
-    sqlx::query("INSERT INTO user_ui_settings (user_id, no_glow) VALUES ('user-saved', 1)")
-        .execute(&mut *conn)
-        .await
-        .expect("seed saved preference");
-    if with_title {
-        sqlx::query(
-            "INSERT INTO titles
-             (id, name, name_normalized, library_id, root_folder_id, facet, created_at)
-             VALUES ('title-synthetic', 'Synthetic Title', 'synthetic title', 'library-synthetic',
-                     'root-synthetic', 'movie', '2026-01-01T00:00:00Z')",
-        )
-        .execute(&mut *conn)
-        .await
-        .expect("seed title");
-    }
-    if let Some(value_json) = setup_complete {
-        sqlx::query(
-            "INSERT INTO settings_definitions
-             (id, category, scope, key_name, data_type, created_at, updated_at)
-             VALUES ('def-setup-complete', 'system', 'system', 'setup.complete',
-                     'boolean', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        )
-        .execute(&mut *conn)
-        .await
-        .expect("seed setting definition");
-        sqlx::query(
-            "INSERT INTO settings_values
-             (id, setting_definition_id, scope, scope_id, value_json, source, created_at, updated_at)
-             VALUES ('value-setup-complete', 'def-setup-complete', 'system', NULL, ?, 'user',
-                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        )
-        .bind(value_json)
-        .execute(&mut *conn)
-        .await
-        .expect("seed setting value");
-    }
+    .expect("seed saved preferences");
 
-    // The column already exists in the migrated schema; replay only the backfill.
-    for statement in include_str!("../../../scryer/src/db/migrations/0306_user_ui_no_glow.sql")
-        .split(';')
-        .map(str::trim)
-        .filter(|statement| statement.contains("INSERT INTO user_ui_settings"))
-    {
-        sqlx::query(statement)
-            .execute(&mut *conn)
+    sqlx::raw_sql(include_str!(
+        "../../../scryer/src/db/migrations/0317_user_ui_drop_glow.sql"
+    ))
+    .execute(&mut *conn)
+    .await
+    .expect("0317 should apply");
+
+    let columns: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('user_ui_settings')")
+            .fetch_all(&mut *conn)
             .await
-            .expect("0306 backfill should apply");
-    }
-
-    sqlx::query_as("SELECT user_id, no_glow FROM user_ui_settings ORDER BY user_id")
-        .fetch_all(&mut *conn)
-        .await
-        .expect("read preferences")
-}
-
-#[tokio::test]
-async fn migration_0306_keeps_the_glow_for_users_of_instances_in_use() {
-    for (setup_complete, with_title) in [
-        (Some("true"), false),
-        (Some("\"true\""), false),
-        (None, true),
-        (Some("false"), true),
-    ] {
-        assert_eq!(
-            ui_settings_after_0306(setup_complete, with_title).await,
-            vec![
-                ("user-saved".to_string(), 1),
-                ("user-unsaved".to_string(), 0),
-            ],
-            "setup_complete = {setup_complete:?}, with_title = {with_title}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn migration_0306_leaves_fresh_installs_on_the_no_glow_default() {
-    for setup_complete in [None, Some("false")] {
-        assert_eq!(
-            ui_settings_after_0306(setup_complete, false).await,
-            vec![("user-saved".to_string(), 1)],
-            "setup_complete = {setup_complete:?}"
-        );
-    }
+            .expect("read columns after 0317");
+    assert!(!columns.iter().any(|(name,)| name == "no_glow"));
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT user_id, hide_sponsor_button, reduce_motion
+           FROM user_ui_settings ORDER BY user_id",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .expect("read preferences");
+    assert_eq!(
+        rows,
+        vec![
+            ("user-glow-off".to_string(), 0, 1),
+            ("user-glow-on".to_string(), 1, 0),
+        ]
+    );
 }
 
 #[tokio::test]

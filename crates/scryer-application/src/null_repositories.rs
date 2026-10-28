@@ -4100,7 +4100,6 @@ impl UserUiSettingsRepository for NullUserUiSettingsRepository {
         current.high_contrast_mode = settings.high_contrast_mode;
         current.reduce_motion = settings.reduce_motion;
         current.hide_sponsor_button = settings.hide_sponsor_button;
-        current.no_glow = settings.no_glow;
         current.density = settings.density;
         current.sidebar_mode = settings.sidebar_mode;
         current.default_landing_view = settings.default_landing_view;

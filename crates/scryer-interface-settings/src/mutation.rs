@@ -790,7 +790,7 @@ impl SettingsMutations {
         &self,
         ctx: &Context<'_>,
         #[graphql(
-            desc = "Complete UI settings to save; omitted or null date_time_format, no_glow, language or table_columns keeps its current value."
+            desc = "Complete UI settings to save; omitted or null date_time_format, language or table_columns keeps its current value."
         )]
         input: SetMyUiSettingsInput,
     ) -> GqlResult<UiSettingsPayload> {

@@ -922,7 +922,6 @@ export const setMyUiSettingsMutation = `mutation SetMyUiSettings($input: SetMyUi
     highContrastMode
     reduceMotion
     hideSponsorButton
-    noGlow
     density
     sidebarMode
     defaultLandingView
@@ -964,7 +963,6 @@ export const setMyCatalogViewMutation = `mutation SetMyCatalogView($input: SetMy
     highContrastMode
     reduceMotion
     hideSponsorButton
-    noGlow
     density
     sidebarMode
     defaultLandingView
@@ -1005,7 +1003,6 @@ const UI_SETTINGS_PAYLOAD_FIELDS = `
     highContrastMode
     reduceMotion
     hideSponsorButton
-    noGlow
     density
     sidebarMode
     defaultLandingView

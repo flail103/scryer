@@ -19276,7 +19276,7 @@ type MutationRoot {
 	"""
 	setMyUiSettings(
 		"""
-		Complete UI settings to save; omitted or null date_time_format, no_glow, language or table_columns keeps its current value.
+		Complete UI settings to save; omitted or null date_time_format, language or table_columns keeps its current value.
 		"""
 		input: SetMyUiSettingsInput!
 	): UiSettingsPayload!
@@ -28983,10 +28983,6 @@ input SetMyUiSettingsInput {
 	"""
 	hideSponsorButton: Boolean!
 	"""
-	Optional glow preference; true turns the decorative accent glow off and null preserves the existing value.
-	"""
-	noGlow: Boolean
-	"""
 	Selected density.
 	"""
 	density: UiDensityValue!
@@ -32597,10 +32593,6 @@ type UiSettingsPayload {
 	Whether the sponsor button is hidden.
 	"""
 	hideSponsorButton: Boolean!
-	"""
-	Whether the decorative accent glow is turned off.
-	"""
-	noGlow: Boolean!
 	"""
 	Selected density.
 	"""

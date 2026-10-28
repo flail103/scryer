@@ -3048,7 +3048,6 @@ export const myUiSettingsQuery = `query MyUiSettings {
     highContrastMode
     reduceMotion
     hideSponsorButton
-    noGlow
     density
     sidebarMode
     defaultLandingView

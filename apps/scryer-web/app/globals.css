@@ -200,74 +200,34 @@
   --scry-pp2: #ffffff;
   --scry-side1: rgba(255, 255, 255, 0.9);
   --scry-side2: rgba(248, 250, 253, 0.9);
-  --scry-shell-left-glow: rgba(var(--scry-accent-rgb), 0.055);
-  --scry-glow: 1;
-  --scry-shell-left-glow-reach: 34rem;
-  --scry-shell-bg:
-    radial-gradient(
-      circle at 14% 10%,
-      var(--scry-shell-left-glow),
-      transparent var(--scry-shell-left-glow-reach)
-    ),
-    radial-gradient(
-      circle at 86% 14%,
-      rgba(var(--scry-accent-rgb), 0.06),
-      transparent 28rem
-    ),
-    radial-gradient(
-      circle at 60% 92%,
-      rgba(var(--scry-accent-rgb), 0.05),
-      transparent 34rem
-    ),
-    linear-gradient(
-      180deg,
-      var(--scry-page1) 0%,
-      var(--scry-page2) 42%,
-      var(--scry-page3) 100%
-    );
+  --scry-shell-bg: linear-gradient(
+    180deg,
+    var(--scry-page1) 0%,
+    var(--scry-page2) 42%,
+    var(--scry-page3) 100%
+  );
   --scry-shell-main-bg: transparent;
-  --scry-shell-side-bg:
-    radial-gradient(
-      circle at 18% 0%,
-      rgba(var(--scry-accent-rgb), 0.1),
-      transparent 13rem
-    ),
-    linear-gradient(180deg, var(--scry-side1), var(--scry-side2));
-  --scry-search-panel-bg:
-    radial-gradient(
-      circle at 86% 0%,
-      rgba(var(--scry-accent-rgb), 0.1),
-      transparent 16rem
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--card) 96%, var(--background) 4%) 0%,
-      var(--card) 56%,
-      color-mix(in srgb, var(--background) 90%, var(--card) 10%) 100%
-    );
-  --scry-search-overlay-bg:
-    radial-gradient(
-      circle at 50% 0%,
-      rgba(var(--scry-accent-rgb), 0.1),
-      transparent 30rem
-    ),
-    color-mix(in srgb, var(--background) 78%, transparent);
-  --scry-mobile-search-bg:
-    radial-gradient(
-      circle at 12% 0%,
-      rgba(var(--scry-accent-rgb), 0.1),
-      transparent 18rem
-    ),
-    radial-gradient(
-      circle at 92% 12%,
-      rgba(var(--scry-accent-rgb), 0.06),
-      transparent 20rem
-    ),
-    linear-gradient(
-      180deg,
-      var(--background) 0%,
-      color-mix(in srgb, var(--muted) 38%, transparent) 100%
-    );
+  --scry-shell-side-bg: linear-gradient(
+    180deg,
+    var(--scry-side1),
+    var(--scry-side2)
+  );
+  --scry-search-panel-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 96%, var(--background) 4%) 0%,
+    var(--card) 56%,
+    color-mix(in srgb, var(--background) 90%, var(--card) 10%) 100%
+  );
+  --scry-search-overlay-bg: color-mix(
+    in srgb,
+    var(--background) 78%,
+    transparent
+  );
+  --scry-mobile-search-bg: linear-gradient(
+    180deg,
+    var(--background) 0%,
+    color-mix(in srgb, var(--muted) 38%, transparent) 100%
+  );
   --scry-search-sticky-bg: color-mix(
     in srgb,
     var(--background) 92%,
@@ -310,8 +270,6 @@
 
 .dark {
   /* Dark theme */
-  --scry-shell-left-glow: rgba(var(--scry-accent-rgb), 0.1);
-  --scry-shell-left-glow-reach: 26rem;
   --scry-page1: #070d1d;
   --scry-page2: #040814;
   --scry-page3: #02050c;
@@ -441,8 +399,6 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: var(--border-color);
   --sidebar-ring: var(--ring);
-  --dark-atmo-indigo: rgba(var(--scry-accent-rgb), 0.065);
-  --dark-atmo-cyan: rgba(var(--scry-accent-rgb), 0.038);
   --dark-atmo-emerald: rgba(var(--scry-accent-rgb), 0.026);
   --dark-atmo-white: rgba(255, 255, 255, 0.014);
 }
@@ -633,23 +589,6 @@ body {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 18px 40px rgba(2, 6, 23, 0.24);
-}
-
-.dark [data-slot="sidebar-inner"]::before {
-  content: "";
-  position: absolute;
-  inset: -12% -16% auto 8%;
-  height: 6rem;
-  background: linear-gradient(
-    90deg,
-    rgba(var(--scry-accent-rgb), 0.09),
-    rgba(var(--scry-accent-rgb), 0.05),
-    rgba(var(--scry-accent-rgb), 0.03)
-  );
-  filter: blur(26px);
-  opacity: 0.22;
-  pointer-events: none;
-  z-index: 0;
 }
 
 .dark [data-slot="sidebar-inner"] > * {
@@ -959,25 +898,16 @@ body {
 }
 
 .dark [data-slot="global-search-overlay"] {
-  background:
-    radial-gradient(
-      circle at 50% 0%,
-      rgba(var(--scry-accent-rgb), 0.11),
-      transparent 28rem
-    ),
-    rgba(2, 4, 10, 0.66);
+  background: rgba(2, 4, 10, 0.66);
   backdrop-filter: blur(8px) saturate(118%);
 }
 
 .dark [data-slot="mobile-global-search-overlay"] {
-  background:
-    linear-gradient(180deg, rgba(7, 13, 28, 0.98), rgba(4, 8, 20, 0.992)),
-    radial-gradient(
-      circle at 12% 0%,
-      var(--dark-atmo-indigo),
-      transparent 18rem
-    ),
-    radial-gradient(circle at 92% 10%, var(--dark-atmo-cyan), transparent 20rem);
+  background: linear-gradient(
+    180deg,
+    rgba(7, 13, 28, 0.98),
+    rgba(4, 8, 20, 0.992)
+  );
 }
 
 .dark [data-slot="mobile-global-search-header"],
@@ -990,53 +920,6 @@ body {
       rgba(var(--scry-accent-rgb), 0.018) 100%
     );
   backdrop-filter: blur(16px) saturate(124%);
-}
-
-/* The glow preference off: the accent-colored atmospheres and spread
-   shadows go, and the plain surfaces under them stay. */
-:root[data-glow="off"] {
-  --scry-glow: 0;
-  --scry-shell-bg: linear-gradient(
-    180deg,
-    var(--scry-page1) 0%,
-    var(--scry-page2) 42%,
-    var(--scry-page3) 100%
-  );
-  --scry-shell-side-bg: linear-gradient(
-    180deg,
-    var(--scry-side1),
-    var(--scry-side2)
-  );
-  --scry-search-panel-bg: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--card) 96%, var(--background) 4%) 0%,
-    var(--card) 56%,
-    color-mix(in srgb, var(--background) 90%, var(--card) 10%) 100%
-  );
-  --scry-search-overlay-bg: color-mix(
-    in srgb,
-    var(--background) 78%,
-    transparent
-  );
-  --scry-mobile-search-bg: linear-gradient(
-    180deg,
-    var(--background) 0%,
-    color-mix(in srgb, var(--muted) 38%, transparent) 100%
-  );
-  --dark-atmo-indigo: transparent;
-  --dark-atmo-cyan: transparent;
-}
-
-:root[data-glow="off"] [data-slot="sidebar-inner"]::before {
-  display: none;
-}
-
-:root.dark[data-glow="off"] [data-slot="global-search-overlay"] {
-  background: rgba(2, 4, 10, 0.66);
-}
-
-:root[data-glow="off"] .fc-scryer-hover-card-image-wrap {
-  background: var(--muted);
 }
 
 @keyframes scryer-progress-indeterminate {
@@ -1592,13 +1475,7 @@ h6 {
   min-height: 210px;
 }
 .fc-scryer-hover-card-image-wrap {
-  background:
-    radial-gradient(
-      circle at 20% 10%,
-      color-mix(in srgb, var(--primary) 22%, transparent),
-      transparent 60%
-    ),
-    var(--muted);
+  background: var(--muted);
   flex: none;
   overflow: hidden;
 }

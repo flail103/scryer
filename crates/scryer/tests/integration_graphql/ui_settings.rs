@@ -42,7 +42,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
             highContrastMode
             reduceMotion
             hideSponsorButton
-            noGlow
             density
             sidebarMode
             defaultLandingView
@@ -66,7 +65,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
                 "highContrastMode": true,
                 "reduceMotion": true,
                 "hideSponsorButton": true,
-                "noGlow": false,
                 "density": "COMPACT",
                 "sidebarMode": "COLLAPSED",
                 "defaultLandingView": "CALENDAR",
@@ -105,7 +103,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
             highContrastMode
             reduceMotion
             hideSponsorButton
-            noGlow
             density
             sidebarMode
             defaultLandingView
@@ -134,7 +131,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
     assert_eq!(settings["highContrastMode"], json!(true));
     assert_eq!(settings["reduceMotion"], json!(true));
     assert_eq!(settings["hideSponsorButton"], json!(true));
-    assert_eq!(settings["noGlow"], json!(false));
     assert_eq!(settings["density"], json!("COMPACT"));
     assert_eq!(settings["sidebarMode"], json!("COLLAPSED"));
     assert_eq!(settings["defaultLandingView"], json!("CALENDAR"));
@@ -166,7 +162,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
             theme
             palette
             dateTimeFormat
-            noGlow
           }
         }
         "#,
@@ -194,11 +189,6 @@ async fn graphql_anonymous_ui_settings_round_trip_is_shared() {
     assert_eq!(
         old_client_update["data"]["setMyUiSettings"]["dateTimeFormat"],
         json!("ISO24H")
-    );
-    // Clients that predate the glow preference keep the saved choice.
-    assert_eq!(
-        old_client_update["data"]["setMyUiSettings"]["noGlow"],
-        json!(false)
     );
 }
 
@@ -254,7 +244,6 @@ async fn graphql_ui_settings_are_isolated_per_logged_in_user() {
             theme
             palette
             dateTimeFormat
-            noGlow
             density
             sidebarMode
             defaultLandingView
@@ -293,7 +282,6 @@ async fn graphql_ui_settings_are_isolated_per_logged_in_user() {
             theme
             palette
             dateTimeFormat
-            noGlow
             density
             sidebarMode
             defaultLandingView
@@ -324,9 +312,6 @@ async fn graphql_ui_settings_are_isolated_per_logged_in_user() {
         json!("MOVIES")
     );
     assert_eq!(read_b["data"]["myUiSettings"]["tableColumns"], json!([]));
-    // Users without saved settings start without the glow.
-    assert_eq!(read_b["data"]["myUiSettings"]["noGlow"], json!(true));
-    assert_eq!(read_a["data"]["myUiSettings"]["noGlow"], json!(true));
 }
 
 #[tokio::test]

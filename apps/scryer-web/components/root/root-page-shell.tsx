@@ -345,7 +345,7 @@ function SmgScryerUpdateBanner({
   return (
     <div
       data-slot="root-shell-notice"
-      className="border-b border-[var(--scry-border3)] bg-[linear-gradient(180deg,var(--scry-soft),var(--scry-surfA))] text-[var(--scry-body)] shadow-[0_8px_28px_rgba(var(--scry-accent-rgb),calc(0.10*var(--scry-glow)))] backdrop-blur"
+      className="border-b border-[var(--scry-border3)] bg-[linear-gradient(180deg,var(--scry-soft),var(--scry-surfA))] text-[var(--scry-body)] backdrop-blur"
     >
       <div className="mx-auto flex w-full max-w-[1480px] items-center gap-3 px-4 py-2 text-sm">
         <CircleFadingArrowUp
@@ -1845,7 +1845,7 @@ function AuthenticatedHomePage({
                         {showInstallBanner ? (
                           <div
                             data-slot="root-shell-notice"
-                            className="flex items-center justify-center gap-3 border-b border-[var(--scry-border3)] bg-[linear-gradient(180deg,var(--scry-soft),var(--scry-surfA))] px-4 py-2 text-sm text-[var(--scry-body)] shadow-[0_8px_28px_rgba(var(--scry-accent-rgb),calc(0.10*var(--scry-glow)))] backdrop-blur"
+                            className="flex items-center justify-center gap-3 border-b border-[var(--scry-border3)] bg-[linear-gradient(180deg,var(--scry-soft),var(--scry-surfA))] px-4 py-2 text-sm text-[var(--scry-body)] backdrop-blur"
                           >
                             <Download className="h-4 w-4 flex-none text-[var(--scry-accent-ring)]" />
                             <span className="text-[var(--scry-muted)]">

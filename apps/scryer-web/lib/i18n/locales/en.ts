@@ -7748,12 +7748,6 @@ const en: LocaleDictionary = {
   "color.fuchsia": "Fuchsia",
   "color.magenta": "Magenta",
   "color.crab": "Crab",
-  "profile.glow": "Glow",
-  "profile.glowDescription":
-    "Show the soft accent-colored glow behind the interface.",
-  "profile.glowToggle": "Show glow",
-  "profile.glowSaved": "Glow preference saved.",
-  "profile.glowSaveFailed": "Failed to update glow preference.",
   "profile.changePassword": "Change Password",
   "profile.currentPassword": "Current Password",
   "profile.newPassword": "New Password",

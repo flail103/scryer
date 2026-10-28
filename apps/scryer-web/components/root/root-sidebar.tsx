@@ -578,7 +578,7 @@ const LEAF_NAV_BADGE_BASE_CLASS =
   "ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-md px-1 text-[10px] font-medium leading-none tabular-nums";
 
 const TOP_NAV_BUTTON_CLASS =
-  "h-9 rounded-[10px] px-2.5 text-[13px] font-medium transition-colors hover:!bg-[var(--scry-hover)] hover:text-sidebar-accent-foreground data-[active=true]:bg-[linear-gradient(90deg,rgba(var(--scry-accent-rgb),0.30),rgba(var(--scry-accent-rgb),0.10))] data-[active=true]:font-semibold data-[active=true]:text-foreground data-[active=true]:shadow-[inset_2px_0_0_rgb(var(--scry-accent-rgb)),0_8px_18px_rgba(var(--scry-accent-rgb),calc(0.16*var(--scry-glow)))] data-[active=true]:hover:!bg-[linear-gradient(90deg,rgba(var(--scry-accent-rgb),0.30),rgba(var(--scry-accent-rgb),0.10))] data-[active=true]:[&>svg]:text-primary";
+  "h-9 rounded-[10px] px-2.5 text-[13px] font-medium transition-colors hover:!bg-[var(--scry-hover)] hover:text-sidebar-accent-foreground data-[active=true]:bg-[linear-gradient(90deg,rgba(var(--scry-accent-rgb),0.30),rgba(var(--scry-accent-rgb),0.10))] data-[active=true]:font-semibold data-[active=true]:text-foreground data-[active=true]:shadow-[inset_2px_0_0_rgb(var(--scry-accent-rgb))] data-[active=true]:hover:!bg-[linear-gradient(90deg,rgba(var(--scry-accent-rgb),0.30),rgba(var(--scry-accent-rgb),0.10))] data-[active=true]:[&>svg]:text-primary";
 
 const SUB_NAV_BUTTON_CLASS =
   "min-h-[30px] rounded-[8px] px-[11px] text-[12.5px] font-medium !text-[var(--scry-muted)] transition-colors hover:!bg-[var(--scry-hover)] hover:!text-[var(--scry-body)] data-[active=true]:!bg-[var(--scry-hover)] data-[active=true]:!bg-none data-[active=true]:font-semibold data-[active=true]:!text-[var(--scry-text2)]";
@@ -1161,7 +1161,7 @@ function RootSidebarContent({
             <img
               src={brandLogoUrl}
               alt="Scryer"
-              className="h-auto w-[220px] object-contain dark:drop-shadow-[0_12px_22px_rgba(var(--scry-accent-rgb),calc(0.32*var(--scry-glow)))]"
+              className="h-auto w-[220px] object-contain"
             />
           </div>
         </SidebarHeader>

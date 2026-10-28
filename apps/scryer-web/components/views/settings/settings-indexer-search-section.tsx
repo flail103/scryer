@@ -399,7 +399,7 @@ function QueryCard({
             type="button"
             disabled={query.trim().length === 0}
             onClick={onSearch}
-            className="h-[46px] rounded-[11px] border-0 bg-[linear-gradient(135deg,var(--scry-accent),var(--scry-accent2))] px-[22px] text-[13.5px] font-semibold text-white shadow-[0_8px_20px_rgba(var(--scry-accent-rgb),calc(0.32*var(--scry-glow)))] hover:opacity-90"
+            className="h-[46px] rounded-[11px] border-0 bg-[linear-gradient(135deg,var(--scry-accent),var(--scry-accent2))] px-[22px] text-[13.5px] font-semibold text-white hover:opacity-90"
           >
             <ScanSearch className="h-4 w-4" />
             {t("label.search")}
