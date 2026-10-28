@@ -1,6 +1,54 @@
 import type { LocaleDictionary } from "../types";
 
 const fr: LocaleDictionary = {
+  "initialAuth.title": "Configurer l’accès à Scryer",
+  "initialAuth.description":
+    "Avant de continuer, choisissez si cette instance exige une connexion.",
+  "initialAuth.choose": "Comment accéder à Scryer ?",
+  "initialAuth.passwordMode": "Exiger un mot de passe administrateur",
+  "initialAuth.noAuthMode": "Continuer sans authentification",
+  "initialAuth.environment":
+    "La configuration de démarrage limite le mode d’authentification disponible.",
+  "initialAuth.admin":
+    "Définissez le mot de passe du compte admin. Utilisez au moins {{minLength}} caractères.",
+  "initialAuth.password": "Nouveau mot de passe",
+  "initialAuth.confirm": "Confirmer le mot de passe",
+  "initialAuth.mismatch": "Les mots de passe ne correspondent pas.",
+  "initialAuth.acknowledge":
+    "Je comprends que toute personne autorisée à accéder à cette instance sans authentification pourra agir comme administrateur. Les restrictions réseau existantes restent applicables.",
+  "initialAuth.code": "Code de configuration",
+  "initialAuth.codeHelp":
+    "Le code à usage unique figure dans la console du serveur ou la sortie du conteneur ou du service. Redémarrer Scryer remplace ce code.",
+  "initialAuth.continue": "Enregistrer le mot de passe et continuer",
+  "initialAuth.continueWithout":
+    "Confirmer l’absence d’authentification et continuer",
+  "initialAuth.saving": "Enregistrement…",
+  "initialAuth.loadFailed":
+    "Impossible de charger l’état de la configuration d’authentification. Réessayez pour continuer.",
+  "initialAuth.retry": "Réessayer",
+  "initialAuth.saveFailed":
+    "Impossible d’enregistrer la configuration d’authentification.",
+  "initialAuth.required":
+    "Terminez la configuration d’authentification avant de continuer.",
+  "initialAuth.alreadyCompleted":
+    "La configuration d’authentification est déjà terminée. Actualisez pour continuer.",
+  "initialAuth.replaceRequired":
+    "Connectez-vous avec le mot de passe administrateur temporaire et remplacez-le.",
+  "initialAuth.invalidCode":
+    "Saisissez le code de configuration affiché dans la console du serveur.",
+  "initialAuth.rateLimited":
+    "Trop de codes incorrects. Patientez une minute, puis réessayez.",
+  "initialAuth.modeConflict":
+    "Ce choix est incompatible avec la configuration de démarrage ou le mot de passe fourni.",
+  "initialAuth.acknowledgeRequired":
+    "Confirmez que vous souhaitez continuer sans authentification.",
+  "initialAuth.sessionExpired":
+    "Cette session temporaire a expiré. Reconnectez-vous pour continuer.",
+  "initialAuth.replacementTitle": "Choisir un nouveau mot de passe",
+  "initialAuth.replacementDescription":
+    "Vous avez utilisé un mot de passe administrateur temporaire. Remplacez-le par un mot de passe différent que vous seul connaissez.",
+  "initialAuth.showPasswords": "Afficher les mots de passe",
+  "initialAuth.signOut": "Se déconnecter",
   "httpRelease.refusal.detailsUnavailable":
     "Les détails de cette release ne sont plus disponibles. Relancez la recherche pour la récupérer.",
   "httpRelease.refusal.live":

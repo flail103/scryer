@@ -656,6 +656,12 @@ pub struct SetMyDashboardLayoutInput {
 #[derive(SimpleObject, Clone)]
 /// Effective authentication runtime flags after configuration and environment overrides.
 pub struct AuthRuntimeStatePayload {
+    /// Initial authentication stage; null means this predates mandatory setup.
+    pub initial_authentication_stage: Option<String>,
+    /// Whether the pending initial choice requires the operator's console code.
+    pub initial_authentication_code_required: bool,
+    /// Minimum length for the administrator's new password.
+    pub password_min_length: i32,
     /// Effective form-login state.
     pub effective_form_login_enabled: bool,
     /// Whether local IPs may skip login.

@@ -52,6 +52,13 @@ ${LOGIN_PAYLOAD_FIELDS}
   }
 }`;
 
+export const completeInitialAuthenticationMutation = `mutation CompleteInitialAuthentication($input: CompleteInitialAuthenticationInput!) {
+  completeInitialAuthentication(input: $input) {
+    completed
+    login { ${LOGIN_PAYLOAD_FIELDS} }
+  }
+}`;
+
 export const completeRequiredPasswordChangeMutation = `mutation CompleteRequiredPasswordChange($input: CompleteRequiredPasswordChangeInput!) {
   completeRequiredPasswordChange(input: $input) {
 ${LOGIN_PAYLOAD_FIELDS}

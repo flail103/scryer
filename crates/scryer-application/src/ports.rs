@@ -3378,6 +3378,19 @@ pub trait ShowRepository: Send + Sync {
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
+    async fn initial_authentication_state(
+        &self,
+    ) -> AppResult<Option<crate::initial_auth::SetupState>> {
+        Ok(None)
+    }
+    async fn complete_initial_authentication(&self, _user: User) -> AppResult<User> {
+        Err(AppError::Repository(
+            "initial authentication persistence is not configured".into(),
+        ))
+    }
+    async fn prepare_initial_authentication_recovery(&self, _id: &str) -> AppResult<Option<User>> {
+        Ok(None)
+    }
     async fn get_by_username(&self, username: &str) -> AppResult<Option<User>>;
     async fn get_login_snapshot_by_username(
         &self,

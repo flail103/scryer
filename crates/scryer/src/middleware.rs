@@ -1801,6 +1801,7 @@ pub(crate) async fn graphql_handler(
     State(state): State<AuthState>,
     headers: HeaderMap,
     ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    setup_admission: Option<axum::Extension<crate::initial_auth::SetupAdmission>>,
     body: async_graphql_axum::GraphQLBatchRequest,
 ) -> Response {
     let batch = body.into_inner();
@@ -1809,6 +1810,35 @@ pub(crate) async fn graphql_handler(
     if batch.iter().count() > GRAPHQL_MAX_BATCH_OPERATIONS {
         return graphql_batch_limit_response(GRAPHQL_MAX_BATCH_OPERATIONS);
     }
+    let setup = match setup_admission {
+        Some(axum::Extension(admission)) => Ok(admission.0),
+        None => crate::initial_auth::setup_state(&state).await,
+    };
+    let setup = match setup {
+        Ok(state) => state.filter(|state| state.is_pending()),
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    };
+    if let Some(stage) = setup.as_ref() {
+        if batch
+            .iter()
+            .any(|request| !crate::initial_auth::allows_graphql(request, stage))
+        {
+            return crate::initial_auth::refused(
+                scryer_application::initial_auth::refusal::REQUIRED,
+            );
+        }
+    }
+    let batch = match batch {
+        async_graphql::BatchRequest::Single(request) => async_graphql::BatchRequest::Single(
+            request.data(scryer_interface::InitialAuthenticationRequest),
+        ),
+        async_graphql::BatchRequest::Batch(requests) => async_graphql::BatchRequest::Batch(
+            requests
+                .into_iter()
+                .map(|request| request.data(scryer_interface::InitialAuthenticationRequest))
+                .collect(),
+        ),
+    };
     // Only a pure restore control request bypasses ordinary admission; while
     // restore owns the application, admission refuses everything else.
     // Outside restore, unclassifiable and mixed requests take the normal path
@@ -1870,7 +1900,24 @@ pub(crate) async fn graphql_handler(
         .ok()
         .flatten()
         .is_some_and(is_api_key_bearer);
-    let actor = match resolve_actor(&state, &headers, Some(remote_addr)).await {
+    // Public first-run metadata and the code-authorized choice must also work
+    // when this browser retains a token from an earlier database.
+    let actor_result = if setup.is_some()
+        && (authorization_token_from_headers(&headers)
+            .ok()
+            .flatten()
+            .is_none()
+            || batch.iter().all(|request| {
+                crate::initial_auth::allows_graphql(
+                    request,
+                    &scryer_application::initial_auth::SetupState::Choice,
+                )
+            })) {
+        Ok(None)
+    } else {
+        resolve_actor(&state, &headers, Some(remote_addr)).await
+    };
+    let actor = match actor_result {
         Ok(actor) => actor,
         Err(AppError::Unauthorized(_) | AppError::UnauthorizedReason { .. }) if api_key_bearer => {
             return api_key_unauthorized_graphql_response();
@@ -2136,6 +2183,13 @@ pub(crate) async fn enforce_authless_access_guard(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    if request
+        .extensions()
+        .get::<crate::initial_auth::PendingSetup>()
+        .is_some()
+    {
+        return next.run(request).await;
+    }
     // These exact routes authenticate their own client key or narrow encrypted
     // artifact reference even when browser login is disabled. No user bypass
     // applies, and the normal API abuse limiter still covers both endpoints.

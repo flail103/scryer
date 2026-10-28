@@ -3323,6 +3323,9 @@ export const meQuery = `query Me {
 
 export const authRuntimeStateQuery = `query AuthRuntimeState {
   authRuntimeState {
+    initialAuthenticationStage
+    initialAuthenticationCodeRequired
+    passwordMinLength
     effectiveFormLoginEnabled
     skipLoginForLocalIps
     passkeyEnabled

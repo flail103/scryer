@@ -380,6 +380,10 @@ export type PluginAutoUpdateSettings = {
 };
 
 export type AuthRuntimeState = {
+  initialAuthenticationStage?:
+    "choice" | "password_replacement" | "complete" | null;
+  initialAuthenticationCodeRequired?: boolean;
+  passwordMinLength?: number;
   effectiveFormLoginEnabled: boolean;
   skipLoginForLocalIps: boolean;
   passkeyEnabled: boolean;

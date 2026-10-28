@@ -655,7 +655,7 @@ impl AppUseCase {
         self.write_cached_jwt_signing_key(user, false).await
     }
 
-    pub(super) async fn refresh_cached_jwt_signing_key(&self, user: &User) -> AppResult<()> {
+    pub(crate) async fn refresh_cached_jwt_signing_key(&self, user: &User) -> AppResult<()> {
         self.write_cached_jwt_signing_key(user, true).await
     }
 

@@ -27,6 +27,72 @@ impl UserStore {
 
 #[async_trait]
 impl UserRepository for UserStore {
+    async fn initial_authentication_state(
+        &self,
+    ) -> AppResult<Option<scryer_application::initial_auth::SetupState>> {
+        let row = SqlRuntime::fetch_optional(self.datastore.read_exec(),
+            "SELECT CAST(value_json AS TEXT) AS state FROM settings_values WHERE id = 'initial-authentication-setup'", &[]).await?;
+        row.map(|row| {
+            serde_json::from_str(&row.text("state")?)
+                .map_err(|_| AppError::Repository("invalid initial authentication state".into()))
+        })
+        .transpose()
+    }
+
+    async fn complete_initial_authentication(&self, user: User) -> AppResult<User> {
+        SqlRuntime::run_in_transaction(&self.datastore, "complete_initial_authentication", move |tx| {
+            let user = user.clone();
+            Box::pin(async move {
+                use scryer_application::initial_auth::{SetupState, refusal};
+                if !transition_initial_auth_tx(tx, &SetupState::Choice, &SetupState::Complete).await? {
+                    return Err(AppError::validation_refused(refusal::ALREADY_COMPLETED, "authentication setup is no longer awaiting a choice"));
+                }
+                let rows = tx.execute(
+                    "UPDATE users SET password_hash = {}, password_change_required = {}, auth_session_version = {} WHERE id = {} AND username = 'admin' AND password_hash IS NULL",
+                    &[SqlArg::OptText(user.password_hash.clone()), SqlArg::Bool(false), SqlArg::Text(scryer_domain::Id::new().0), SqlArg::Text(user.id.clone())],
+                ).await?;
+                if rows != 1 { return Err(AppError::validation_refused(refusal::ALREADY_COMPLETED, "the initial administrator has changed")); }
+                upsert_app_permission_mask_tx(tx, &user.id, user.authorization.app).await?;
+                let libraries = SqlRuntime::fetch_all(SqlExec::Tx(tx), "SELECT id FROM libraries", &[]).await?;
+                let grants = libraries.iter().map(|row| Ok(LibraryGrant {
+                    user_id: user.id.clone(), library_id: row.text("id")?, permissions: user.authorization.default_library,
+                })).collect::<AppResult<Vec<_>>>()?;
+                replace_library_grants_tx(tx, &user.id, &grants).await?;
+                save_initial_auth_setting_tx(tx, "auth.form_login_enabled", user.password_hash.is_some()).await?;
+                save_initial_auth_setting_tx(tx, "auth.skip_login_for_local_ips", false).await?;
+                Ok(user)
+            })
+        }).await
+    }
+
+    async fn prepare_initial_authentication_recovery(&self, id: &str) -> AppResult<Option<User>> {
+        let id = id.to_owned();
+        SqlRuntime::run_in_transaction(&self.datastore, "prepare_initial_authentication_recovery", move |tx| {
+            let id = id.clone();
+            Box::pin(async move {
+                use scryer_application::initial_auth::{SetupState, refusal};
+                let Some(row) = SqlRuntime::fetch_optional(SqlExec::Tx(tx),
+                    "SELECT CAST(value_json AS TEXT) AS state FROM settings_values WHERE id = 'initial-authentication-setup'", &[]).await? else {
+                    return Ok(None);
+                };
+                let previous: SetupState = serde_json::from_str(&row.text("state")?)
+                    .map_err(|_| AppError::Repository("invalid initial authentication state".into()))?;
+                if !previous.is_pending() { return Ok(None); }
+                if !transition_initial_auth_tx(tx, &previous, &SetupState::PasswordReplacement { user_id: id.clone() }).await? {
+                    return Err(AppError::validation_refused(refusal::ALREADY_COMPLETED, "authentication setup changed during recovery"));
+                }
+                let rows = tx.execute(
+                    "UPDATE users SET password_change_required = {}, auth_session_version = {} WHERE id = {} AND password_hash IS NOT NULL",
+                    &[SqlArg::Bool(true), SqlArg::Text(scryer_domain::Id::new().0), SqlArg::Text(id.clone())],
+                ).await?;
+                if rows != 1 { return Err(AppError::Repository("initial recovery administrator is missing credentials".into())); }
+                save_initial_auth_setting_tx(tx, "auth.form_login_enabled", true).await?;
+                save_initial_auth_setting_tx(tx, "auth.skip_login_for_local_ips", false).await?;
+                load_user_by_id_tx(tx, &id).await
+            })
+        }).await
+    }
+
     async fn get_by_username(&self, username: &str) -> AppResult<Option<User>> {
         load_user_by_username(self.datastore.read_exec(), username).await
     }
@@ -78,6 +144,7 @@ impl UserRepository for UserStore {
                 }
                 upsert_app_permission_mask_tx(tx, &user.id, user.authorization.app).await?;
                 replace_library_grants_tx(tx, &user.id, &grants).await?;
+                begin_initial_password_replacement_tx(tx, &user.id).await?;
                 Ok(user)
             })
         })
@@ -303,6 +370,11 @@ impl UserRepository for UserStore {
                             "account credentials changed; authenticate again".into(),
                         ));
                     }
+                    if password_change_required {
+                        // Bootstrap may select an already initialized passwordless
+                        // administrator when resuming an unfinished first boot.
+                        begin_initial_password_replacement_tx(tx, &id).await?;
+                    }
                     for table in [
                         "totp_enrollment_challenges",
                         "webauthn_challenges",
@@ -362,6 +434,10 @@ impl UserRepository for UserStore {
                     if rows == 0 {
                         return Err(AppError::unauthorized_reason(crate::error_reasons::IDENTITY_PASSWORD_CHANGE_NOT_REQUIRED, "password change is no longer required"));
                     }
+                    transition_initial_auth_tx(tx,
+                        &scryer_application::initial_auth::SetupState::PasswordReplacement { user_id: id.clone() },
+                        &scryer_application::initial_auth::SetupState::Complete,
+                    ).await?;
                     load_user_by_id_tx(tx, &id)
                         .await?
                         .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::IDENTITY_USER_NOT_FOUND, format!("user {id}")))
@@ -984,6 +1060,59 @@ async fn load_user_by_id(exec: SqlExec<'_, '_>, id: &str) -> AppResult<Option<Us
 
 async fn load_user_by_id_tx(tx: &mut SqlTx<'_>, id: &str) -> AppResult<Option<User>> {
     load_user_by_id(SqlExec::Tx(tx), id).await
+}
+
+async fn begin_initial_password_replacement_tx(tx: &mut SqlTx<'_>, user_id: &str) -> AppResult<()> {
+    use scryer_application::initial_auth::SetupState;
+    if transition_initial_auth_tx(
+        tx,
+        &SetupState::Choice,
+        &SetupState::PasswordReplacement {
+            user_id: user_id.to_owned(),
+        },
+    )
+    .await?
+    {
+        save_initial_auth_setting_tx(tx, "auth.form_login_enabled", true).await?;
+        save_initial_auth_setting_tx(tx, "auth.skip_login_for_local_ips", false).await?;
+    }
+    Ok(())
+}
+
+async fn transition_initial_auth_tx(
+    tx: &mut SqlTx<'_>,
+    expected: &scryer_application::initial_auth::SetupState,
+    next: &scryer_application::initial_auth::SetupState,
+) -> AppResult<bool> {
+    Ok(tx.execute(
+        "UPDATE settings_values SET value_json = {}, updated_at = {} WHERE id = 'initial-authentication-setup' AND value_json = {}",
+        &[SqlArg::Json(serde_json::to_value(next).map_err(|e| AppError::Repository(e.to_string()))?),
+          SqlArg::Timestamp(Utc::now()),
+          SqlArg::Json(serde_json::to_value(expected).map_err(|e| AppError::Repository(e.to_string()))?)],
+    ).await? == 1)
+}
+
+async fn save_initial_auth_setting_tx(tx: &mut SqlTx<'_>, key: &str, value: bool) -> AppResult<()> {
+    let definition = SqlRuntime::fetch_optional(
+        SqlExec::Tx(tx),
+        "SELECT id FROM settings_definitions WHERE scope = 'system' AND key_name = {}",
+        &[SqlArg::Text(key.to_string())],
+    )
+    .await?
+    .ok_or_else(|| AppError::Repository("authentication setting definition is missing".into()))?;
+    let definition_id = definition.text("id")?;
+    let now = Utc::now();
+    let rows = tx.execute(
+        "UPDATE settings_values SET value_json = {}, updated_at = {}, source = 'initial-authentication' WHERE setting_definition_id = {} AND scope = 'system' AND scope_id IS NULL",
+        &[SqlArg::Json(serde_json::json!(value)), SqlArg::Timestamp(now), SqlArg::Text(definition_id.clone())],
+    ).await?;
+    if rows == 0 {
+        tx.execute(
+            "INSERT INTO settings_values (id, setting_definition_id, scope, value_json, source, created_at, updated_at) VALUES ({}, {}, 'system', {}, 'initial-authentication', {}, {})",
+            &[SqlArg::Text(scryer_domain::Id::new().0), SqlArg::Text(definition_id), SqlArg::Json(serde_json::json!(value)), SqlArg::Timestamp(now), SqlArg::Timestamp(now)],
+        ).await?;
+    }
+    Ok(())
 }
 
 async fn insert_user_tx(tx: &mut SqlTx<'_>, user: &User) -> AppResult<()> {

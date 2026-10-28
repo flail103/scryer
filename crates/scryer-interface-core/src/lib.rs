@@ -61,6 +61,7 @@ pub struct AuthRuntimeStateSnapshot {
 
 #[derive(Clone)]
 pub struct AuthRuntimeStateHandle {
+    pub initial_authentication: Arc<scryer_application::initial_auth::SetupChallenge>,
     snapshot: Arc<RwLock<AuthRuntimeStateSnapshot>>,
     epoch_tx: watch::Sender<u64>,
     local_login_bypass_disabled: bool,
@@ -79,6 +80,7 @@ impl AuthRuntimeStateHandle {
         let (epoch_tx, _) = watch::channel(snapshot.epoch);
         Self {
             snapshot: Arc::new(RwLock::new(snapshot)),
+            initial_authentication: Arc::new(Default::default()),
             epoch_tx,
             local_login_bypass_disabled,
         }
@@ -149,6 +151,9 @@ impl AuthRuntimeStateHandle {
 
 #[derive(Clone, Copy)]
 pub struct ConnectionAuthEpoch(pub u64);
+
+/// Set only after the HTTP boundary validates initial-setup provenance.
+pub struct InitialAuthenticationRequest;
 
 #[derive(Clone, Default)]
 pub struct MfaVerification {

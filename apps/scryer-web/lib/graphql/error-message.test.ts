@@ -1,5 +1,5 @@
 import { PUBLIC_ERROR_REASON_CODES } from "./public-error-reason-codes.ts";
-import { t } from "../i18n/index.ts";
+import { t, loadLocaleDictionary } from "../i18n/index.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -20,6 +20,25 @@ function coded(
 ) {
   return { graphQLErrors: [{ message, extensions: { code, reason } }] };
 }
+
+test("initial authentication refusals use localized codes rather than server wording", async () => {
+  await loadLocaleDictionary("fr");
+  assert.equal(
+    userFacingGraphQlErrorMessage(
+      coded("INITIAL_AUTH_CODE_INVALID"),
+      "Failed",
+      (key, values) => t(key, "fr", values),
+    ),
+    "Saisissez le code de configuration affiché dans la console du serveur.",
+  );
+  assert.equal(
+    userFacingGraphQlErrorMessage(
+      coded("INITIAL_AUTH_ALREADY_COMPLETED"),
+      "Failed",
+    ),
+    "Authentication setup has already been completed. Refresh to continue.",
+  );
+});
 
 test("password refusals interpolate validated minima and retain missing-fact sentences", () => {
   for (const minLength of [8, 24, "16"]) {

@@ -19,6 +19,13 @@ const INTERNAL_ERROR_CODE = "INTERNAL_ERROR";
 /** Public reasons name conditions; their sentences never determine behavior. */
 export const ERROR_REASON_KEYS: Readonly<Record<string, string>> = {
   ...PUBLIC_ERROR_REASON_KEYS,
+  INITIAL_AUTH_REQUIRED: "initialAuth.required",
+  INITIAL_AUTH_ALREADY_COMPLETED: "initialAuth.alreadyCompleted",
+  INITIAL_AUTH_PASSWORD_REPLACEMENT_REQUIRED: "initialAuth.replaceRequired",
+  INITIAL_AUTH_CODE_INVALID: "initialAuth.invalidCode",
+  INITIAL_AUTH_CODE_RATE_LIMITED: "initialAuth.rateLimited",
+  INITIAL_AUTH_MODE_CONFLICT: "initialAuth.modeConflict",
+  INITIAL_AUTH_ACKNOWLEDGEMENT_REQUIRED: "initialAuth.acknowledgeRequired",
   INTERFACE_ACTION_DEFINITION_CONFLICT:
     "error.reason.INTERFACE_ACTION_DEFINITION_CONFLICT",
   INTERFACE_ACTION_DEFINITION_REQUIRED:

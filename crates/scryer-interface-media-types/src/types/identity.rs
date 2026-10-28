@@ -265,6 +265,28 @@ pub struct TotpVerifyInput {
     pub code: String,
 }
 
+/// Authentication mode explicitly selected during initial setup.
+#[derive(async_graphql::Enum, Copy, Clone, Eq, PartialEq)]
+pub enum InitialAuthenticationMode {
+    Password,
+    NoAuthentication,
+}
+
+/// The operator's explicit first-run authentication decision.
+#[derive(InputObject)]
+pub struct CompleteInitialAuthenticationInput {
+    pub mode: InitialAuthenticationMode,
+    pub password: Option<String>,
+    pub acknowledge_no_authentication: bool,
+    pub setup_code: Option<String>,
+}
+
+#[derive(SimpleObject)]
+pub struct InitialAuthenticationPayload {
+    pub completed: bool,
+    pub login: Option<LoginPayload>,
+}
+
 /// New password selected after signing in with an administrator-provided temporary password.
 #[derive(InputObject)]
 pub struct CompleteRequiredPasswordChangeInput {

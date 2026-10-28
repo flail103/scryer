@@ -53,7 +53,7 @@ pub async fn replay_catalog_into_fresh_db(
             ))
         })?;
 
-    apply_postgres_baseline(pool, catalog, payload_bytes, baseline).await?;
+    apply_postgres_baseline(pool, catalog, payload_bytes, baseline, false).await?;
     apply_version_range(
         pool,
         catalog,
@@ -111,7 +111,7 @@ pub async fn run_migrations_with_hook_context(
                         "missing PostgreSQL baseline through {target_version:04}"
                     ))
                 })?;
-            apply_postgres_baseline(pool, &catalog, &payload_bytes, baseline).await?;
+            apply_postgres_baseline(pool, &catalog, &payload_bytes, baseline, true).await?;
             apply_version_range(
                 pool,
                 &catalog,
@@ -339,6 +339,7 @@ async fn apply_postgres_baseline(
     catalog: &CompiledMigrationCatalog,
     payload_bytes: &[u8],
     baseline: &CompiledBaseline,
+    initialize_authentication: bool,
 ) -> AppResult<()> {
     let mut tx = pool
         .begin()
@@ -354,6 +355,15 @@ async fn apply_postgres_baseline(
         .execute(&mut *tx)
         .await
         .map_err(|error| AppError::Repository(error.to_string()))?;
+
+    if initialize_authentication {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(
+            include_str!("../migrations/initial_auth_seed.sql").to_owned(),
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    }
 
     for migration in catalog
         .migrations
