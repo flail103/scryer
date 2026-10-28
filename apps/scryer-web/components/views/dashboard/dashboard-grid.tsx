@@ -12,6 +12,7 @@ import {
   type Layout,
   type LayoutItem,
 } from "react-grid-layout";
+import { useBeforeUnload, useBlocker, type BlockerFunction } from "react-router";
 import { useClient } from "urql";
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -527,6 +528,46 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
     }
   }, [client, draft, finish, reportFailure, saved, setGlobalStatus, setUiSettings, t]);
 
+  // Leaving the page with an unsaved arrangement asks first: moves within the
+  // app through the router, reloads and closing the tab through the browser.
+  // A save in flight is not held up, since it ends edit mode itself.
+  const hasUnsavedChanges = React.useMemo(
+    () => editing && draft !== null && changedDashboardBreakpoints(draft, saved).length > 0,
+    [draft, editing, saved],
+  );
+  const guardNavigation = hasUnsavedChanges && !saving;
+  const navigationBlocker = useBlocker(
+    React.useCallback<BlockerFunction>(
+      ({ currentLocation, nextLocation }) =>
+        guardNavigation && currentLocation.pathname !== nextLocation.pathname,
+      [guardNavigation],
+    ),
+  );
+  useBeforeUnload(
+    React.useCallback(
+      (event: BeforeUnloadEvent) => {
+        if (!guardNavigation) {
+          return;
+        }
+        event.preventDefault();
+        event.returnValue = "";
+      },
+      [guardNavigation],
+    ),
+  );
+  const navigationHeld = navigationBlocker.state === "blocked";
+  // A held move whose changes are gone (a save landed meanwhile) goes ahead.
+  React.useEffect(() => {
+    if (navigationHeld && !hasUnsavedChanges) {
+      navigationBlocker.proceed?.();
+    }
+  }, [hasUnsavedChanges, navigationBlocker, navigationHeld]);
+  const discardAndLeave = React.useCallback(() => {
+    finish();
+    navigationBlocker.proceed?.();
+  }, [finish, navigationBlocker]);
+  const stayOnPage = React.useCallback(() => navigationBlocker.reset?.(), [navigationBlocker]);
+
   const reset = React.useCallback(async () => {
     setSaving(true);
     try {
@@ -710,6 +751,16 @@ export function DashboardGrid({ data, editing, onEditingChange }: DashboardGridP
         isBusy={saving}
         onConfirm={() => void reset()}
         onCancel={() => setConfirmReset(false)}
+      />
+
+      <ConfirmDialog
+        open={navigationHeld && hasUnsavedChanges}
+        title={t("dashboard.layout.unsavedTitle")}
+        description={t("dashboard.layout.unsavedDescription")}
+        confirmLabel={t("label.discard")}
+        cancelLabel={t("label.cancel")}
+        onConfirm={discardAndLeave}
+        onCancel={stayOnPage}
       />
     </div>
   );

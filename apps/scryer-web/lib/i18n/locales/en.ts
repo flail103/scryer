@@ -2465,6 +2465,8 @@ const en: LocaleDictionary = {
   "dashboard.layout.reset": "Reset to default",
   "dashboard.layout.resetConfirmTitle": "Reset the dashboard?",
   "dashboard.layout.resetConfirmDescription": "Every screen size goes back to the default layout. Your saved arrangement is removed.",
+  "dashboard.layout.unsavedTitle": "Unsaved dashboard changes",
+  "dashboard.layout.unsavedDescription": "You have rearranged the dashboard without saving. Leave and discard those changes?",
   "dashboard.layout.trayTitle": "Dashboard panels",
   "dashboard.layout.trayDescription": "Drag a panel onto the dashboard, or add it to the end.",
   "dashboard.layout.placed": "On dashboard",
