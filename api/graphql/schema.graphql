@@ -21198,6 +21198,22 @@ type MutationRoot {
 		libraryIds: [ID!]
 	): EmptyRecycleBinPayload!
 	"""
+	Create one folder inside an absolute directory for the folder picker;
+	requires library-settings read permission, the same as browsePath. The
+	folder gets the server's umask and is owned by the user Scryer runs as.
+	Refusals carry a FOLDER_CREATE_* reason.
+	"""
+	createFolder(
+		"""
+		Absolute path of the directory to create the folder in.
+		"""
+		parentPath: String!,
+		"""
+		Name of the new folder; surrounding spaces are trimmed.
+		"""
+		name: String!
+	): DirectoryEntryPayload!
+	"""
 	Start a background interactive release-search job for the requested scopes.
 	A title with a season and no episode searches the whole season as a season pack.
 	Results accumulate as indexers complete, and a new search cancels the caller's running job for the same scope.

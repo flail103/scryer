@@ -3511,3 +3511,11 @@ export const setMemberListPolicyMutation = `mutation SetMemberListPolicy($userId
     listRequestsLast30d
   }
 }`;
+
+export const createFolderMutation = `mutation CreateFolder($parentPath: String!, $name: String!) {
+  createFolder(parentPath: $parentPath, name: $name) {
+    name
+    path
+    isDirectory
+  }
+}`;

@@ -3317,6 +3317,87 @@ pub mod fs_safety {
     ];
 }
 
+/// Why the folder picker could not create a new folder. Every way the
+/// operating system can refuse lands on one of these, so a client never sees
+/// raw OS error text.
+pub mod folder_create {
+    /// No name was given, or only spaces.
+    pub const NAME_REQUIRED: &str = "FOLDER_CREATE_NAME_REQUIRED";
+    /// The name is `.`, `..` or a device name Windows reserves (CON, NUL, COM1 and the like).
+    pub const NAME_RESERVED: &str = "FOLDER_CREATE_NAME_RESERVED";
+    /// The name holds a path separator, a character Windows, SMB or FAT/exFAT
+    /// drives reject, or a control character.
+    pub const NAME_INVALID_CHARACTERS: &str = "FOLDER_CREATE_NAME_INVALID_CHARACTERS";
+    /// The name ends with a dot, which Windows and SMB shares silently drop.
+    pub const NAME_TRAILING_DOT: &str = "FOLDER_CREATE_NAME_TRAILING_DOT";
+    /// The name starts with a dot, so the folder would be hidden from the picker.
+    pub const NAME_HIDDEN: &str = "FOLDER_CREATE_NAME_HIDDEN";
+    /// The name, or the path it makes, is longer than the drive allows.
+    pub const NAME_TOO_LONG: &str = "FOLDER_CREATE_NAME_TOO_LONG";
+    /// The drive's file system refused the name for its own rules.
+    pub const NAME_NOT_ALLOWED: &str = "FOLDER_CREATE_NAME_NOT_ALLOWED";
+    /// The folder to create in is not an absolute path.
+    pub const PARENT_NOT_ABSOLUTE: &str = "FOLDER_CREATE_PARENT_NOT_ABSOLUTE";
+    /// The folder to create in no longer exists or cannot be reached.
+    pub const PARENT_MISSING: &str = "FOLDER_CREATE_PARENT_MISSING";
+    /// The path to create in is a file, not a folder.
+    pub const PARENT_NOT_DIRECTORY: &str = "FOLDER_CREATE_PARENT_NOT_DIRECTORY";
+    /// A file or folder with that name is already there.
+    pub const ALREADY_EXISTS: &str = "FOLDER_CREATE_ALREADY_EXISTS";
+    /// The user Scryer runs as may not write in that folder.
+    pub const PERMISSION_DENIED: &str = "FOLDER_CREATE_PERMISSION_DENIED";
+    /// The drive or mount is read-only.
+    pub const READ_ONLY: &str = "FOLDER_CREATE_READ_ONLY";
+    /// The drive is full, or a storage quota is used up.
+    pub const DISK_FULL: &str = "FOLDER_CREATE_DISK_FULL";
+    /// The folder already holds as many subfolders as its file system allows.
+    pub const FOLDER_FULL: &str = "FOLDER_CREATE_FOLDER_FULL";
+    /// The location does not support creating folders.
+    pub const NOT_SUPPORTED: &str = "FOLDER_CREATE_NOT_SUPPORTED";
+    /// The drive or network share is disconnected, not responding or failing.
+    pub const DRIVE_UNAVAILABLE: &str = "FOLDER_CREATE_DRIVE_UNAVAILABLE";
+    /// The folder could not be created for a reason none of the others name.
+    pub const FAILED: &str = "FOLDER_CREATE_FAILED";
+    /// Every reason owned by this policy area.
+    pub const ALL: &[&str] = &[
+        NAME_REQUIRED,
+        NAME_RESERVED,
+        NAME_INVALID_CHARACTERS,
+        NAME_TRAILING_DOT,
+        NAME_HIDDEN,
+        NAME_TOO_LONG,
+        NAME_NOT_ALLOWED,
+        PARENT_NOT_ABSOLUTE,
+        PARENT_MISSING,
+        PARENT_NOT_DIRECTORY,
+        ALREADY_EXISTS,
+        PERMISSION_DENIED,
+        READ_ONLY,
+        DISK_FULL,
+        FOLDER_FULL,
+        NOT_SUPPORTED,
+        DRIVE_UNAVAILABLE,
+        FAILED,
+    ];
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn reasons_are_distinct_prefixed_and_screaming_snake_case() {
+            let mut unique = std::collections::HashSet::new();
+            for reason in super::ALL {
+                assert!(reason.starts_with("FOLDER_CREATE_"));
+                assert!(
+                    reason
+                        .bytes()
+                        .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+                );
+                assert!(unique.insert(reason));
+            }
+        }
+    }
+}
+
 pub mod authorization {
     /// You do not have permission to perform this action.
     pub const ACTION_PERMISSION_DENIED: &str = "AUTHORIZATION_ACTION_PERMISSION_DENIED";
