@@ -6286,6 +6286,7 @@ const en: LocaleDictionary = {
   "settings.autoBackupsHour": "Hour",
   "settings.autoBackupsMinute": "Minute",
   "settings.autoBackupsNextRun": "Next automatic backup",
+  "settings.autoBackupsNextRunNeedsKey": "Disabled (save password first)",
   "settings.autoBackupsKeyLabel": "Automatic backup key",
   "settings.autoBackupsKeyHelpLabel": "About the automatic backup key",
   "settings.autoBackupsSetKey": "Set automatic backup key",
