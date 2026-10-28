@@ -5,7 +5,6 @@ import {
   Eye,
   EyeOff,
   FolderOpen,
-  LockKeyhole,
   Plus,
   RotateCcw,
   Trash2,
@@ -140,6 +139,12 @@ const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
   effectiveBackupPath: "",
 };
 const AUTO_BACKUP_KEY_MIN_LENGTH = 8;
+type AutoBackupDraft = {
+  enabled: boolean;
+  dailyTimeLocal: string;
+  key: string;
+  clearKey: boolean;
+};
 const BACKUPS_PANEL_CLASS =
   "overflow-hidden rounded-[14px] border border-[var(--scry-border)] bg-[var(--scry-surf)] shadow-[0_10px_24px_rgba(0,0,0,0.16)]";
 const BACKUPS_PANEL_HEADER_CLASS =
@@ -297,20 +302,32 @@ export function SettingsBackupsContainer() {
   const passwordRequired = password.trim().length === 0;
   const confirmPasswordRequired = confirmPassword.length === 0;
   const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
-  const autoBackupReplacementKeyPresent = autoBackupKey.trim().length > 0;
-  const autoBackupReplacementKeyTooShort =
-    autoBackupReplacementKeyPresent &&
-    nonWhitespaceCharacterCount(autoBackupKey) < AUTO_BACKUP_KEY_MIN_LENGTH;
-  const autoBackupWillHaveKey =
-    !clearAutoBackupKey &&
-    (autoBackupReplacementKeyPresent || autoBackupSettings.autoBackupKeyPresent);
-  const autoBackupKeyRequired = autoBackupSettings.enabled && !autoBackupWillHaveKey;
-  const autoBackupKeyValidationMessage = autoBackupKeyRequired
-    ? t("settings.autoBackupsKeyRequired", { count: AUTO_BACKUP_KEY_MIN_LENGTH })
-    : autoBackupReplacementKeyTooShort
-      ? t("settings.autoBackupsKeyTooShort", { count: AUTO_BACKUP_KEY_MIN_LENGTH })
-      : null;
-  const canSaveAutoBackupSettings = !autoBackupSaving && !autoBackupKeyValidationMessage;
+  // Each automatic backup control saves its own change: the switch and the
+  // clear-key box at once, the time when its picker closes and the key when
+  // its field loses focus. A draft that cannot be saved yet, such as backups
+  // switched on without a key, stays unsaved with its reason shown.
+  const autoBackupDraftError = (draft: AutoBackupDraft): string | null => {
+    const replacementKeyPresent = draft.key.trim().length > 0;
+    const willHaveKey =
+      !draft.clearKey && (replacementKeyPresent || savedAutoBackupSettings.autoBackupKeyPresent);
+    if (draft.enabled && !willHaveKey) {
+      return t("settings.autoBackupsKeyRequired", { count: AUTO_BACKUP_KEY_MIN_LENGTH });
+    }
+    if (
+      replacementKeyPresent &&
+      nonWhitespaceCharacterCount(draft.key) < AUTO_BACKUP_KEY_MIN_LENGTH
+    ) {
+      return t("settings.autoBackupsKeyTooShort", { count: AUTO_BACKUP_KEY_MIN_LENGTH });
+    }
+    return null;
+  };
+  const currentAutoBackupDraft: AutoBackupDraft = {
+    enabled: autoBackupSettings.enabled,
+    dailyTimeLocal: autoBackupSettings.dailyTimeLocal,
+    key: autoBackupKey,
+    clearKey: clearAutoBackupKey,
+  };
+  const autoBackupKeyValidationMessage = autoBackupDraftError(currentAutoBackupDraft);
   const normalizedBackupPathDraft = normalizeBackupPathDraft(backupPathDraft);
   const savedCustomBackupPath = savedBackupSettings.customBackupPath ?? null;
   const backupPathDirty = normalizedBackupPathDraft !== savedCustomBackupPath;
@@ -394,6 +411,10 @@ export function SettingsBackupsContainer() {
       const nextSettings = data?.autoBackupSettings ?? DEFAULT_AUTO_BACKUP_SETTINGS;
       setSavedAutoBackupSettings(nextSettings);
       setAutoBackupSettings(nextSettings);
+      // Open on load when backups run; after that only the header click and
+      // switching backups on change it, so switching them off keeps the
+      // options in view.
+      setAutoBackupExpanded(nextSettings.enabled);
     } catch (error) {
       setGlobalStatus(mutationErrorMessage(error, t("status.failedToLoad"), t), { level: "ERROR" });
     } finally {
@@ -434,15 +455,6 @@ export function SettingsBackupsContainer() {
   React.useEffect(() => {
     void fetchBackupSettings();
   }, [fetchBackupSettings]);
-
-  React.useEffect(() => {
-    if (autoBackupSettings.enabled) {
-      setAutoBackupExpanded(true);
-      return;
-    }
-
-    setAutoBackupExpanded(false);
-  }, [autoBackupSettings.enabled]);
 
   useSettingsSubscription(
     React.useCallback(
@@ -623,23 +635,26 @@ export function SettingsBackupsContainer() {
     }
   }, [client, setGlobalStatus, t]);
 
-  const handleSaveAutoBackupSettings = React.useCallback(async () => {
-    if (autoBackupKeyValidationMessage) {
-      setGlobalStatus(autoBackupKeyValidationMessage);
+  const saveAutoBackupDraft = async (draft: AutoBackupDraft) => {
+    const replacementKeyPresent = draft.key.trim().length > 0;
+    const unchanged =
+      draft.enabled === savedAutoBackupSettings.enabled &&
+      draft.dailyTimeLocal === savedAutoBackupSettings.dailyTimeLocal &&
+      !replacementKeyPresent &&
+      !draft.clearKey;
+    if (autoBackupSaving || unchanged || autoBackupDraftError(draft)) {
       return;
     }
 
     setAutoBackupSaving(true);
     try {
-      const nextAutoBackupKey =
-        clearAutoBackupKey ? null : autoBackupReplacementKeyPresent ? autoBackupKey : null;
       const { data, error } = await client
         .mutation<UpdateAutoBackupSettingsMutationResult>(updateAutoBackupSettingsMutation, {
           input: {
-            enabled: autoBackupSettings.enabled,
-            dailyTimeLocal: autoBackupSettings.dailyTimeLocal,
-            setAutoBackupKey: nextAutoBackupKey,
-            clearAutoBackupKey,
+            enabled: draft.enabled,
+            dailyTimeLocal: draft.dailyTimeLocal,
+            setAutoBackupKey: !draft.clearKey && replacementKeyPresent ? draft.key : null,
+            clearAutoBackupKey: draft.clearKey,
           },
         })
         .toPromise();
@@ -658,17 +673,7 @@ export function SettingsBackupsContainer() {
     } finally {
       setAutoBackupSaving(false);
     }
-  }, [
-    autoBackupKey,
-    autoBackupKeyValidationMessage,
-    autoBackupReplacementKeyPresent,
-    autoBackupSettings.dailyTimeLocal,
-    autoBackupSettings.enabled,
-    clearAutoBackupKey,
-    client,
-    setGlobalStatus,
-    t,
-  ]);
+  };
 
   const handleSaveBackupSettings = React.useCallback(async () => {
     setBackupSettingsSaving(true);
@@ -719,13 +724,10 @@ export function SettingsBackupsContainer() {
                 onClick={() => setAutoBackupExpanded((current) => !current)}
                 aria-expanded={autoBackupExpanded}
               >
-                <div className="min-w-0 flex-1 space-y-1">
+                <div className="min-w-0 flex-1">
                   <h2 className={BACKUPS_PANEL_TITLE_CLASS}>
                     {t("settings.autoBackupsTitle")}
                   </h2>
-                  <p className={`text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}>
-                    {t("settings.autoBackupsDescription")}
-                  </p>
                 </div>
               </button>
               <div className="flex shrink-0 justify-end sm:pt-1">
@@ -738,12 +740,16 @@ export function SettingsBackupsContainer() {
                       ? t("label.enabled")
                       : t("label.disabled")
                   }
-                  onChange={(nextValue) =>
+                  onChange={(nextValue) => {
                     setAutoBackupSettings((current) => ({
                       ...current,
                       enabled: nextValue,
-                    }))
-                  }
+                    }));
+                    if (nextValue) {
+                      setAutoBackupExpanded(true);
+                    }
+                    void saveAutoBackupDraft({ ...currentAutoBackupDraft, enabled: nextValue });
+                  }}
                 />
               </div>
             </div>
@@ -751,7 +757,7 @@ export function SettingsBackupsContainer() {
           {autoBackupExpanded ? (
             <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-4`}>
               <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
-                <div className={`flex h-full min-h-32 flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
+                <div className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
                   <Label
                     htmlFor="auto-backups-time"
                     className="text-sm font-medium text-[var(--scry-ink2)]"
@@ -771,22 +777,17 @@ export function SettingsBackupsContainer() {
                           dailyTimeLocal: nextValue,
                         }))
                       }
+                      onClose={() => void saveAutoBackupDraft(currentAutoBackupDraft)}
                     />
                   </div>
-                  <p className={`mt-auto pt-4 text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
-                    {t("settings.autoBackupsTimeHelp")}
-                  </p>
                 </div>
 
-                <div className={`flex h-full min-h-32 flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
+                <div className={`flex h-full flex-col p-4 ${BACKUPS_INSET_CLASS}`}>
                   <p className="text-sm font-medium text-[var(--scry-ink2)]">
                     {t("settings.autoBackupsNextRun")}
                   </p>
                   <p className="mt-3 text-base font-medium text-[var(--scry-ink2)]">
                     {autoBackupNextRunLabel}
-                  </p>
-                  <p className={`mt-auto pt-4 text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
-                    {t("settings.autoBackupsNextRunHelp")}
                   </p>
                 </div>
               </div>
@@ -819,6 +820,7 @@ export function SettingsBackupsContainer() {
                             setClearAutoBackupKey(false);
                           }
                         }}
+                        onBlur={() => void saveAutoBackupDraft(currentAutoBackupDraft)}
                       />
                       <button
                         type="button"
@@ -846,16 +848,6 @@ export function SettingsBackupsContainer() {
                   </div>
 
                   <div className="flex shrink-0 flex-wrap items-center gap-3 sm:min-w-64">
-                    <Button
-                      type="button"
-                      variant="primary"
-                      onClick={() => void handleSaveAutoBackupSettings()}
-                      disabled={!canSaveAutoBackupSettings}
-                    >
-                      {autoBackupSaving ? <LoadingMark className="h-4 w-4" /> : null}
-                      {t("label.save")}
-                    </Button>
-
                     {autoBackupSettings.autoBackupKeyPresent ? (
                       <div className={`flex min-w-0 items-center gap-3 px-4 py-3 sm:max-w-xl ${BACKUPS_INSET_CLASS}`}>
                         <Checkbox
@@ -871,6 +863,11 @@ export function SettingsBackupsContainer() {
                               setAutoBackupKey("");
                               setShowAutoBackupKey(false);
                             }
+                            void saveAutoBackupDraft({
+                              ...currentAutoBackupDraft,
+                              key: shouldClear ? "" : currentAutoBackupDraft.key,
+                              clearKey: shouldClear,
+                            });
                           }}
                         />
                         <div className="flex min-w-0 items-center gap-2">
@@ -880,10 +877,6 @@ export function SettingsBackupsContainer() {
                           >
                             {t("settings.autoBackupsClearKey")}
                           </Label>
-                          <InfoHelp
-                            text={t("settings.autoBackupsClearKeyHelp")}
-                            ariaLabel={t("settings.autoBackupsClearKey")}
-                          />
                         </div>
                       </div>
                     ) : null}
@@ -899,9 +892,6 @@ export function SettingsBackupsContainer() {
             <h2 className={BACKUPS_PANEL_TITLE_CLASS}>
               {t("settings.backupLocationTitle")}
             </h2>
-            <p className={`mt-1 text-sm ${BACKUPS_MUTED_TEXT_CLASS}`}>
-              {t("settings.backupLocationDescription")}
-            </p>
           </div>
           <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-4`}>
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.75fr)]">
@@ -1239,13 +1229,6 @@ export function SettingsBackupsContainer() {
                 </p>
               ) : null}
             </label>
-            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-              <div className="mb-1 flex items-center gap-2 text-foreground">
-                <LockKeyhole className="h-3.5 w-3.5" />
-                <span>{t("settings.backupsRequiredPassword")}</span>
-              </div>
-              <p>{t("settings.backupsPasswordHelp")}</p>
-            </div>
           </div>
           <DialogFooter>
             <Button

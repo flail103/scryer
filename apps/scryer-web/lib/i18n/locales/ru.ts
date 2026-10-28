@@ -4047,8 +4047,6 @@ const ru: LocaleDictionary = {
     "setup.restoreSelectFile": "Выбрать файл",
     "setup.restoreClearFile": "Очистить выбор",
 
-    "setup.restorePasswordHelp":
-        "Введите пароль, использованный при создании этой зашифрованной резервной копии.",
 
     "setup.restoreNoFile":
         "Выберите файл резервной копии, чтобы продолжить.",
@@ -4637,8 +4635,6 @@ const ru: LocaleDictionary = {
     "settings.autoBackupsTitle":
         "Автоматические резервные копии",
 
-    "settings.autoBackupsDescription":
-        "Включите автоматическое создание одной резервной копии в день по времени сервера. Создание резервной копии ограничено 30 минутами, а Scryer хранит последние 5 успешно созданных автоматических копий.",
 
     "settings.autoBackupsDisabledMissingKeyToastTitle":
         "Автоматическое резервное копирование отключено",
@@ -4661,14 +4657,10 @@ const ru: LocaleDictionary = {
     "settings.autoBackupsMinute":
         "Минуты",
 
-    "settings.autoBackupsTimeHelp":
-        "Используется локальный часовой пояс сервера.",
 
     "settings.autoBackupsNextRun":
         "Следующее автоматическое резервное копирование",
 
-    "settings.autoBackupsNextRunHelp":
-        "Сохраните изменения, чтобы обновить расписание. Если автоматическое резервное копирование отключено, запуск выполняться не будет.",
 
     "settings.autoBackupsKeyLabel":
         "Ключ автоматического резервного копирования",
@@ -4694,8 +4686,6 @@ const ru: LocaleDictionary = {
     "settings.autoBackupsClearKey":
         "Удалить сохранённый ключ автоматического резервного копирования",
 
-    "settings.autoBackupsClearKeyHelp":
-        "После сохранения настроек сохранённый ключ будет удалён. Перед этим отключите автоматическое резервное копирование.",
 
     "settings.autoBackupsKeySummary":
         "Обязательное шифрование автоматических резервных копий",
@@ -4720,8 +4710,6 @@ const ru: LocaleDictionary = {
     "settings.backupLocationTitle":
         "Расположение резервных копий",
 
-    "settings.backupLocationDescription":
-        "Выберите место, где Scryer будет хранить резервные копии на сервере.",
 
     "settings.backupLocationCustomPath":
         "Пользовательский путь",
@@ -4759,8 +4747,6 @@ const ru: LocaleDictionary = {
     "settings.backupsCreateDescription":
         "Защитите эту резервную копию паролем. Этот же пароль потребуется при восстановлении.",
 
-    "settings.backupsRequiredPassword":
-        "Обязательная защита паролем",
 
     "settings.backupsConfirmPassword":
         "Подтвердите пароль",
@@ -4768,8 +4754,6 @@ const ru: LocaleDictionary = {
     "settings.backupsPasswordMismatch":
         "Пароли не совпадают",
 
-    "settings.backupsPasswordHelp":
-        "Полные резервные копии содержат секретные данные экземпляра и должны быть зашифрованы.",
 
     "settings.backupsQueued":
         "Создание резервной копии запущено в фоновом режиме.",

@@ -3059,8 +3059,6 @@ const nl: LocaleDictionary = {
   "setup.restoreDropTargetFormats": "Ondersteunde formaten: .tar.zst en .enc",
   "setup.restoreSelectFile": "Bestand selecteren",
   "setup.restoreClearFile": "Selectie wissen",
-  "setup.restorePasswordHelp":
-    "Voer het wachtwoord in dat je hebt gebruikt toen deze versleutelde backup werd gemaakt.",
   "setup.restoreNoFile": "Kies een backupbundel om door te gaan.",
   "setup.restorePasswordRequired":
     "Voer het bundelwachtwoord in voordat je doorgaat.",
@@ -3405,8 +3403,6 @@ const nl: LocaleDictionary = {
 
   // Recycle Bin
   "settings.autoBackupsTitle": "Automatische backups",
-  "settings.autoBackupsDescription":
-    "Schakel één systeembackup per dag in op een serverlokale tijd. Automatische backups time-outen na 30 minuten en Scryer bewaart de laatste 5 succesvolle automatische backups.",
   "settings.autoBackupsDisabledMissingKeyToastTitle":
     "Automatische backups zijn uitgeschakeld",
   "settings.autoBackupsDisabledMissingKeyToastDescription":
@@ -3415,17 +3411,12 @@ const nl: LocaleDictionary = {
   "settings.autoBackupsTime": "Dagelijkse backuptijd",
   "settings.autoBackupsHour": "Uur",
   "settings.autoBackupsMinute": "Minuut",
-  "settings.autoBackupsTimeHelp": "Gebruikt de lokale tijdzone van de server.",
   "settings.autoBackupsNextRun": "Volgende automatische backup",
-  "settings.autoBackupsNextRunHelp":
-    "Sla je wijzigingen op om de planner bij te werken. Uitgeschakelde automatische backups worden niet uitgevoerd.",
   "settings.autoBackupsKeyLabel": "Automatische backupsleutel",
   "settings.autoBackupsKeyHelpLabel": "Over de automatische backupsleutel",
   "settings.autoBackupsSetKey": "Automatische backupsleutel instellen",
   "settings.autoBackupsKeyAlreadySetHint": "(backupsleutel al ingesteld)",
   "settings.autoBackupsClearKey": "Opgeslagen automatische backupsleutel wissen",
-  "settings.autoBackupsClearKeyHelp":
-    "Verwijdert de opgeslagen sleutel nadat je opslaat. Schakel automatische backups uit voordat je de sleutel wist.",
   "settings.autoBackupsKeyHelp":
     "Laat het veld leeg om de bestaande opgeslagen sleutel te behouden. Voer een nieuwe waarde in van minstens {{count}} niet-witruimtetekens om ze te vervangen.",
   "settings.autoBackupsKeyRequired":
@@ -3436,8 +3427,6 @@ const nl: LocaleDictionary = {
   "settings.autoBackupsHideKey": "Automatische backupsleutel verbergen",
   "settings.autoBackupsSaved": "Instellingen voor automatische backups opgeslagen.",
   "settings.backupLocationTitle": "Backuplocatie",
-  "settings.backupLocationDescription":
-    "Kies waar Scryer backupbundles op de server opslaat.",
   "settings.backupLocationCustomPath": "Aangepast backuppad",
   "settings.backupLocationBrowse": "Bladeren",
   "settings.backupLocationEffectivePath": "Actief pad",
@@ -3453,11 +3442,8 @@ const nl: LocaleDictionary = {
   "settings.backupsCreateTitle": "Backupbundle maken",
   "settings.backupsCreateDescription":
     "Beveilig deze backup met een wachtwoord. Hetzelfde wachtwoord is vereist bij het herstellen.",
-  "settings.backupsRequiredPassword": "Verplichte wachtwoordbeveiliging",
   "settings.backupsConfirmPassword": "Wachtwoord bevestigen",
   "settings.backupsPasswordMismatch": "Wachtwoorden komen niet overeen",
-  "settings.backupsPasswordHelp":
-    "Volledige backupbundles bevatten instantiesecrets en moeten versleuteld zijn.",
   "settings.backupsQueued": "Backup maken gestart op de achtergrond.",
   "settings.backupsDeleted": "Backup verwijderd.",
   "settings.backupsDeletedCount": "{{count}} backup(s) verwijderd.",

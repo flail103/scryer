@@ -5877,8 +5877,6 @@ const en: LocaleDictionary = {
   "setup.restoreDropTargetFormats": "Supported formats: .tar.zst and .enc",
   "setup.restoreSelectFile": "Select file",
   "setup.restoreClearFile": "Clear selection",
-  "setup.restorePasswordHelp":
-    "Enter the password used when this encrypted backup was created.",
   "setup.restoreNoFile": "Choose a backup bundle to continue.",
   "setup.restorePasswordRequired":
     "Enter the bundle password before continuing.",
@@ -6279,8 +6277,6 @@ const en: LocaleDictionary = {
 
   // Recycle Bin
   "settings.autoBackupsTitle": "Automatic backups",
-  "settings.autoBackupsDescription":
-    "Opt in to one system backup per day at a server-local time. Automatic backups time out after 30 minutes, and Scryer keeps the last 5 successful automatic backups.",
   "settings.autoBackupsDisabledMissingKeyToastTitle":
     "Automatic backups were disabled",
   "settings.autoBackupsDisabledMissingKeyToastDescription":
@@ -6289,17 +6285,12 @@ const en: LocaleDictionary = {
   "settings.autoBackupsTime": "Daily backup time",
   "settings.autoBackupsHour": "Hour",
   "settings.autoBackupsMinute": "Minute",
-  "settings.autoBackupsTimeHelp": "Uses the server's local timezone.",
   "settings.autoBackupsNextRun": "Next automatic backup",
-  "settings.autoBackupsNextRunHelp":
-    "Save your changes to update the scheduler. Disabled automatic backups do not run.",
   "settings.autoBackupsKeyLabel": "Automatic backup key",
   "settings.autoBackupsKeyHelpLabel": "About the automatic backup key",
   "settings.autoBackupsSetKey": "Set automatic backup key",
   "settings.autoBackupsKeyAlreadySetHint": "(backup key already set)",
   "settings.autoBackupsClearKey": "Clear saved automatic backup key",
-  "settings.autoBackupsClearKeyHelp":
-    "Removes the stored key after you save. Disable automatic backups before clearing the key.",
   "settings.autoBackupsKeyHelp":
     "Leave the field blank to keep the existing saved key. Enter a new value of at least {{count}} non-whitespace characters to replace it.",
   "settings.autoBackupsKeyRequired":
@@ -6310,8 +6301,6 @@ const en: LocaleDictionary = {
   "settings.autoBackupsHideKey": "Hide automatic backup key",
   "settings.autoBackupsSaved": "Automatic backup settings saved.",
   "settings.backupLocationTitle": "Backup location",
-  "settings.backupLocationDescription":
-    "Choose where Scryer stores backup bundles on the server.",
   "settings.backupLocationCustomPath": "Custom backup path",
   "settings.backupLocationBrowse": "Browse",
   "settings.backupLocationEffectivePath": "Active path",
@@ -6327,11 +6316,8 @@ const en: LocaleDictionary = {
   "settings.backupsCreateTitle": "Create backup bundle",
   "settings.backupsCreateDescription":
     "Protect this backup with a password. The same password is required during restore.",
-  "settings.backupsRequiredPassword": "Required password protection",
   "settings.backupsConfirmPassword": "Confirm password",
   "settings.backupsPasswordMismatch": "Passwords do not match",
-  "settings.backupsPasswordHelp":
-    "Full backup bundles include instance secrets and must be encrypted.",
   "settings.backupsQueued": "Backup creation started in the background.",
   "settings.backupsDeleted": "Backup deleted.",
   "settings.backupsDeletedCount": "Deleted {{count}} backup(s).",

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { DatabaseBackup, LockKeyhole, RotateCcw, Upload } from "lucide-react";
+import { DatabaseBackup, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   SetupBackButton,
@@ -483,15 +483,6 @@ export function SetupRestoreView({
                   className="border-[var(--scry-border2)] bg-[var(--scry-page2)]"
                 />
               </label>
-            ) : null}
-
-            {requiresPassword ? (
-              <div className="rounded-[12px] border border-[var(--scry-border2)] bg-[rgba(10,17,32,0.48)] p-3 text-xs text-[var(--scry-muted)]">
-                <div className="flex items-center gap-2 text-[var(--scry-ink2)]">
-                  <LockKeyhole className="h-3.5 w-3.5" />
-                  <span>{t("setup.restorePasswordHelp")}</span>
-                </div>
-              </div>
             ) : null}
 
             {error ? (

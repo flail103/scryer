@@ -19,6 +19,8 @@ type TimePickerProps = {
   id?: string
   value: string
   onChange: (value: string) => void
+  /** Called when the picker closes, after any changes made while it was open. */
+  onClose?: () => void
   disabled?: boolean
   className?: string
   hourLabel?: string
@@ -44,6 +46,7 @@ export function TimePicker({
   id,
   value,
   onChange,
+  onClose,
   disabled = false,
   className,
   hourLabel = "Hour",
@@ -56,7 +59,13 @@ export function TimePicker({
   }, [onChange])
 
   return (
-    <Popover>
+    <Popover
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose?.()
+        }
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           id={id}
