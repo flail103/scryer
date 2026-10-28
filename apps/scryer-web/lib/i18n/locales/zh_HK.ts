@@ -3245,7 +3245,6 @@ const zh_HK: LocaleDictionary = {
   "settings.backupLocationCustomPath": "自訂備份路徑",
   "settings.backupLocationBrowse": "瀏覽",
   "settings.backupLocationEffectivePath": "使用中路徑",
-  "settings.backupLocationHelp": "請使用伺服器或容器路徑。變更此路徑會切換使用中的備份資料夾；既有的備份不會被移動，並會隱藏直到您切換回來。",
   "settings.backupLocationReset": "使用預設值",
   "settings.backupLocationPickerTitle": "選取備份資料夾",
   "settings.backupLocationSaved": "已儲存備份存放位置。",

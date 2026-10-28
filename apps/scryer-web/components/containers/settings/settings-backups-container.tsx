@@ -915,73 +915,62 @@ export function SettingsBackupsContainer() {
               {t("settings.backupLocationTitle")}
             </h2>
           </div>
-          <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-4`}>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.75fr)]">
-              <div className="space-y-2">
-                <Label htmlFor="backup-location-path" className="text-[var(--scry-ink2)]">
-                  {t("settings.backupLocationCustomPath")}
-                </Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    id="backup-location-path"
-                    value={backupPathDraft}
-                    placeholder={savedBackupSettings.defaultBackupPath}
-                    disabled={backupSettingsSaving}
-                    onChange={(event) => setBackupPathDraft(event.target.value)}
-                    className="font-[var(--font-code)]"
-                  />
+          <div className={`${BACKUPS_PANEL_BODY_CLASS} space-y-2`}>
+            <Label htmlFor="backup-location-path" className="text-[var(--scry-ink2)]">
+              {t("settings.backupLocationCustomPath")}
+            </Label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id="backup-location-path"
+                value={backupPathDraft}
+                placeholder={savedBackupSettings.defaultBackupPath}
+                disabled={backupSettingsSaving}
+                onChange={(event) => setBackupPathDraft(event.target.value)}
+                className="min-w-0 flex-1 font-[var(--font-code)]"
+              />
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  id="backup-location-browse"
+                  type="button"
+                  variant="outline"
+                  disabled={backupSettingsSaving}
+                  onClick={() => setFolderBrowserOpen(true)}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  {t("settings.backupLocationBrowse")}
+                </Button>
+                {backupPathDraft.trim().length > 0 ? (
                   <Button
-                    id="backup-location-browse"
                     type="button"
                     variant="outline"
-                    className="shrink-0"
+                    onClick={handleResetBackupPath}
                     disabled={backupSettingsSaving}
-                    onClick={() => setFolderBrowserOpen(true)}
                   >
-                    <FolderOpen className="h-4 w-4" />
-                    {t("settings.backupLocationBrowse")}
+                    <RotateCcw className="h-4 w-4" />
+                    {t("settings.backupLocationReset")}
                   </Button>
-                </div>
-              </div>
-
-              <div className={`space-y-2 p-4 ${BACKUPS_INSET_CLASS}`}>
-                <p className={`text-xs font-medium uppercase ${BACKUPS_MUTED_TEXT_CLASS}`}>
-                  {t("settings.backupLocationEffectivePath")}
-                </p>
-                <p
-                  id="backup-location-effective-path"
-                  className="break-all font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
+                ) : null}
+                <Button
+                  id="backup-location-save"
+                  type="button"
+                  variant="primary"
+                  onClick={() => void handleSaveBackupSettings()}
+                  disabled={!canSaveBackupSettings}
                 >
-                  {savedBackupSettings.effectiveBackupPath || savedBackupSettings.defaultBackupPath}
-                </p>
+                  {backupSettingsSaving ? <LoadingMark className="h-4 w-4" /> : null}
+                  {t("label.save")}
+                </Button>
               </div>
             </div>
-
-            <p className={`text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
-              {t("settings.backupLocationHelp")}
+            <p className={`break-all text-xs ${BACKUPS_MUTED_TEXT_CLASS}`}>
+              {t("settings.backupLocationEffectivePath")}{" "}
+              <span
+                id="backup-location-effective-path"
+                className="font-[var(--font-code)] text-[var(--scry-ink2)]"
+              >
+                {savedBackupSettings.effectiveBackupPath || savedBackupSettings.defaultBackupPath}
+              </span>
             </p>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Button
-                id="backup-location-save"
-                type="button"
-                variant="primary"
-                onClick={() => void handleSaveBackupSettings()}
-                disabled={!canSaveBackupSettings}
-              >
-                {backupSettingsSaving ? <LoadingMark className="h-4 w-4" /> : null}
-                {t("label.save")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleResetBackupPath}
-                disabled={backupSettingsSaving || backupPathDraft.trim().length === 0}
-              >
-                <RotateCcw className="h-4 w-4" />
-                {t("settings.backupLocationReset")}
-              </Button>
-            </div>
           </div>
         </section>
 

@@ -3429,8 +3429,6 @@ const nl: LocaleDictionary = {
   "settings.backupLocationCustomPath": "Aangepast backuppad",
   "settings.backupLocationBrowse": "Bladeren",
   "settings.backupLocationEffectivePath": "Actief pad",
-  "settings.backupLocationHelp":
-    "Gebruik een server- of containerpad. Als je dit wijzigt, wisselt de actieve backupmap; bestaande backups worden niet verplaatst en zijn verborgen tot je terugschakelt.",
   "settings.backupLocationReset": "Standaard gebruiken",
   "settings.backupLocationPickerTitle": "Backupmap selecteren",
   "settings.backupLocationSaved": "Backuplocatie opgeslagen.",

@@ -6309,11 +6309,9 @@ const en: LocaleDictionary = {
   "settings.autoBackupsHideKey": "Hide automatic backup key",
   "settings.autoBackupsSaved": "Automatic backup settings saved.",
   "settings.backupLocationTitle": "Backup location",
-  "settings.backupLocationCustomPath": "Custom backup path",
+  "settings.backupLocationCustomPath": "Backup folder",
   "settings.backupLocationBrowse": "Browse",
-  "settings.backupLocationEffectivePath": "Active path",
-  "settings.backupLocationHelp":
-    "Use a server or container path. Changing it switches the active backup folder; existing backups are not moved and are hidden until you switch back.",
+  "settings.backupLocationEffectivePath": "Backups are saved to",
   "settings.backupLocationReset": "Use default",
   "settings.backupLocationPickerTitle": "Select backup folder",
   "settings.backupLocationSaved": "Backup location saved.",
