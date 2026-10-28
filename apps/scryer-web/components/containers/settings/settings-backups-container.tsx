@@ -646,7 +646,7 @@ export function SettingsBackupsContainer() {
     }
   }, [client, setGlobalStatus, t]);
 
-  const saveAutoBackupDraft = async (draft: AutoBackupDraft) => {
+  const saveAutoBackupDraft = async (draft: AutoBackupDraft, successMessage?: string) => {
     const replacementKeyPresent = draft.key.trim().length > 0;
     const unchanged =
       draft.enabled === savedAutoBackupSettings.enabled &&
@@ -677,7 +677,7 @@ export function SettingsBackupsContainer() {
       setAutoBackupSettings(data.updateAutoBackupSettings);
       setAutoBackupKey("");
       setShowAutoBackupKey(false);
-      setGlobalStatus(t("settings.autoBackupsSaved"), { level: "SUCCESS" });
+      setGlobalStatus(successMessage ?? t("settings.autoBackupsSaved"), { level: "SUCCESS" });
     } catch (error) {
       setGlobalStatus(mutationErrorMessage(error, t("status.failedToUpdate"), t), { level: "ERROR" });
     } finally {
@@ -858,18 +858,21 @@ export function SettingsBackupsContainer() {
                           id="auto-backups-clear-key"
                           type="button"
                           variant="outline"
-                          disabled={autoBackupSaving || autoBackupSettings.enabled}
-                          title={
-                            autoBackupSettings.enabled
-                              ? t("settings.autoBackupsClearKeyNeedsDisabled")
-                              : undefined
-                          }
+                          disabled={autoBackupSaving}
+                          // Backups cannot run without a key, so clearing it
+                          // also switches them off.
                           onClick={() =>
-                            void saveAutoBackupDraft({
-                              ...currentAutoBackupDraft,
-                              key: "",
-                              clearKey: true,
-                            })
+                            void saveAutoBackupDraft(
+                              {
+                                ...currentAutoBackupDraft,
+                                enabled: false,
+                                key: "",
+                                clearKey: true,
+                              },
+                              autoBackupSettings.enabled
+                                ? t("settings.autoBackupsKeyClearedBackupsOff")
+                                : t("settings.autoBackupsKeyCleared"),
+                            )
                           }
                         >
                           {t("label.clear")}
