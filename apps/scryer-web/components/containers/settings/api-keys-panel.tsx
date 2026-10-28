@@ -1,4 +1,5 @@
 import { userFacingGraphQlErrorMessage } from "../../../lib/graphql/error-message.ts";
+import { applyApiKeyLoadRefusal } from "../../../lib/utils/api-key-load.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "urql";
 import {
@@ -168,14 +169,13 @@ export function ApiKeysPanel({
       .toPromise();
     if (result.error || !result.data) {
       if (
-        errorMessage(result.error, "", t).includes(
-          "interactive session is required",
-        )
+        applyApiKeyLoadRefusal(result.error, {
+          setKeys,
+          setCanCreate,
+          setLoaded,
+          setStatus,
+        })
       ) {
-        setKeys([]);
-        setCanCreate(false);
-        setLoaded(true);
-        setStatus(null);
         return;
       }
       setLoaded(true);

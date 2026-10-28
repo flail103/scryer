@@ -78,6 +78,7 @@ async fn generation(
     budget: Arc<RawSearchBudget>,
 ) -> (Arc<RawSearchGeneration>, mpsc::UnboundedReceiver<Read>) {
     let (sender, receiver) = mpsc::unbounded_channel();
+    let coordinator = Arc::new(crate::RestoreCoordinator::default());
     let sources = (0..count)
         .map(|id| RawSearchSource {
             id: id.to_string(),
@@ -95,8 +96,9 @@ async fn generation(
             sources,
             Arc::new(ControlledClient(sender)),
             budget,
-            CancellationToken::new(),
+            coordinator.shutdown_workers.child_token(),
             None,
+            coordinator,
         )
         .await
         .unwrap(),
@@ -264,6 +266,35 @@ async fn dropped_consumer_does_not_cancel_generation_owned_read() {
         titles(&finish(request_page(&generation, 0, 1)).await),
         vec![7]
     );
+    assert!(reads.try_recv().is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_refuses_outstanding_source_work_and_drains_late_completion() {
+    let (generation, mut reads) = generation(1, Arc::new(RawSearchBudget::default())).await;
+    let caller = request_page(&generation, 0, 1);
+    let (_, complete) = read(&mut reads).await;
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let deadline = crate::RestoreDeadline::new();
+    let drain = generation.coordinator.drain(&deadline);
+    tokio::pin!(drain);
+    assert!(futures_util::poll!(&mut drain).is_pending());
+    assert!(generation.cancel.is_cancelled());
+    tokio::time::advance(crate::RESTORE_WORK_BUDGET).await;
+    assert!(drain.await.is_err());
+    // A source ignoring cancellation still owns its cleanup. The coordinator
+    // cannot allow restore merely because its page consumer disconnected.
+    complete.send(response([7], Some("more"))).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        generation.coordinator.drain(&crate::RestoreDeadline::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!generation.state.lock().await.sources[0].pending);
+    assert!(generation.page(0, 1).await.is_err());
     assert!(reads.try_recv().is_err());
 }
 
@@ -910,20 +941,22 @@ async fn dropped_rebuild_reader_keeps_successor_until_completion_or_explicit_can
         assert_eq!(titles(&finish(last).await), [300]);
         let original = generation.clone();
         let rebuild = tokio::spawn(async move { original.page_or_rebuild(0, 2).await });
-        let (_, mut answer) = read(&mut reads).await;
+        let (_, answer) = read(&mut reads).await;
         rebuild.abort();
         assert!(matches!(rebuild.await, Err(error) if error.is_cancelled()));
         let successor = generation.rebuild.lock().await.upgrade().unwrap();
         assert!(!answer.is_closed());
         if cancel {
             generation.cancel.cancel();
-            tokio::time::timeout(Duration::from_secs(60), answer.closed())
-                .await
-                .unwrap();
+            assert!(
+                !answer.is_closed(),
+                "cancellation must not drop admitted source cleanup"
+            );
             assert_eq!(
                 successor.page(0, 2).await.unwrap_err().reason(),
                 Some(reasons::CANCELLED)
             );
+            answer.send(response([10, 11], None)).unwrap();
         } else {
             answer.send(response([10, 11], None)).unwrap();
             let (joined, page) =

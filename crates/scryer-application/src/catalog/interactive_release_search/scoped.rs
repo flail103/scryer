@@ -61,7 +61,7 @@ impl AppUseCase {
         // every subsequent offset-zero request would join an abandoned walk.
         let app = self.clone();
         let (send, receive) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
+        self.restore_coordinator().spawn_task(async move {
             let response = generation.page_or_rebuild(offset, limit).await;
             let mut entries = app
                 .runtime
@@ -130,13 +130,14 @@ impl AppUseCase {
         )
         .await
         .ok_or_else(full)?;
-        let cancel = CancellationToken::new();
+        let cancel = self.restore_coordinator().shutdown_workers.child_token();
         let generation = raw::RawSearchGeneration::new(
             sources,
             self.services.integrations.indexer_client.clone(),
             self.runtime.acquisition.raw_search_budget.clone(),
             cancel.clone(),
             Some(Arc::downgrade(registry)),
+            self.restore_coordinator().clone(),
         )
         .await?;
         let mut entries = registry.lock().await;

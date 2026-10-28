@@ -5313,6 +5313,7 @@ pub struct IndexerSearchCandidateWrite {
 #[derive(Debug, Clone)]
 pub struct ReusableIndexerSearchCandidate {
     pub normalized: NormalizedIndexerSearchCandidate,
+    pub reusable_until: chrono::DateTime<chrono::Utc>,
 }
 
 /// A bounded replay batch, ordered by the opaque source ID.

@@ -496,9 +496,14 @@ async fn select_reusable_strategies(
         let page_chain = background_page_budget.and_then(|_| state.page_chain(now));
         if let Some(replay) = state.replay {
             match replay.send(page_sink, indexer_id).await {
-                Ok(count) => {
+                Ok(ReplayOutcome::Served(count)) => {
                     selection.replayed_result_count =
                         selection.replayed_result_count.saturating_add(count);
+                }
+                Ok(ReplayOutcome::Unavailable) => {
+                    strategy.request.page_cursor = None;
+                    selection.live.push(strategy);
+                    continue;
                 }
                 Err(error) if error.is_canceled() => return Err(error),
                 Err(error) => {
@@ -667,6 +672,12 @@ struct ReusableStrategyState {
 // History length changes the number of batches, not the size of a batch.
 const CANDIDATE_REPLAY_BATCH_SIZE: u32 = 100;
 
+#[derive(Debug)]
+enum ReplayOutcome {
+    Served(usize),
+    Unavailable,
+}
+
 struct CandidateReplay {
     context: SearchDiagnosticsContext,
     config: IndexerConfig,
@@ -679,7 +690,46 @@ struct CandidateReplay {
 }
 
 impl CandidateReplay {
-    async fn send(self, sink: &IndexerSearchPageSink, indexer_id: &str) -> AppResult<usize> {
+    async fn preflight(&self) -> AppResult<bool> {
+        if self.run_ids.is_empty() {
+            return Ok(false);
+        }
+        let mut cursor = None;
+        loop {
+            let page = self
+                .context
+                .repository
+                .list_search_run_candidates(
+                    &self.run_ids,
+                    cursor.as_deref(),
+                    CANDIDATE_REPLAY_BATCH_SIZE,
+                )
+                .await?;
+            let now = Utc::now();
+            if page.candidates.into_iter().any(|record| {
+                record.reusable_until <= now
+                    || reusable_candidate_from_record(record, &self.config).is_none()
+            }) {
+                return Ok(false);
+            }
+            match page.next_cursor {
+                None => return Ok(true),
+                Some(next) if cursor.as_ref().is_none_or(|previous| next > *previous) => {
+                    cursor = Some(next)
+                }
+                Some(_) => return Ok(false),
+            }
+        }
+    }
+
+    async fn send(
+        self,
+        sink: &IndexerSearchPageSink,
+        indexer_id: &str,
+    ) -> AppResult<ReplayOutcome> {
+        if !self.preflight().await? {
+            return Ok(ReplayOutcome::Unavailable);
+        }
         let mut count = 0usize;
         let mut cursor = None;
         loop {
@@ -699,7 +749,11 @@ impl CandidateReplay {
             let mut candidates = page
                 .candidates
                 .into_iter()
-                .map(|record| reusable_candidate_from_record(record, &self.config))
+                .map(|record| {
+                    (record.reusable_until > Utc::now())
+                        .then(|| reusable_candidate_from_record(record, &self.config))
+                        .flatten()
+                })
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| {
                     AppError::Repository(
@@ -732,7 +786,7 @@ impl CandidateReplay {
                 }
             }
         }
-        Ok(count)
+        Ok(ReplayOutcome::Served(count))
     }
 }
 
@@ -861,9 +915,8 @@ struct ListingPassState {
     /// first page: their runs keep the indexer's whole answer and advance
     /// the chain.
     owned: HashMap<String, String>,
-    /// Strategies whose first page this pass was another strategy's listing,
-    /// with that listing's first page and its owner.
-    followers: Vec<(String, String, IndexerSearchListingStrategy)>,
+    /// Candidates replayed successfully before followers stopped reading.
+    follower_replayed: usize,
     /// Followers whose listing is still being read: their answer is open, not
     /// contained.
     riders: HashSet<String>,
@@ -1051,16 +1104,33 @@ impl ListingProbe {
                     if let Some(state) = reusable.get_mut(&strategy.strategy_id) {
                         state.replay = None;
                     }
-                    plan.replayed = plan.replayed.saturating_add(
-                        self.replay_listing(listing, &strategy.strategy_id, page_sink)
-                            .await?,
-                    );
+                    match self
+                        .replay_listing(listing, &strategy.strategy_id, page_sink)
+                        .await?
+                    {
+                        ReplayOutcome::Served(count) => {
+                            plan.replayed = plan.replayed.saturating_add(count)
+                        }
+                        ReplayOutcome::Unavailable => {
+                            reusable.remove(&strategy.strategy_id);
+                            strategy.request.page_cursor = None;
+                        }
+                    }
                     plan.strategies.push(strategy);
                     continue;
                 }
                 ListingRelation::Reads(listing) => listing,
             };
             let own_state = reusable.remove(&strategy.strategy_id);
+            let ReplayOutcome::Served(count) = self
+                .replay_listing(listing, &strategy.strategy_id, page_sink)
+                .await?
+            else {
+                strategy.request.page_cursor = None;
+                plan.strategies.push(strategy);
+                continue;
+            };
+            plan.replayed = plan.replayed.saturating_add(count);
             let idle = listing.advanced_at < idle_before;
             if !listing.finished && idle {
                 match listing.page_cursor.as_deref() {
@@ -1095,10 +1165,6 @@ impl ListingProbe {
                                     strategy.strategy_id.clone(),
                                     listing.first_page_fingerprint.clone(),
                                 );
-                                plan.replayed = plan.replayed.saturating_add(
-                                    self.replay_listing(listing, &strategy.strategy_id, page_sink)
-                                        .await?,
-                                );
                                 strategy.request.page_cursor = Some(cursor.to_string());
                                 plan.page_chains.insert(
                                     strategy.strategy_id.clone(),
@@ -1123,10 +1189,6 @@ impl ListingProbe {
                     }
                 }
             }
-            plan.replayed = plan.replayed.saturating_add(
-                self.replay_listing(listing, &strategy.strategy_id, page_sink)
-                    .await?,
-            );
             plan.served += 1;
             if !listing.finished {
                 plan.served_open += 1;
@@ -1261,13 +1323,18 @@ impl ListingProbe {
     }
 
     /// The gate a paged read asks after its first page.
-    fn first_page_gate(&self, strategy_id: &str) -> IndexerFirstPageGate {
+    fn first_page_gate(
+        &self,
+        strategy_id: &str,
+        sink: IndexerSearchPageSink,
+    ) -> IndexerFirstPageGate {
         let probe = self.clone();
         let strategy_id = strategy_id.to_string();
         IndexerFirstPageGate::new(move |fingerprint| {
             let probe = probe.clone();
             let strategy_id = strategy_id.clone();
-            async move { probe.claim(&strategy_id, fingerprint).await }
+            let sink = sink.clone();
+            async move { probe.claim(&strategy_id, fingerprint, &sink).await }
         })
     }
 
@@ -1277,6 +1344,7 @@ impl ListingProbe {
         &self,
         strategy_id: &str,
         first_page_fingerprint: String,
+        sink: &IndexerSearchPageSink,
     ) -> IndexerFirstPageVerdict {
         let family = self
             .lock()
@@ -1308,17 +1376,27 @@ impl ListingProbe {
                 IndexerFirstPageVerdict::ReadOn
             }
             Ok(IndexerSearchListingClaim::SameListing {
-                owner,
+                owner: _,
                 listing_open,
             }) => {
+                let listings = self.listings().await;
+                let Some(listing) = listings
+                    .iter()
+                    .find(|listing| listing.first_page_fingerprint == first_page_fingerprint)
+                else {
+                    return IndexerFirstPageVerdict::ReadOn;
+                };
+                let Ok(ReplayOutcome::Served(count)) =
+                    self.replay_listing(listing, strategy_id, sink).await
+                else {
+                    return IndexerFirstPageVerdict::ReadOn;
+                };
                 let mut state = self.lock();
                 state.owned.remove(strategy_id);
                 if listing_open {
                     state.riders.insert(strategy_id.to_string());
                 }
-                state
-                    .followers
-                    .push((strategy_id.to_string(), first_page_fingerprint, owner));
+                state.follower_replayed = state.follower_replayed.saturating_add(count);
                 IndexerFirstPageVerdict::Stop { listing_open }
             }
             Err(error) => {
@@ -1355,33 +1433,9 @@ impl ListingProbe {
         }
     }
 
-    /// Replays the listings the strategies that stopped at their first page
-    /// this pass were found reading. A listing owned in this same scope was
-    /// read live here.
-    async fn replay_followers(&self, page_sink: &IndexerSearchPageSink) -> AppResult<usize> {
-        let followers = std::mem::take(&mut self.lock().followers);
-        let followers = followers
-            .into_iter()
-            .filter(|(_, _, owner)| owner.scope_key != self.diagnostics.scope_key)
-            .collect::<Vec<_>>();
-        if followers.is_empty() {
-            return Ok(0);
-        }
-        let listings = self.listings().await;
-        let mut replayed = 0_usize;
-        for (strategy_id, fingerprint, _) in followers {
-            let Some(listing) = listings
-                .iter()
-                .find(|listing| listing.first_page_fingerprint == fingerprint)
-            else {
-                continue;
-            };
-            replayed = replayed.saturating_add(
-                self.replay_listing(listing, &strategy_id, page_sink)
-                    .await?,
-            );
-        }
-        Ok(replayed)
+    /// Collects counts only: replay must succeed before a follower stops.
+    fn take_follower_replayed(&self) -> usize {
+        std::mem::take(&mut self.lock().follower_replayed)
     }
 
     /// Sends a listing's recorded pages through this scope's result guard,
@@ -1392,20 +1446,20 @@ impl ListingProbe {
         listing: &IndexerSearchListing,
         strategy_id: &str,
         page_sink: &IndexerSearchPageSink,
-    ) -> AppResult<usize> {
-        let (filter, branch) = {
-            let mut state = self.lock();
-            if listing.run_ids.is_empty()
-                || !state
-                    .replayed
-                    .insert(listing.first_page_fingerprint.clone())
-            {
-                return Ok(0);
+    ) -> AppResult<ReplayOutcome> {
+        let (filter, branch, already_replayed) = {
+            let state = self.lock();
+            if listing.run_ids.is_empty() {
+                return Ok(ReplayOutcome::Unavailable);
             }
             let Some(entry) = state.strategies.get(strategy_id) else {
-                return Ok(0);
+                return Ok(ReplayOutcome::Unavailable);
             };
-            (self.filter_for(entry), entry.branch.clone())
+            (
+                self.filter_for(entry),
+                entry.branch.clone(),
+                state.replayed.contains(&listing.first_page_fingerprint),
+            )
         };
         let replay = CandidateReplay {
             context: self.diagnostics.clone(),
@@ -1414,12 +1468,29 @@ impl ListingProbe {
             provenance: reusable_strategy_provenance(&branch),
             filter: Some(filter),
         };
-        match replay.send(page_sink, &self.diagnostics.indexer_id).await {
-            Ok(count) => Ok(count),
+        let outcome = if already_replayed {
+            replay.preflight().await.map(|safe| {
+                if safe {
+                    ReplayOutcome::Served(0)
+                } else {
+                    ReplayOutcome::Unavailable
+                }
+            })
+        } else {
+            replay.send(page_sink, &self.diagnostics.indexer_id).await
+        };
+        match outcome {
+            Ok(ReplayOutcome::Served(count)) => {
+                self.lock()
+                    .replayed
+                    .insert(listing.first_page_fingerprint.clone());
+                Ok(ReplayOutcome::Served(count))
+            }
+            Ok(ReplayOutcome::Unavailable) => Ok(ReplayOutcome::Unavailable),
             Err(error) if error.is_canceled() => Err(error),
             Err(error) => {
                 self.warn(&error, "indexer listing replay failed");
-                Ok(0)
+                Ok(ReplayOutcome::Unavailable)
             }
         }
     }
@@ -5740,7 +5811,8 @@ impl MultiIndexerSearchClient {
                 && strategy.page_cursor.is_none()
                 && probe.tracks(&strategy.strategy_id)
             {
-                strategy.first_page_gate = Some(probe.first_page_gate(&strategy.strategy_id));
+                strategy.first_page_gate =
+                    Some(probe.first_page_gate(&strategy.strategy_id, page_sink.clone()));
             }
             let page_sink = page_sink.clone();
 
@@ -8481,27 +8553,10 @@ impl IndexerClient for MultiIndexerSearchClient {
                     }
                 }
 
-                // A strategy whose first page was another scope's listing reads the
-                // rest of it from that owner's chain.
+                // Followers already replayed before their first-page gate stopped them.
                 if let Some(probe) = listing_probe.as_ref() {
-                    match probe
-                        .replay_followers(page_sink.as_ref().expect("stream sink is present"))
-                        .await
-                    {
-                        Ok(replayed) => {
-                            primary_usable_result_count =
-                                primary_usable_result_count.saturating_add(replayed);
-                        }
-                        Err(error) => {
-                            return (
-                                indexer_id,
-                                indexer_name,
-                                scheduler_lease_for_task.clone(),
-                                Err(error),
-                                true,
-                            );
-                        }
-                    }
+                    primary_usable_result_count =
+                        primary_usable_result_count.saturating_add(probe.take_follower_replayed());
                 }
 
                 // An indexer over its query budget is skipped for the rest of
@@ -8887,24 +8942,8 @@ impl IndexerClient for MultiIndexerSearchClient {
                             }
                         }
                     }
-                    // A strategy whose first page was another scope's listing reads the
-                    // rest of it from that owner's chain.
                     if let Some(probe) = listing_probe.as_ref() {
-                        match probe
-                            .replay_followers(page_sink.as_ref().expect("stream sink is present"))
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(error) => {
-                                return (
-                                    indexer_id,
-                                    indexer_name,
-                                    scheduler_lease_for_task.clone(),
-                                    Err(error),
-                                    true,
-                                );
-                            }
-                        }
+                        probe.take_follower_replayed();
                     }
                 }
 
@@ -12948,6 +12987,7 @@ mod tests {
 
         let stored = ReusableIndexerSearchCandidate {
             normalized: normalized_candidate(&live, None, None, Utc::now()),
+            reusable_until: Utc::now() + Duration::hours(1),
         };
         let replayed = reusable_candidate_from_record(stored, &mock_indexer_config())
             .expect("the stored result rehydrates");
@@ -13221,8 +13261,20 @@ mod tests {
                         let mut result = search_result(&title);
                         result.download_url =
                             Some(format!("https://example.invalid/{run_id}/{id}"));
+                        if run_id == "password" && id == total - 1 {
+                            result.password_hint = Some("archive-password".into());
+                        }
+                        if run_id == "http" && id == total - 1 {
+                            result.http = Some(scryer_plugin_sdk::PluginHttpRelease {
+                                provider: "synthetic".into(),
+                                item_id: "item".into(),
+                                page_url: "https://provider.invalid/item".into(),
+                                ..Default::default()
+                            });
+                        }
                         ReusableIndexerSearchCandidate {
                             normalized: normalized_candidate(&result, None, None, Utc::now()),
+                            reusable_until: candidate_reusable_until(&result, Utc::now()),
                         }
                     })
                     .collect(),
@@ -13262,6 +13314,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn candidate_replay_preflights_unsafe_later_pages_and_distinguishes_empty() {
+        for unsafe_run in ["password", "http"] {
+            let repository = Arc::new(ReplayTestRepository {
+                calls: StdMutex::new(Vec::new()),
+                fail: false,
+                candidates_per_run: 101,
+            });
+            let mut replay = test_candidate_replay(repository.clone());
+            replay.run_ids = vec!["plain".into(), unsafe_run.into()];
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            let sink = IndexerSearchPageSink::new(tx, 1);
+            assert!(matches!(
+                replay.send(&sink, "idx-1").await.unwrap(),
+                ReplayOutcome::Unavailable
+            ));
+            assert!(
+                rx.try_recv().is_err(),
+                "no partial replay escapes preflight"
+            );
+            assert_eq!(repository.calls.lock().unwrap().len(), 3);
+        }
+        let repository = Arc::new(ReplayTestRepository {
+            calls: StdMutex::new(Vec::new()),
+            fail: false,
+            candidates_per_run: 0,
+        });
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let sink = IndexerSearchPageSink::new(tx, 1);
+        assert!(matches!(
+            test_candidate_replay(repository.clone())
+                .send(&sink, "idx-1")
+                .await
+                .unwrap(),
+            ReplayOutcome::Served(0)
+        ));
+        let mut unavailable = test_candidate_replay(repository);
+        unavailable.run_ids.clear();
+        assert!(matches!(
+            unavailable.send(&sink, "idx-1").await.unwrap(),
+            ReplayOutcome::Unavailable
+        ));
+    }
+
+    #[tokio::test]
     async fn candidate_replay_reserves_capacity_before_hydrating_each_batch() {
         let repository = Arc::new(ReplayTestRepository {
             calls: StdMutex::new(Vec::new()),
@@ -13273,14 +13369,21 @@ mod tests {
         let held = sink.reserve().await.unwrap();
         let mut replay = Box::pin(test_candidate_replay(repository.clone()).send(&sink, "idx-1"));
         assert!(futures_util::poll!(&mut replay).is_pending());
-        assert!(repository.calls.lock().unwrap().is_empty());
+        assert_eq!(
+            repository.calls.lock().unwrap().len(),
+            5,
+            "preflight visits every bounded page before emission"
+        );
         drop(held);
 
         let mut titles = HashSet::new();
         for batch in 0..5 {
             let progress = futures_util::poll!(&mut replay);
             if batch == 4 {
-                assert!(matches!(progress, std::task::Poll::Ready(Ok(410))));
+                assert!(matches!(
+                    progress,
+                    std::task::Poll::Ready(Ok(ReplayOutcome::Served(410)))
+                ));
             } else {
                 assert!(progress.is_pending());
             }
@@ -13294,13 +13397,13 @@ mod tests {
             // Receiving does not free capacity: scoring owns the page until drop.
             if batch < 4 {
                 assert!(futures_util::poll!(&mut replay).is_pending());
-                assert_eq!(repository.calls.lock().unwrap().len(), batch + 1);
+                assert_eq!(repository.calls.lock().unwrap().len(), batch + 6);
             }
             drop(page);
         }
         assert_eq!(titles.len(), 410);
         let calls = repository.calls.lock().unwrap();
-        assert_eq!(calls.len(), 5);
+        assert_eq!(calls.len(), 10);
         assert!(calls.iter().all(|(_, _, limit)| *limit == 100));
         assert_eq!(calls[1].1.as_deref(), Some("0099"));
         assert_eq!(calls[2].1.as_deref(), Some("0199"));
@@ -13331,7 +13434,10 @@ mod tests {
             } else {
                 assert!(error.is_canceled());
             }
-            assert_eq!(repository.calls.lock().unwrap().len(), 1);
+            assert_eq!(
+                repository.calls.lock().unwrap().len(),
+                if fail { 1 } else { 6 }
+            );
         }
     }
 
@@ -20346,6 +20452,7 @@ mod tests {
                     .into_iter()
                     .map(|candidate| ReusableIndexerSearchCandidate {
                         normalized: candidate.normalized.clone(),
+                        reusable_until: candidate.reusable_until.min(candidate.expires_at),
                     })
                     .collect(),
             })
@@ -23707,6 +23814,26 @@ mod tests {
         .fetch_all(pool)
         .await
         .expect("listing rows")
+    }
+
+    #[tokio::test]
+    async fn unsafe_listing_tail_keeps_new_and_known_followers_on_live_search() {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            let (client, fetches, pool) = listing_search_client(title_level_pages(3)).await;
+            background_pass(&client, "owner", (1, 1)).await;
+            for (session, episode) in [("new-reader", 2), ("known-reader", 2)] {
+                // Model a later page that is no longer reconstructible. Do not
+                // remove it from the listing: omission would hide lost results.
+                sqlx::query("UPDATE indexer_search_candidate_sources SET reusable_until = '2000-01-01T00:00:00Z'
+                    WHERE candidate_id IN (SELECT id FROM indexer_search_candidates WHERE title = ?)")
+                    .bind(harbor(1, 3)).execute(&pool).await.unwrap();
+                let asked = fetched(&fetches);
+                let response = background_pass(&client, session, (1, episode)).await;
+                assert_eq!(id_fetches(&fetches, asked),
+                    (1..=3).map(|page| (Some(1), Some(episode), page_cursor(page))).collect::<Vec<_>>());
+                assert!(result_titles(&response).contains(&harbor(1, episode)));
+            }
+        }).await.expect("unsafe listing regression timed out");
     }
 
     #[tokio::test]

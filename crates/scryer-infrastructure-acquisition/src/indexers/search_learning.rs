@@ -98,8 +98,14 @@ impl IndexerSearchLearningStore {
         let key = current_encryption_key(&self.encryption_key)?;
         let mut order = Vec::with_capacity(rows.len());
         let mut candidates = HashMap::with_capacity(rows.len());
+        let mut reuse_deadlines = HashMap::with_capacity(rows.len());
         for row in &rows {
             let id = row.text("id")?;
+            reuse_deadlines.insert(
+                id.clone(),
+                row.timestamp("reusable_until")?
+                    .min(row.timestamp("expires_at")?),
+            );
             order.push(id.clone());
             candidates.insert(
                 id,
@@ -194,8 +200,14 @@ impl IndexerSearchLearningStore {
 
         Ok(order
             .into_iter()
-            .filter_map(|id| candidates.remove(&id))
-            .map(|normalized| ReusableIndexerSearchCandidate { normalized })
+            .filter_map(|id| {
+                candidates
+                    .remove(&id)
+                    .map(|normalized| ReusableIndexerSearchCandidate {
+                        normalized,
+                        reusable_until: reuse_deadlines[&id],
+                    })
+            })
             .collect())
     }
 }
@@ -708,7 +720,7 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
                     s.response_tmdb_id, s.response_imdb_id, s.season, s.episode,
                     s.absolute_episode, s.release_group, s.provider_source, c.info_hash,
                     s.seeders, s.peers, s.download_volume_factor,
-                    s.upload_volume_factor, s.protected
+                    s.upload_volume_factor, s.protected, s.reusable_until, s.expires_at
              FROM indexer_search_candidate_sources s
              JOIN indexer_search_candidates c ON c.id = s.candidate_id
              JOIN indexer_search_run_candidate_sources rc ON rc.source_id = s.id
@@ -735,8 +747,14 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
         let key = current_encryption_key(&self.encryption_key)?;
         let mut order = Vec::with_capacity(rows.len());
         let mut candidates = HashMap::with_capacity(rows.len());
+        let mut reuse_deadlines = HashMap::with_capacity(rows.len());
         for row in &rows {
             let id = row.text("id")?;
+            reuse_deadlines.insert(
+                id.clone(),
+                row.timestamp("reusable_until")?
+                    .min(row.timestamp("expires_at")?),
+            );
             order.push(id.clone());
             candidates.insert(
                 id,
@@ -830,8 +848,14 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
 
         Ok(order
             .into_iter()
-            .filter_map(|id| candidates.remove(&id))
-            .map(|normalized| ReusableIndexerSearchCandidate { normalized })
+            .filter_map(|id| {
+                candidates
+                    .remove(&id)
+                    .map(|normalized| ReusableIndexerSearchCandidate {
+                        normalized,
+                        reusable_until: reuse_deadlines[&id],
+                    })
+            })
             .collect())
     }
 
@@ -863,7 +887,7 @@ impl IndexerSearchLearningRepository for IndexerSearchLearningStore {
                     s.response_tmdb_id, s.response_imdb_id, s.season, s.episode,
                     s.absolute_episode, s.release_group, s.provider_source, c.info_hash,
                     s.seeders, s.peers, s.download_volume_factor,
-                    s.upload_volume_factor, s.protected
+                    s.upload_volume_factor, s.protected, s.reusable_until, s.expires_at
              FROM indexer_search_candidate_sources s
              JOIN indexer_search_candidates c ON c.id = s.candidate_id
              WHERE s.id IN (
@@ -3328,6 +3352,10 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(first.candidates.len(), 1);
+        assert_eq!(
+            first.candidates[0].reusable_until.timestamp(),
+            candidate.reusable_until.timestamp()
+        );
         let second = store
             .list_search_run_candidates(
                 std::slice::from_ref(&run.id),

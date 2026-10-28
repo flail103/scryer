@@ -674,7 +674,11 @@ fn job_to_queue_item(job: &HttpJob, live: Option<LiveSnapshot>) -> DownloadQueue
     };
     let failed = job.state == HttpJobState::Failed;
     DownloadQueueItem {
-        attention_reason_code: None,
+        attention_reason_code: if failed {
+            job.error_reason.clone()
+        } else {
+            None
+        },
         id: job.id.clone(),
         title_id: Some(job.title_id.clone()).filter(|id| !id.is_empty()),
         episode_id: None,
@@ -696,11 +700,7 @@ fn job_to_queue_item(job: &HttpJob, live: Option<LiveSnapshot>) -> DownloadQueue
         queued_at: Some(job.queued_at.to_rfc3339()),
         last_updated_at: Some(job.updated_at.to_rfc3339()),
         attention_required: failed,
-        attention_reason: if failed {
-            job.error_reason.clone().or_else(|| job.error.clone())
-        } else {
-            None
-        },
+        attention_reason: if failed { job.error.clone() } else { None },
         download_client_item_id: job.id.clone(),
         download_id: job.download_id.clone(),
         import_status: None,

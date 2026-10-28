@@ -180,13 +180,15 @@ async fn expiry_cancels_a_pending_source_and_releases_its_retained_budget() {
         async fn search_raw_text(
             &self,
             _: RawTextSearchRequest,
-            _: CancellationToken,
+            cancel: CancellationToken,
         ) -> AppResult<IndexerSearchResponse> {
             let (send, receive) = oneshot::channel();
             self.0.send(send).unwrap();
-            // Model admission that has not started the provider operation timer.
-            let _ = receive.await;
-            unreachable!("the expired generation must drop this source future");
+            // A waiting source acknowledges cancellation before returning.
+            tokio::select! {
+                _ = cancel.cancelled() => Err(AppError::canceled("source cancelled")),
+                _ = receive => unreachable!("this fixture only stops on cancellation"),
+            }
         }
     }
     let (mut app, _) = crate::lib_tests::bootstrap();
@@ -237,6 +239,42 @@ async fn expiry_cancels_a_pending_source_and_releases_its_retained_budget() {
     .await
     .unwrap();
     assert_eq!(budget.used(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_tracks_disconnected_scoped_drivers_and_late_source_cleanup() {
+    let (app, mut reads) = fixture();
+    let worker = app.clone();
+    let caller = tokio::spawn(async move {
+        worker
+            .search_scoped_raw_page(principal("a"), "query".into(), sources(), 0, 100)
+            .await
+    });
+    let complete = tokio::time::timeout(Duration::from_secs(60), reads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let deadline = crate::RestoreDeadline::new();
+    let drain = app.restore_coordinator().drain(&deadline);
+    tokio::pin!(drain);
+    assert!(futures_util::poll!(&mut drain).is_pending());
+    assert!(!complete.is_closed());
+    complete.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(60), drain)
+        .await
+        .unwrap()
+        .unwrap();
+    let entries = app
+        .runtime
+        .acquisition
+        .interactive_release_searches
+        .lock()
+        .await;
+    assert!(entries.values().all(|entry| entry.cancel.is_cancelled()
+        && entry.snapshot.state == InteractiveReleaseSearchState::Completed));
+    assert!(reads.try_recv().is_err());
 }
 
 #[tokio::test(start_paused = true)]

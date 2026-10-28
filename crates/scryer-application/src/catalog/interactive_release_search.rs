@@ -666,7 +666,7 @@ impl AppUseCase {
 
         let job_id = Id::new().0;
         let scope_key = interactive_release_search_scope_key(&request);
-        let cancel = CancellationToken::new();
+        let cancel = self.restore_coordinator().shutdown_workers.child_token();
         let raw = if is_query {
             Some(
                 raw::RawSearchGeneration::new(
@@ -677,6 +677,7 @@ impl AppUseCase {
                     Some(Arc::downgrade(
                         &self.runtime.acquisition.interactive_release_searches,
                     )),
+                    self.restore_coordinator().clone(),
                 )
                 .await?,
             )

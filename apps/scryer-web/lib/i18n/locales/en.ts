@@ -3362,7 +3362,7 @@ const en: LocaleDictionary = {
   "error.reason.SECURITY_PASSWORD_HASH_VERSION_UNSUPPORTED":
     "Unsupported password hash version.",
   "error.reason.SECURITY_PASSWORD_OUT_OF_RANGE":
-    "Password must be at least the selected value characters.",
+    "Password must be at least {{minLength}} characters.",
   "error.reason.SECURITY_PASSWORD_REAUTHENTICATION_UNAVAILABLE_ACCOUNT":
     "Password reauthentication is unavailable for this account.",
   "error.reason.SECURITY_PASSWORD_REQUIRED": "Password is required.",
