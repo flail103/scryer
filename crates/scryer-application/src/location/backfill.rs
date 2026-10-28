@@ -59,13 +59,14 @@ use crate::{AppError, AppResult, AppUseCase, MediaFileHashCandidate};
 /// Hashing has its own cadence and lifetime; acquisition, RSS and pending
 /// releases never await this worker.
 const FULL_HASH_BACKFILL_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const FULL_HASH_BACKFILL_WINDOW_START_HOUR: u32 = 2;
 const FULL_HASH_BACKFILL_WINDOW_END_HOUR: u32 = 6;
 
 pub(crate) fn full_hash_backfill_window_open<T: TimeZone>(now: &DateTime<T>) -> bool {
-    now.hour() < FULL_HASH_BACKFILL_WINDOW_END_HOUR
+    (FULL_HASH_BACKFILL_WINDOW_START_HOUR..FULL_HASH_BACKFILL_WINDOW_END_HOUR).contains(&now.hour())
 }
 
-/// Resolves the next local midnight independently so daylight-saving changes
+/// Resolves the next local 02:00 window independently so daylight-saving changes
 /// never turn the overnight window into a fixed 24-hour delay.
 pub(crate) fn next_full_hash_backfill_window<T: TimeZone>(
     now: &DateTime<T>,
@@ -76,16 +77,18 @@ pub(crate) fn next_full_hash_backfill_window<T: TimeZone>(
     }
 
     let zone = now.timezone();
-    // Past the early return, tonight's window is never the answer: either it is
-    // already closed, or the caller asked for the window *after* this one. Both
-    // mean the next local midnight. Starting the scan on today's date instead
-    // let a call made inside the window return `now + 1 minute` — at 05:45 the
-    // next run landed at 05:46, so the tail of the window degenerated into a
-    // per-minute sweep rather than the 30-minute cadence the job schedules.
-    let mut date = now.date_naive().succ_opt()?;
+    // Before 02:00 today's window is still ahead. Otherwise, resolve tomorrow's
+    // opening rather than returning a minute inside the current window.
+    let mut date = if now.hour() < FULL_HASH_BACKFILL_WINDOW_START_HOUR {
+        now.date_naive()
+    } else {
+        now.date_naive().succ_opt()?
+    };
     for _ in 0..3 {
-        // If midnight is skipped locally, use the first valid minute in the window.
-        for minute in 0..FULL_HASH_BACKFILL_WINDOW_END_HOUR * 60 {
+        // If 02:00 is skipped locally, use the first valid minute in the window.
+        for minute in
+            FULL_HASH_BACKFILL_WINDOW_START_HOUR * 60..FULL_HASH_BACKFILL_WINDOW_END_HOUR * 60
+        {
             let local = date.and_hms_opt(minute / 60, minute % 60, 0)?;
             if let Some(candidate) = zone.from_local_datetime(&local).earliest()
                 && candidate > *now
@@ -99,9 +102,15 @@ pub(crate) fn next_full_hash_backfill_window<T: TimeZone>(
 }
 
 pub(crate) fn next_full_hash_backfill_run<T: TimeZone>(now: &DateTime<T>) -> Option<DateTime<Utc>> {
+    // Stay on local half-hour ticks instead of delaying from completion or
+    // immediately catching up on a tick missed while the previous batch ran.
+    let elapsed = chrono::Duration::seconds(
+        i64::from(now.minute() * 60 + now.second()) % FULL_HASH_BACKFILL_INTERVAL.as_secs() as i64,
+    ) + chrono::Duration::nanoseconds(i64::from(now.nanosecond()));
     let next_tick = now.with_timezone(&Utc)
         + chrono::Duration::from_std(FULL_HASH_BACKFILL_INTERVAL)
-            .expect("full-hash backfill interval fits chrono duration");
+            .expect("full-hash backfill interval fits chrono duration")
+        - elapsed;
     if full_hash_backfill_window_open(&next_tick.with_timezone(&now.timezone())) {
         Some(next_tick)
     } else {
@@ -135,8 +144,6 @@ pub async fn start_full_hash_backfill_worker(
             continue;
         }
 
-        next_run = next_full_hash_backfill_run(&now)
-            .expect("a future full-hash backfill run must be available");
         let run_app = app.clone();
         let mut run = tokio::spawn(async move {
             run_app
@@ -154,6 +161,9 @@ pub async fn start_full_hash_backfill_worker(
                 run.await
             },
         };
+        next_run =
+            next_full_hash_backfill_run(&app.runtime.environment.now().with_timezone(&Local))
+                .expect("a future full-hash backfill run must be available");
         match outcome {
             Ok(Ok(())) => {}
             Ok(Err(error)) => tracing::warn!(%error, "periodic full-hash backfill failed"),
@@ -753,9 +763,16 @@ mod tests {
     use chrono::{FixedOffset, TimeZone};
 
     #[test]
-    fn full_hash_backfill_window_follows_local_midnight_to_six() {
+    fn full_hash_backfill_window_follows_local_two_to_six() {
         let zone = FixedOffset::west_opt(6 * 60 * 60).unwrap();
-        for (hour, open) in [(23, false), (0, true), (5, true), (6, false)] {
+        for (hour, open) in [
+            (23, false),
+            (0, false),
+            (1, false),
+            (2, true),
+            (5, true),
+            (6, false),
+        ] {
             let now = zone.with_ymd_and_hms(2026, 9, 12, hour, 0, 0).unwrap();
             assert_eq!(full_hash_backfill_window_open(&now), open);
 
@@ -765,13 +782,48 @@ mod tests {
             if open {
                 assert_eq!(next, now);
             } else {
-                assert_eq!(next.hour(), 0);
+                assert_eq!(next.hour(), 2);
                 assert_eq!(
                     next.date_naive(),
                     now.date_naive() + chrono::Duration::days(i64::from(hour >= 6))
                 );
             }
         }
+    }
+
+    #[test]
+    fn full_hash_backfill_skips_ticks_missed_by_long_batches() {
+        let zone = FixedOffset::west_opt(6 * 60 * 60).unwrap();
+        let started = zone.with_ymd_and_hms(2026, 9, 12, 2, 0, 0).unwrap();
+        for (duration_minutes, next_hour, next_minute) in
+            [(5, 2, 30), (30, 3, 0), (45, 3, 0), (95, 4, 0)]
+        {
+            let completed = started + chrono::Duration::minutes(duration_minutes);
+            let next = next_full_hash_backfill_run(&completed)
+                .unwrap()
+                .with_timezone(&zone);
+            assert_eq!(
+                next,
+                zone.with_ymd_and_hms(2026, 9, 12, next_hour, next_minute, 0)
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn full_hash_backfill_next_tick_has_no_completion_time_drift() {
+        let zone = FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap();
+        let completed = zone
+            .with_ymd_and_hms(2026, 9, 12, 2, 45, 17)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
+        assert_eq!(
+            next_full_hash_backfill_run(&completed)
+                .unwrap()
+                .with_timezone(&zone),
+            zone.with_ymd_and_hms(2026, 9, 12, 3, 0, 0).unwrap()
+        );
     }
 
     #[test]
@@ -785,12 +837,14 @@ mod tests {
             zone.with_ymd_and_hms(2026, 9, 12, 2, 30, 0).unwrap()
         );
 
-        let final_run = zone.with_ymd_and_hms(2026, 9, 12, 5, 45, 0).unwrap();
-        assert_eq!(
-            next_full_hash_backfill_run(&final_run)
-                .unwrap()
-                .with_timezone(&zone),
-            zone.with_ymd_and_hms(2026, 9, 13, 0, 0, 0).unwrap()
-        );
+        for (hour, minute) in [(5, 45), (6, 0), (7, 15)] {
+            let completed = zone.with_ymd_and_hms(2026, 9, 12, hour, minute, 0).unwrap();
+            assert_eq!(
+                next_full_hash_backfill_run(&completed)
+                    .unwrap()
+                    .with_timezone(&zone),
+                zone.with_ymd_and_hms(2026, 9, 13, 2, 0, 0).unwrap()
+            );
+        }
     }
 }
