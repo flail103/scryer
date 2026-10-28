@@ -580,7 +580,7 @@ impl TitleFileMover for StorageOutage {
     async fn move_file(&self, request: FileMoveRequest<'_>) -> AppResult<VerifiedFile> {
         let failed = self
             .failures
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |left| left.checked_sub(1),

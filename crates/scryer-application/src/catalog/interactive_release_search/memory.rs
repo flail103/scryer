@@ -35,7 +35,7 @@ impl RawSearchBudget {
 
     pub(super) fn reserve(self: &Arc<Self>, bytes: usize) -> Option<MemoryCharge> {
         self.used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes).filter(|next| *next <= self.limit)
             })
             .ok()?;
@@ -63,7 +63,7 @@ impl MemoryCharge {
             if self
                 .pool
                 .used
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                     used.checked_add(additional)
                         .filter(|next| *next <= self.pool.limit)
                 })

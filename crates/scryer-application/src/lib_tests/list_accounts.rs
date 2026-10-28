@@ -211,7 +211,7 @@ impl ListProviderClient for Client {
         self.account_reads.fetch_add(1, Ordering::SeqCst);
         if self
             .account_outages
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(1)
             })
             .is_ok()
@@ -996,7 +996,7 @@ impl FailRotatedWrite {
         if account.status == UserListAccountStatus::Active
             && self
                 .failing_active_writes
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok()

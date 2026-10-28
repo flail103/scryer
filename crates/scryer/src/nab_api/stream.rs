@@ -169,7 +169,7 @@ mod tests {
     type Lease = Arc<Charge>;
 
     fn reserve(used: &Arc<AtomicUsize>, limit: usize, bytes: usize) -> io::Result<Lease> {
-        used.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+        used.try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
             current.checked_add(bytes).filter(|next| *next <= limit)
         })
         .map_err(|_| io::Error::other("full"))?;

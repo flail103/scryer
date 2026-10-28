@@ -428,13 +428,13 @@ fn build_test_plugin_fixture(ctx: &TaskContext) -> Result<()> {
 
     step("Building test indexer WebAssembly fixture from source");
     let mut locate_rustc = ctx.command_in("rustup", &ctx.repo_root);
-    locate_rustc.args(["which", "rustc", "--toolchain", "1.97.1"]);
+    locate_rustc.args(["which", "rustc", "--toolchain", "1.99.1"]);
     let rustc = PathBuf::from(run_capture(&mut locate_rustc)?.trim());
     let mut build = ctx.command_in("rustup", &ctx.repo_root);
     build
         .args([
             "run",
-            "1.97.1",
+            "1.99.1",
             "cargo",
             "build",
             "--locked",
