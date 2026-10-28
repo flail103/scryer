@@ -455,14 +455,7 @@ impl UserUiSettingsRepository for UserStore {
                 if let Some(columns) = &settings.table_columns {
                     replace_ui_table_columns_tx(tx, &user_id, None, columns).await?;
                 }
-                load_ui_settings_by_user_id_tx(tx, &user_id)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found_reason(
-                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
-                            format!("UI settings for user {user_id}"),
-                        )
-                    })
+                load_ui_settings_by_user_id_tx(tx, &user_id).await
             })
         })
         .await
@@ -479,19 +472,6 @@ impl UserUiSettingsRepository for UserStore {
             let update = update.clone();
             Box::pin(async move {
                 let now = Utc::now();
-                // Settings are read through their row, so a first catalog save
-                // creates it with every other preference at its default.
-                tx.execute(
-                    "INSERT INTO user_ui_settings (user_id, created_at, updated_at)
-                     VALUES ({}, {}, {})
-                     ON CONFLICT(user_id) DO NOTHING",
-                    &[
-                        SqlArg::Text(user_id.clone()),
-                        SqlArg::Timestamp(now),
-                        SqlArg::Timestamp(now),
-                    ],
-                )
-                .await?;
                 if let Some(view_mode) = update.view_mode {
                     tx.execute(
                         "INSERT INTO user_ui_catalog_views (
@@ -521,14 +501,7 @@ impl UserUiSettingsRepository for UserStore {
                     )
                     .await?;
                 }
-                load_ui_settings_by_user_id_tx(tx, &user_id)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found_reason(
-                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
-                            format!("UI settings for user {user_id}"),
-                        )
-                    })
+                load_ui_settings_by_user_id_tx(tx, &user_id).await
             })
         })
         .await
@@ -545,19 +518,6 @@ impl UserUiSettingsRepository for UserStore {
             let layout = layout.clone();
             Box::pin(async move {
                 let now = Utc::now();
-                // Settings are read through their row, so a first layout save
-                // creates it with every other preference at its default.
-                tx.execute(
-                    "INSERT INTO user_ui_settings (user_id, created_at, updated_at)
-                     VALUES ({}, {}, {})
-                     ON CONFLICT(user_id) DO NOTHING",
-                    &[
-                        SqlArg::Text(user_id.clone()),
-                        SqlArg::Timestamp(now),
-                        SqlArg::Timestamp(now),
-                    ],
-                )
-                .await?;
                 let breakpoint = layout.breakpoint.as_str().to_string();
                 tx.execute(
                     "INSERT INTO user_ui_dashboard_layouts (
@@ -603,14 +563,7 @@ impl UserUiSettingsRepository for UserStore {
                     )
                     .await?;
                 }
-                load_ui_settings_by_user_id_tx(tx, &user_id)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found_reason(
-                            crate::error_reasons::IDENTITY_USER_UI_SETTINGS_NOT_FOUND,
-                            format!("UI settings for user {user_id}"),
-                        )
-                    })
+                load_ui_settings_by_user_id_tx(tx, &user_id).await
             })
         })
         .await
@@ -649,7 +602,7 @@ impl UserUiSettingsRepository for UserStore {
                             .await?;
                         }
                     }
-                    load_ui_settings_by_user_id_tx(tx, &user_id).await
+                    load_ui_settings_by_user_id_tx(tx, &user_id).await.map(Some)
                 })
             },
         )
@@ -1133,20 +1086,31 @@ const UI_SETTINGS_SELECT: &str =
        FROM user_ui_settings
       WHERE user_id = {}";
 
+const UI_LANGUAGE_SELECT: &str = "SELECT locale FROM users WHERE id = {}";
+
+// The general preferences and each per-surface table (columns, catalog views,
+// dashboard layouts) are independent. A user without a user_ui_settings row
+// has the general preferences at their application defaults, whatever the
+// other tables hold, so a save on one surface never writes another's values.
+// Settings read as `None` only for a user that does not exist.
 async fn load_ui_settings_by_user_id(
     datastore: &StoreDatastore,
     user_id: &str,
 ) -> AppResult<Option<UiSettings>> {
-    let row = SqlRuntime::fetch_optional(
-        datastore.read_exec(),
-        UI_SETTINGS_SELECT,
-        &[SqlArg::Text(user_id.to_string())],
-    )
-    .await?;
-    let Some(row) = row else {
-        return Ok(None);
+    let args = [SqlArg::Text(user_id.to_string())];
+    let row = SqlRuntime::fetch_optional(datastore.read_exec(), UI_SETTINGS_SELECT, &args).await?;
+    let mut settings = match row {
+        Some(row) => row_to_ui_settings(&row)?,
+        None => {
+            let Some(user) =
+                SqlRuntime::fetch_optional(datastore.read_exec(), UI_LANGUAGE_SELECT, &args)
+                    .await?
+            else {
+                return Ok(None);
+            };
+            default_ui_settings(user_id, Some(&user))?
+        }
     };
-    let mut settings = row_to_ui_settings(&row)?;
     settings.table_columns = load_ui_table_columns(datastore.read_exec(), user_id).await?;
     settings.catalog_views = load_ui_catalog_views(datastore.read_exec(), user_id).await?;
     settings.dashboard_layouts = load_ui_dashboard_layouts(datastore.read_exec(), user_id).await?;
@@ -1156,21 +1120,29 @@ async fn load_ui_settings_by_user_id(
 async fn load_ui_settings_by_user_id_tx(
     tx: &mut SqlTx<'_>,
     user_id: &str,
-) -> AppResult<Option<UiSettings>> {
-    let row = SqlRuntime::fetch_optional(
-        SqlExec::Tx(tx),
-        UI_SETTINGS_SELECT,
-        &[SqlArg::Text(user_id.to_string())],
-    )
-    .await?;
-    let Some(row) = row else {
-        return Ok(None);
+) -> AppResult<UiSettings> {
+    let args = [SqlArg::Text(user_id.to_string())];
+    let row = SqlRuntime::fetch_optional(SqlExec::Tx(tx), UI_SETTINGS_SELECT, &args).await?;
+    let mut settings = match row {
+        Some(row) => row_to_ui_settings(&row)?,
+        None => {
+            let language =
+                SqlRuntime::fetch_optional(SqlExec::Tx(tx), UI_LANGUAGE_SELECT, &args).await?;
+            default_ui_settings(user_id, language.as_ref())?
+        }
     };
-    let mut settings = row_to_ui_settings(&row)?;
     settings.table_columns = load_ui_table_columns(SqlExec::Tx(tx), user_id).await?;
     settings.catalog_views = load_ui_catalog_views(SqlExec::Tx(tx), user_id).await?;
     settings.dashboard_layouts = load_ui_dashboard_layouts(SqlExec::Tx(tx), user_id).await?;
-    Ok(Some(settings))
+    Ok(settings)
+}
+
+fn default_ui_settings(user_id: &str, language: Option<&SqlRow>) -> AppResult<UiSettings> {
+    let mut settings = UiSettings::defaults_for_user(user_id);
+    if let Some(row) = language {
+        settings.language = row.opt_text("locale")?;
+    }
+    Ok(settings)
 }
 
 async fn upsert_ui_settings_tx(
@@ -2147,8 +2119,9 @@ mod tests {
 
         let missing = UserUiSettingsRepository::get_by_user_id(&store, &user.id)
             .await
-            .expect("load missing UI settings");
-        assert!(missing.is_none());
+            .expect("load missing UI settings")
+            .expect("unsaved settings read as defaults");
+        assert_eq!(missing, UiSettings::defaults_for_user(user.id.clone()));
 
         let stored = UserUiSettingsRepository::upsert(
             &store,
@@ -2319,6 +2292,92 @@ mod tests {
         }
     }
 
+    async fn has_ui_settings_row(store: &UserStore, user_id: &str) -> bool {
+        SqlRuntime::fetch_optional(
+            store.datastore.read_exec(),
+            "SELECT user_id FROM user_ui_settings WHERE user_id = {}",
+            &[SqlArg::Text(user_id.to_string())],
+        )
+        .await
+        .expect("query settings row")
+        .is_some()
+    }
+
+    #[tokio::test]
+    async fn layout_and_catalog_saves_never_write_general_preferences() {
+        let store = test_store().await;
+        let user = UserRepository::create(&store, test_user("isolation_user"))
+            .await
+            .expect("create user");
+        let defaults = UiSettings::defaults_for_user(user.id.clone());
+
+        let layout = UiDashboardLayout {
+            breakpoint: UiDashboardBreakpoint::Lg,
+            columns: 12,
+            items: vec![dashboard_item("panel-one", 0, 0)],
+        };
+        let saved =
+            UserUiSettingsRepository::set_dashboard_layout(&store, &user.id, layout.clone())
+                .await
+                .expect("save layout");
+        assert_eq!(saved.no_glow, defaults.no_glow);
+        assert_eq!(saved.theme, defaults.theme);
+        assert_eq!(saved.dashboard_layouts, vec![layout.clone()]);
+
+        let viewed = UserUiSettingsRepository::set_catalog_view(
+            &store,
+            &user.id,
+            UiCatalogViewUpdate {
+                device_class: UiDeviceClass::Desktop,
+                facet: UiSettingsFacet::Movies,
+                view_mode: Some(UiCatalogViewMode::PosterTable),
+                columns: None,
+            },
+        )
+        .await
+        .expect("save catalog view");
+        assert_eq!(viewed.no_glow, defaults.no_glow);
+
+        let reset = UserUiSettingsRepository::reset_dashboard_layouts(&store, &user.id, None)
+            .await
+            .expect("reset layouts")
+            .expect("settings after reset");
+        assert_eq!(reset.no_glow, defaults.no_glow);
+        assert!(!has_ui_settings_row(&store, &user.id).await);
+
+        let loaded = UserUiSettingsRepository::get_by_user_id(&store, &user.id)
+            .await
+            .expect("load settings")
+            .expect("settings without a row");
+        assert_eq!(loaded.no_glow, defaults.no_glow);
+        assert_eq!(loaded.catalog_views.len(), 1);
+
+        // A stored choice survives saves on the other surfaces untouched.
+        let update = UiSettingsUpdate {
+            theme: loaded.theme,
+            palette: loaded.palette,
+            date_time_format: loaded.date_time_format,
+            highlight_color: None,
+            secondary_color: None,
+            high_contrast_mode: false,
+            reduce_motion: false,
+            hide_sponsor_button: false,
+            no_glow: false,
+            density: loaded.density,
+            sidebar_mode: loaded.sidebar_mode,
+            default_landing_view: loaded.default_landing_view,
+            language: None,
+            table_columns: None,
+        };
+        UserUiSettingsRepository::upsert(&store, &user.id, update)
+            .await
+            .expect("turn glow on");
+        let saved = UserUiSettingsRepository::set_dashboard_layout(&store, &user.id, layout)
+            .await
+            .expect("save layout again");
+        assert!(!saved.no_glow);
+    }
+
     #[tokio::test]
     async fn dashboard_layouts_replace_reset_and_cascade_with_the_user() {
         let store = test_store().await;
@@ -2340,7 +2399,7 @@ mod tests {
         )
         .await
         .expect("save lg layout");
-        // A first layout save creates the settings row with defaults.
+        // A layout save leaves the general preferences at their defaults.
         assert_eq!(saved.theme, UiTheme::default());
         assert_eq!(
             saved.dashboard_layouts,
@@ -2431,7 +2490,7 @@ mod tests {
             .await
             .expect("create second user");
 
-        // A first catalog save creates the settings row with defaults.
+        // A catalog save leaves the general preferences at their defaults.
         let desktop = UserUiSettingsRepository::set_catalog_view(
             &store,
             &user_a.id,
@@ -2589,8 +2648,9 @@ mod tests {
         // Nothing leaks to the other user.
         let other = UserUiSettingsRepository::get_by_user_id(&store, &user_b.id)
             .await
-            .expect("load other user's settings");
-        assert!(other.is_none());
+            .expect("load other user's settings")
+            .expect("the other user exists");
+        assert_eq!(other, UiSettings::defaults_for_user(user_b.id.clone()));
 
         // Deleting the user removes every preference row it owned.
         UserRepository::delete(&store, &user_a.id)
