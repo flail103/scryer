@@ -809,6 +809,14 @@ pub const BACKUP_TABLE_CATALOG: &[BackupTableCatalogEntry] = &[
         classification: BackupTableClassification::Export,
     },
     BackupTableCatalogEntry {
+        table: "indexer_api_clients",
+        classification: BackupTableClassification::Export,
+    },
+    BackupTableCatalogEntry {
+        table: "indexer_api_client_grants",
+        classification: BackupTableClassification::Export,
+    },
+    BackupTableCatalogEntry {
         table: "indexer_api_quotas",
         classification: BackupTableClassification::Export,
     },

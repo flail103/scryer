@@ -5472,7 +5472,7 @@ mod tests {
                 scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
                 None,
                 "true".into(),
-                "test".into(),
+                "test",
                 None,
             )
             .await

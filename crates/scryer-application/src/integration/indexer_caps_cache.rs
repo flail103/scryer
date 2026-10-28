@@ -312,7 +312,7 @@ impl UnansweredCapsRequests {
 fn connection_key(config: &IndexerConfig) -> String {
     crate::helpers::blake3_identity_hex(
         crate::helpers::HashDomain::IndexerSecret,
-        &connection_identity(config).to_string(),
+        connection_identity(config).to_string(),
     )
 }
 

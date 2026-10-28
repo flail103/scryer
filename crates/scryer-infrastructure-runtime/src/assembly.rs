@@ -2758,6 +2758,18 @@ mod tests {
 
     async fn seed_backup_matrix_lists(pool: &sqlx::SqlitePool) -> AppResult<()> {
         for statement in [
+            "INSERT INTO indexers
+             (id, name, provider_type, base_url, is_enabled, enable_interactive_search,
+              enable_auto_search, created_at, updated_at)
+             VALUES ('backup-indexer', 'Fixture indexer', 'newznab', 'https://example.invalid',
+                     1, 1, 1, '2026-01-01', '2026-01-01')",
+            "INSERT INTO indexer_api_clients
+             (id, name, enabled, protocols_json, lookup_id, secret_hash, key_generation,
+              revision, created_at, updated_at)
+             VALUES ('backup-client', 'Fixture client', 1, '[\"newznab\"]', 'fixture-lookup',
+                     'fixture-hash', 1, 1, '2026-01-01', '2026-01-01')",
+            "INSERT INTO indexer_api_client_grants (client_id, indexer_id, categories_json)
+             VALUES ('backup-client', 'backup-indexer', '[2000]')",
             "INSERT INTO user_list_accounts
              (id, user_id, provider, external_user_id, username, credential_encrypted,
               linked_at, updated_at)
@@ -2803,6 +2815,10 @@ mod tests {
 
     async fn verify_backup_matrix_lists(pool: &sqlx::SqlitePool) -> AppResult<()> {
         for (query, expected) in [
+            ("SELECT secret_hash FROM indexer_api_clients WHERE id = 'backup-client'",
+             "fixture-hash"),
+            ("SELECT categories_json FROM indexer_api_client_grants WHERE client_id = 'backup-client' AND indexer_id = 'backup-indexer'",
+             "[2000]"),
             ("SELECT credential_encrypted FROM user_list_accounts WHERE id = 'backup-account'",
              "fixture-ciphertext"),
             ("SELECT credential_id || ':' || on_leave FROM list_subscriptions WHERE id = 'backup-list'",

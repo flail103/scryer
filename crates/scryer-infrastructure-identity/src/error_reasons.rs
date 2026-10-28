@@ -207,6 +207,10 @@ pub const IDENTITY_TOTP_DISABLEMENT_SESSION_STALE: &str = "IDENTITY_TOTP_DISABLE
 pub const IDENTITY_TOTP_ENROLLMENT_SESSION_STALE: &str = "IDENTITY_TOTP_ENROLLMENT_SESSION_STALE";
 
 /// UI settings for user {user_id}
+#[allow(
+    dead_code,
+    reason = "retain the stable reason code for existing clients"
+)]
 pub const IDENTITY_USER_UI_SETTINGS_NOT_FOUND: &str = "IDENTITY_USER_UI_SETTINGS_NOT_FOUND";
 
 /// cannot remove the last available sign-in method

@@ -1011,7 +1011,7 @@ async fn apply_result_keeps_retrying_no_video_import_after_unchanged_checks() {
 
     // Unchanged checks past the two fast retries keep retrying at the slow
     // cadence until the 48-hour ceiling.
-    assert!(5 < NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS);
+    const { assert!(5 < NO_VIDEO_BLOCK_AFTER_UNCHANGED_ATTEMPTS) };
     for attempt in 3..=5 {
         let before = Utc::now();
         assert!(!apply_import_result(&app, &mut td, result.clone(), 0).await);

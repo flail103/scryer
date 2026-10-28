@@ -8780,6 +8780,7 @@ mod tests {
     fn direct_nab_provider_family_includes_specialized_newznab_indexers() {
         for provider_type in [
             "amenzb",
+            "aninzb",
             "animetosho-xyz",
             "dognzb",
             "newznab",
@@ -8788,7 +8789,6 @@ mod tests {
         ] {
             assert!(is_nab_provider_type(provider_type), "{provider_type}");
         }
-        assert!(!is_nab_provider_type("aninzb"));
         assert!(!is_nab_provider_type("torrent-rss"));
     }
 

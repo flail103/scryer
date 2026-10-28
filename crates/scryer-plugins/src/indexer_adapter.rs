@@ -197,6 +197,10 @@ impl WasmIndexerClient {
     /// first operation; its state then remains alive until a trap, timeout,
     /// cancellation, provider reload, or configuration change replaces this
     /// client.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "construction requires the component, indexer configuration, and host context"
+    )]
     pub(crate) fn new_component_with_plugin_settings(
         wasm_bytes: Vec<u8>,
         descriptor: PluginDescriptor,

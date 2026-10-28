@@ -861,8 +861,10 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
             "missing mutation {name}"
         );
     }
+    // Folder creation adds one mutation: 283->284.
+    assert!(mutation_field_names.contains(&"createFolder"));
     assert_eq!(
-        mutation_field_count, 283,
+        mutation_field_count, 284,
         "mutation fields: {mutation_field_names:?}"
     );
     // Cross-library transfer (T082, FR-055/FR-056) surfaces destination-title

@@ -3,6 +3,10 @@
 #[path = "integration_nab_requests/admission.rs"]
 mod admission;
 mod common;
+#[allow(
+    dead_code,
+    reason = "this integration test imports only part of the application module"
+)]
 #[path = "../src/nab_api/mod.rs"]
 mod nab_api;
 

@@ -2883,19 +2883,13 @@ pub enum IndexerFirstPageVerdict {
     Stop { listing_open: bool },
 }
 
+type IndexerFirstPageFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = IndexerFirstPageVerdict> + Send>>;
+
 /// Asked with the first page's content fingerprint (see
 /// `indexer_listing_page_fingerprint`).
 #[derive(Clone)]
-pub struct IndexerFirstPageGate(
-    Arc<
-        dyn Fn(
-                String,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = IndexerFirstPageVerdict> + Send>,
-            > + Send
-            + Sync,
-    >,
-);
+pub struct IndexerFirstPageGate(Arc<dyn Fn(String) -> IndexerFirstPageFuture + Send + Sync>);
 
 impl IndexerFirstPageGate {
     pub fn new<F, Fut>(gate: F) -> Self

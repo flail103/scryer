@@ -813,10 +813,10 @@ impl RawSearchGeneration {
                             });
                         }
                     }
-                    if let Some(cursor) = &page.next_cursor {
-                        if !source.visited.insert(cursor.clone()) {
-                            source.refusal_reason = Some(reasons::CURSOR_REPEATED);
-                        }
+                    if let Some(cursor) = &page.next_cursor
+                        && !source.visited.insert(cursor.clone())
+                    {
+                        source.refusal_reason = Some(reasons::CURSOR_REPEATED);
                     }
                     source.cursor = page.next_cursor.clone();
                     source.exhausted = page.completion.is_complete()

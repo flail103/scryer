@@ -3,6 +3,10 @@
 use std::{collections::HashMap, time::Duration};
 
 mod common;
+#[allow(
+    dead_code,
+    reason = "this integration test imports only part of the application module"
+)]
 #[path = "../src/nab_api/mod.rs"]
 mod nab_api;
 
@@ -127,7 +131,7 @@ async fn authenticated_http_json_upstream_preserves_xml_metadata_and_stable_link
             scryer_application::EXPERIMENTAL_FEATURES_ENABLED_KEY,
             None,
             "true".into(),
-            "test".into(),
+            "test",
             None,
         )
         .await
