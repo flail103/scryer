@@ -130,6 +130,11 @@ jobs:
         working-directory: apps/scryer-web
         run: npm run lint
 
+      - name: Check formatting
+        if: steps.scope.outputs.run == 'true'
+        working-directory: apps/scryer-web
+        run: npm run format:check
+
       - name: Run web unit tests
         if: steps.scope.outputs.run == 'true'
         working-directory: apps/scryer-web
