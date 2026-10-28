@@ -112,6 +112,18 @@ const QUEUE_PREVIEW_LIMIT: Record<DashboardTier, number> = {
  */
 const TABLE_PANE_CLASS = "h-full overflow-y-auto";
 /**
+ * Provider tables pick their columns from their own width, not the panel's
+ * grid size: a few grid columns on a wide screen have room for every column,
+ * and the same span on a narrow one does not. Each optional column shows from
+ * the width its content needs, so narrowing the panel drops the type first,
+ * then the counts, down to name and status.
+ */
+const PROVIDER_TABLE_PANE_CLASS = `${TABLE_PANE_CLASS} @container`;
+const INDEXER_STATS_COLUMN = "hidden @min-[440px]:table-cell";
+const INDEXER_TYPE_COLUMN = "hidden @min-[580px]:table-cell";
+const CLIENT_STATS_COLUMN = "hidden @min-[340px]:table-cell";
+const CLIENT_TYPE_COLUMN = "hidden @min-[480px]:table-cell";
+/**
  * Header stays put while rows scroll. `sticky` goes on the header *cells*, not
  * the header row: a sticky `<tr>` is constrained to its `<thead>`, which is one
  * row tall, so it has no travel and scrolls away with the body. A `<th>` is
@@ -1013,7 +1025,7 @@ export function RecentlyImportedPanel({ items, tier }: { items: DashboardImporte
 
 // ── Indexers ────────────────────────────────────────────────────────────────
 
-export function IndexersPanel({ overview, tier }: { overview: DashboardOverview | null; tier: DashboardTier }) {
+export function IndexersPanel({ overview }: { overview: DashboardOverview | null }) {
   const t = useTranslate();
   const { user } = useAuth();
   const canViewErrorHistory = hasAnyAppPermission(user, [
@@ -1084,33 +1096,28 @@ export function IndexersPanel({ overview, tier }: { overview: DashboardOverview 
       ) : (
         <Table
           density="dense"
-          className={tier === "compact" ? undefined : "min-w-[440px]"}
-          wrapperClassName={TABLE_PANE_CLASS}
+          wrapperClassName={PROVIDER_TABLE_PANE_CLASS}
         >
           <TableHeader>
             <TableRow>
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnIndexer")}
               </TableHead>
-              {tier === "expanded" ? (
-                <TableHead className={TABLE_HEAD_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_CLASS, INDEXER_TYPE_COLUMN)}>
                   {t("dashboard.columnType")}
                 </TableHead>
-              ) : null}
-              {tier === "compact" ? null : <>
-              <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
+                            <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
                 {t("dashboard.columnSearch")}
               </TableHead>
-              <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
                 {t("dashboard.columnGrab")}
               </TableHead>
-              <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, INDEXER_STATS_COLUMN)}>
                 {t("dashboard.columnFail")}
               </TableHead>
-              <TableHead className={TABLE_HEAD_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_CLASS, INDEXER_STATS_COLUMN)}>
                 {t("dashboard.columnQuota")}
               </TableHead>
-              </>}
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnStatus")}
               </TableHead>
@@ -1130,20 +1137,18 @@ export function IndexersPanel({ overview, tier }: { overview: DashboardOverview 
                       {indexer.name}
                     </span>
                   </TableCell>
-                  {tier === "expanded" ? (
-                    <TableCell className="px-3 py-[7px] text-[11px] text-[var(--scry-muted)]">
+                  <TableCell className={cn("px-3 py-[7px] text-[11px] text-[var(--scry-muted)]", INDEXER_TYPE_COLUMN)}>
                       {indexer.providerType}
                     </TableCell>
-                  ) : null}
-                  {tier === "compact" ? null : <>
-                  <TableCell className="px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]">
+                                    <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]", INDEXER_STATS_COLUMN)}>
                     {stat?.queriesLast24H ?? 0}
                   </TableCell>
-                  <TableCell className="px-3 py-[7px] text-right tabular-nums text-[var(--scry-success-text)]">
+                  <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-success-text)]", INDEXER_STATS_COLUMN)}>
                     {stat?.grabsLast24H ?? 0}
                   </TableCell>
                   <TableCell
                     className={cn(
+                      INDEXER_STATS_COLUMN,
                       "px-3 py-[7px] text-right tabular-nums",
                       failed > 0
                         ? "text-[var(--scry-danger-text)]"
@@ -1152,13 +1157,12 @@ export function IndexersPanel({ overview, tier }: { overview: DashboardOverview 
                   >
                     {failed}
                   </TableCell>
-                  <TableCell className="px-3 py-[7px]">
+                  <TableCell className={cn("px-3 py-[7px]", INDEXER_STATS_COLUMN)}>
                     <QuotaBar
                       current={stat?.apiCurrent ?? null}
                       max={stat?.apiMax ?? null}
                     />
                   </TableCell>
-                  </>}
                   <TableCell className="px-3 py-[7px]">
                     <ProviderStatus
                       isEnabled={indexer.isEnabled}
@@ -1318,9 +1322,7 @@ function ProviderStatus({
 export function DownloadClientsPanel({
   overview,
   queueItems,
-  tier,
 }: {
-  tier: DashboardTier;
   overview: DashboardOverview | null;
   queueItems: DownloadQueueItem[];
 }) {
@@ -1386,27 +1388,22 @@ export function DownloadClientsPanel({
       ) : (
         <Table
           density="dense"
-          className={tier === "compact" ? undefined : "min-w-[420px]"}
-          wrapperClassName={TABLE_PANE_CLASS}
+          wrapperClassName={PROVIDER_TABLE_PANE_CLASS}
         >
           <TableHeader>
             <TableRow>
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnClient")}
               </TableHead>
-              {tier === "expanded" ? (
-                <TableHead className={TABLE_HEAD_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_CLASS, CLIENT_TYPE_COLUMN)}>
                   {t("dashboard.columnType")}
                 </TableHead>
-              ) : null}
-              {tier === "compact" ? null : <>
-              <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
+                            <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}>
                 {t("dashboard.columnActive")}
               </TableHead>
-              <TableHead className={TABLE_HEAD_RIGHT_CLASS}>
+              <TableHead className={cn(TABLE_HEAD_RIGHT_CLASS, CLIENT_STATS_COLUMN)}>
                 {t("dashboard.columnQueue")}
               </TableHead>
-              </>}
               <TableHead className={TABLE_HEAD_CLASS}>
                 {t("dashboard.columnStatus")}
               </TableHead>
@@ -1431,14 +1428,12 @@ export function DownloadClientsPanel({
                       </span>
                     </span>
                   </TableCell>
-                  {tier === "expanded" ? (
-                    <TableCell className="px-3 py-[7px] text-[11px] text-[var(--scry-muted)]">
+                  <TableCell className={cn("px-3 py-[7px] text-[11px] text-[var(--scry-muted)]", CLIENT_TYPE_COLUMN)}>
                       {client.clientType}
                     </TableCell>
-                  ) : null}
-                  {tier === "compact" ? null : <>
-                  <TableCell
+                                    <TableCell
                     className={cn(
+                      CLIENT_STATS_COLUMN,
                       "px-3 py-[7px] text-right tabular-nums",
                       counts.active > 0
                         ? "text-[var(--scry-ink2)]"
@@ -1447,10 +1442,9 @@ export function DownloadClientsPanel({
                   >
                     {counts.active}
                   </TableCell>
-                  <TableCell className="px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]">
+                  <TableCell className={cn("px-3 py-[7px] text-right tabular-nums text-[var(--scry-muted)]", CLIENT_STATS_COLUMN)}>
                     {counts.queued}
                   </TableCell>
-                  </>}
                   <TableCell className="px-3 py-[7px]">
                     {/* `lastSeenAt` is the last successful contact, not the
                         time of the error, so it is not passed as an error age. */}

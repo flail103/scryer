@@ -69,14 +69,14 @@ export const DASHBOARD_PANEL_RENDERERS: Readonly<
       <RecentlyImportedPanel items={data.recentImports} tier={tier} />
     </DashboardPanelLoad>
   ),
-  indexers: ({ data, tier }) => (
+  indexers: ({ data }) => (
     <DashboardPanelLoad state={data.panels.overview}>
-      <IndexersPanel overview={data.overview} tier={tier} />
+      <IndexersPanel overview={data.overview} />
     </DashboardPanelLoad>
   ),
-  "download-clients": ({ data, tier }) => (
+  "download-clients": ({ data }) => (
     <DashboardPanelLoad state={combinePanelStates(data.panels.overview, data.panels.queue)}>
-      <DownloadClientsPanel overview={data.overview} queueItems={data.queueItems} tier={tier} />
+      <DownloadClientsPanel overview={data.overview} queueItems={data.queueItems} />
     </DashboardPanelLoad>
   ),
   storage: ({ data, tier }) => (
