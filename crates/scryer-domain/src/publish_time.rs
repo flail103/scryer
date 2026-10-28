@@ -53,10 +53,10 @@ fn believable(time: DateTime<Utc>) -> Option<DateTime<Utc>> {
 /// `at`, and uppercase a lowercase `t` separator or `z` designator.
 fn clean(value: &str) -> String {
     let mut text = value.trim();
-    if let Some(open) = text.rfind('(') {
-        if text.ends_with(')') {
-            text = text[..open].trim_end();
-        }
+    if let Some(open) = text.rfind('(')
+        && text.ends_with(')')
+    {
+        text = text[..open].trim_end();
     }
     let mut tokens: Vec<String> = text
         .split_whitespace()
@@ -68,12 +68,11 @@ fn clean(value: &str) -> String {
     }
     for token in &mut tokens {
         strip_ordinal(token);
-        if token.len() >= 11 {
-            if let Some(tee) = token.find(['t', 'T']) {
-                if token[..tee].chars().all(|c| c.is_ascii_digit() || c == '-') {
-                    token.replace_range(tee..=tee, "T");
-                }
-            }
+        if token.len() >= 11
+            && let Some(tee) = token.find(['t', 'T'])
+            && token[..tee].chars().all(|c| c.is_ascii_digit() || c == '-')
+        {
+            token.replace_range(tee..=tee, "T");
         }
         if token.ends_with('z') {
             token.replace_range(token.len() - 1.., "Z");
@@ -103,11 +102,12 @@ fn is_weekday(token: &str) -> bool {
 fn strip_ordinal(token: &mut String) {
     let lower = token.to_ascii_lowercase();
     for suffix in ["st", "nd", "rd", "th"] {
-        if let Some(digits) = lower.strip_suffix(suffix) {
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-                token.truncate(digits.len());
-                return;
-            }
+        if let Some(digits) = lower.strip_suffix(suffix)
+            && !digits.is_empty()
+            && digits.chars().all(|c| c.is_ascii_digit())
+        {
+            token.truncate(digits.len());
+            return;
         }
     }
 }
