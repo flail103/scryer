@@ -176,8 +176,12 @@ impl SetupChallenge {
             }),
         }
     }
+    // Exclude lookalikes: I/L/1, O/Q/0, B/8, G/6, S/5 and Z/2.
+    const CODE_ALPHABET: &[u8] = b"ACDEFHJKMNPRTUVWXY3479";
+
     pub fn initialize(&self) -> AppResult<String> {
-        const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+        const ALPHABET: &[u8] = SetupChallenge::CODE_ALPHABET;
+        const ACCEPT_BELOW: usize = 256 - (256 % ALPHABET.len());
         let mut code = String::new();
         while code.len() < 6 {
             let mut bytes = [0u8; 16];
@@ -185,8 +189,8 @@ impl SetupChallenge {
                 .fill(&mut bytes)
                 .map_err(|_| AppError::Repository("setup code generation failed".into()))?;
             for byte in bytes {
-                if byte < 248 && code.len() < 6 {
-                    code.push(ALPHABET[usize::from(byte) % 31] as char);
+                if usize::from(byte) < ACCEPT_BELOW && code.len() < 6 {
+                    code.push(ALPHABET[usize::from(byte) % ALPHABET.len()] as char);
                 }
             }
         }
@@ -284,6 +288,24 @@ impl SetupChallenge {
 mod tests {
     use super::*;
     const CLIENT: IpAddr = IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
+    #[test]
+    fn initial_auth_code_alphabet_excludes_lookalikes() {
+        let alphabet = SetupChallenge::CODE_ALPHABET;
+        assert!(alphabet.len() >= 20);
+        for character in b"ILOQBGSZ012568" {
+            assert!(!alphabet.contains(character));
+        }
+        let unique: std::collections::HashSet<_> = alphabet.iter().collect();
+        assert_eq!(unique.len(), alphabet.len());
+        let code = SetupChallenge::default().initialize().unwrap();
+        assert_eq!(code.as_bytes()[3], b'-');
+        assert!(
+            code.bytes()
+                .filter(|byte| *byte != b'-')
+                .all(|byte| alphabet.contains(&byte))
+        );
+    }
 
     #[test]
     fn initial_auth_code_is_retryable_until_commit_and_accepts_display_variants() {

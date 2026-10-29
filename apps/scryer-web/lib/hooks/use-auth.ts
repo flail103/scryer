@@ -414,6 +414,16 @@ async function computeAuthBootstrapSnapshot(): Promise<AuthBootstrapSnapshot> {
   };
 }
 
+/** Reload the policy and session after the first-run authentication decision. */
+export async function refreshInitialAuthenticationSession(
+  adopt: () => void,
+): Promise<void> {
+  await authBootstrapPromise;
+  adopt();
+  authBootstrapSnapshot = null;
+  await loadAuthBootstrapSnapshot();
+}
+
 function loadAuthBootstrapSnapshot(): Promise<AuthBootstrapSnapshot> {
   if (authBootstrapSnapshot) {
     return Promise.resolve(authBootstrapSnapshot);

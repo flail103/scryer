@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Navigate, useLocation } from "react-router";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Navigate, useLocation, useNavigate } from "react-router";
 import { useQuery, useMutation } from "urql";
 import { authRuntimeStateQuery } from "@/lib/graphql/queries";
 import { completeInitialAuthenticationMutation } from "@/lib/graphql/mutations";
 import {
   AUTH_SESSION_CHANGED_EVENT,
+  refreshInitialAuthenticationSession,
   useAuth,
   type AuthUser,
 } from "@/lib/hooks/use-auth";
@@ -19,7 +26,7 @@ import {
 } from "@/lib/utils/initial-authentication";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SetupIntroLoading } from "./setup-intro";
+import { SetupIntroLoading, useSetupIntroTarget } from "./setup-intro";
 import { SetupRestoreView } from "./setup-restore-view";
 
 export function InitialAuthenticationGate({
@@ -40,7 +47,30 @@ export function InitialAuthenticationGate({
   );
   const [observedStage, setObservedStage] =
     useState<ReturnType<typeof initialAuthenticationView>>("error");
-  const reloadPath = initialAuthenticationReloadPath(observedStage, stage);
+  const navigate = useNavigate();
+  const [handoff, setHandoff] = useState<AuthRuntimeState | null>(null);
+  const reloadPath = initialAuthenticationReloadPath(
+    observedStage,
+    stage,
+    handoff !== null,
+  );
+  const completeHandoff = useCallback(
+    async (adopt: () => void) => {
+      setHandoff(data!.authRuntimeState);
+      try {
+        await Promise.all([
+          refreshInitialAuthenticationSession(adopt),
+          import("@/src/pages/setup"),
+        ]);
+        setObservedStage("application");
+        navigate("/setup", { replace: true });
+      } finally {
+        setHandoff(null);
+        refresh({ requestPolicy: "network-only" });
+      }
+    },
+    [data, navigate, refresh],
+  );
   const authoritative = !fetching && !error && data && stage !== "error";
   if (authoritative && observedStage !== stage && !reloadPath) {
     setObservedStage(stage);
@@ -51,6 +81,12 @@ export function InitialAuthenticationGate({
     window.location.replace(`${base === "/" ? "" : base}${reloadPath}`);
   }, [authoritative, reloadPath]);
   const pending = stage === "choice" || stage === "password_replacement";
+  useSetupIntroTarget(
+    authoritative &&
+      !handoff &&
+      stage !== "choice" &&
+      location.pathname !== "/setup",
+  );
   useEffect(() => {
     const recheck = () => refresh({ requestPolicy: "network-only" });
     window.addEventListener(AUTH_SESSION_CHANGED_EVENT, recheck);
@@ -76,11 +112,12 @@ export function InitialAuthenticationGate({
       </SetupFrame>
     );
   if (reloadPath) return <SetupIntroLoading />;
-  if (stage === "choice")
+  if (stage === "choice" || handoff)
     return (
       <AuthenticationChoice
-        state={data.authRuntimeState}
+        state={handoff ?? data.authRuntimeState}
         onStale={() => refresh({ requestPolicy: "network-only" })}
+        onComplete={completeHandoff}
       />
     );
   if (stage === "password_replacement" && location.pathname !== "/login")
@@ -88,22 +125,129 @@ export function InitialAuthenticationGate({
   return children;
 }
 
-function SetupFrame({ children }: { children: ReactNode }) {
+function SetupFrame({
+  children,
+  panel = true,
+}: {
+  children: ReactNode;
+  panel?: boolean;
+}) {
+  const logoRef = useSetupIntroTarget<HTMLImageElement>();
   return (
-    <main className="min-h-screen bg-background px-6 py-16 text-foreground">
-      <div className="mx-auto flex max-w-lg flex-col gap-6 rounded-xl border bg-card p-8">
+    <main className="min-h-screen bg-fixed px-6 py-16 text-foreground [background-image:var(--scry-shell-bg)]">
+      <img
+        ref={logoRef}
+        src={`${import.meta.env.BASE_URL}scryer-logo.svg`}
+        alt=""
+        aria-hidden="true"
+        width={80}
+        height={80}
+        className="mx-auto mb-8 h-20 w-20"
+      />
+      <div
+        className={
+          panel
+            ? "mx-auto flex max-w-lg flex-col gap-6 rounded-xl border bg-card p-8"
+            : "mx-auto w-full max-w-2xl"
+        }
+      >
         {children}
       </div>
     </main>
   );
 }
 
+function SetupCodeInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const inputs = useRef<Array<HTMLInputElement | null>>([]);
+  const characters = Array.from(
+    { length: 6 },
+    (_, index) => value[index]?.trim() ?? "",
+  );
+  const enter = (index: number, text: string) => {
+    const incoming = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (incoming.length >= 6) index = 0;
+    const next = [...characters];
+    if (!incoming) next[index] = "";
+    else
+      for (
+        let offset = 0;
+        offset < incoming.length && index + offset < 6;
+        offset++
+      ) {
+        next[index + offset] = incoming[offset];
+      }
+    onChange(
+      next
+        .map((character) => character || " ")
+        .join("")
+        .trimEnd(),
+    );
+    if (incoming) inputs.current[Math.min(index + incoming.length, 5)]?.focus();
+  };
+  return (
+    <fieldset aria-describedby="setup-code-help">
+      <legend className="mb-2">{label}</legend>
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {characters.map((character, index) => (
+          <div key={index} className="contents">
+            {index === 3 && (
+              <span aria-hidden="true" className="font-mono text-2xl">
+                -
+              </span>
+            )}
+            <Input
+              ref={(element) => {
+                inputs.current[index] = element;
+              }}
+              aria-label={`${label} ${index + 1}`}
+              autoComplete={index === 0 ? "one-time-code" : "off"}
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={character}
+              required
+              className="h-14 min-w-0 flex-1 px-0 text-center font-mono text-2xl md:text-2xl"
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => enter(index, event.target.value)}
+              onPaste={(event) => {
+                event.preventDefault();
+                enter(index, event.clipboardData.getData("text"));
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "ArrowLeft" ||
+                  (event.key === "Backspace" && !character)
+                ) {
+                  event.preventDefault();
+                  inputs.current[Math.max(0, index - 1)]?.focus();
+                } else if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  inputs.current[Math.min(5, index + 1)]?.focus();
+                }
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function AuthenticationChoice({
   state,
   onStale,
+  onComplete,
 }: {
   state: AuthRuntimeState;
   onStale: () => void;
+  onComplete: (adopt: () => void) => Promise<void>;
 }) {
   const t = useTranslate();
   const { adoptSession } = useAuth();
@@ -116,7 +260,8 @@ function AuthenticationChoice({
   const [restoring, setRestoring] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [{ fetching }, complete] = useMutation<{
+  const [transitioning, setTransitioning] = useState(false);
+  const [{ fetching: mutationFetching }, complete] = useMutation<{
     completeInitialAuthentication: {
       completed: boolean;
       login: {
@@ -126,6 +271,7 @@ function AuthenticationChoice({
       } | null;
     };
   }>(completeInitialAuthenticationMutation);
+  const fetching = mutationFetching || transitioning;
   const minimum = state.passwordMinLength ?? 8;
   const blockedByEnvironment = (choice: string) =>
     state.envOverrideActive &&
@@ -171,9 +317,20 @@ function AuthenticationChoice({
         return;
       }
       const login = result.data.completeInitialAuthentication.login;
-      if (login) adoptSession(login.token, login.user, login.persistSession);
-      const base = getRuntimeBasePath();
-      window.location.assign(`${base === "/" ? "" : base}/setup`);
+      setTransitioning(true);
+      try {
+        await onComplete(() => {
+          if (login)
+            adoptSession(login.token, login.user, login.persistSession);
+        });
+      } catch (error) {
+        setError(
+          userFacingGraphQlErrorMessage(error, t("initialAuth.loadFailed"), t),
+        );
+        onStale();
+      } finally {
+        setTransitioning(false);
+      }
     },
     [
       canSubmit,
@@ -186,12 +343,13 @@ function AuthenticationChoice({
       setupCode,
       t,
       onStale,
+      onComplete,
       adoptSession,
     ],
   );
   if (restoring) {
     return (
-      <SetupFrame>
+      <SetupFrame panel={false}>
         <SetupRestoreView
           t={t}
           setupCode={state.initialAuthenticationCodeRequired ? setupCode : null}
@@ -273,15 +431,11 @@ function AuthenticationChoice({
           </label>
         )}
         {state.initialAuthenticationCodeRequired && (
-          <label className="block">
-            {t("initialAuth.code")}
-            <Input
-              autoComplete="one-time-code"
+          <div>
+            <SetupCodeInput
+              label={t("initialAuth.code")}
               value={setupCode}
-              maxLength={32}
-              onChange={(e) => setSetupCode(e.target.value)}
-              required
-              aria-describedby="setup-code-help"
+              onChange={setSetupCode}
             />
             <span
               id="setup-code-help"
@@ -289,7 +443,7 @@ function AuthenticationChoice({
             >
               {t("initialAuth.codeHelp")}
             </span>
-          </label>
+          </div>
         )}
         {error && <p role="alert">{error}</p>}
         <Button
@@ -311,7 +465,8 @@ function AuthenticationChoice({
         variant="outline"
         disabled={
           fetching ||
-          (state.initialAuthenticationCodeRequired && !setupCode.trim())
+          (state.initialAuthenticationCodeRequired &&
+            setupCode.replace(/\s/g, "").length !== 6)
         }
         onClick={() => setRestoring(true)}
       >

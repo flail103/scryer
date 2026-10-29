@@ -9,7 +9,9 @@ export function initialAuthenticationView(stage: unknown) {
 export function initialAuthenticationReloadPath(
   previous: ReturnType<typeof initialAuthenticationView>,
   next: ReturnType<typeof initialAuthenticationView>,
+  refreshingLocalSession = false,
 ) {
+  if (refreshingLocalSession) return null;
   if (previous === "error" || next === "error" || previous === next)
     return null;
   return next === "password_replacement"
@@ -31,7 +33,8 @@ export function canCompleteInitialAuthentication(input: {
   const passwordMode = input.mode === "PASSWORD";
   if (input.environmentMode !== null && input.environmentMode !== passwordMode)
     return false;
-  if (input.codeRequired && !input.code.trim()) return false;
+  if (input.codeRequired && input.code.replace(/[\s-]/g, "").length !== 6)
+    return false;
   return passwordMode
     ? input.password.length >= input.minimum &&
         input.password === input.confirmation

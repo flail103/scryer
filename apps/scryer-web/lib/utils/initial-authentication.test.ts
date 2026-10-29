@@ -18,6 +18,17 @@ test("initial authentication never treats missing or unknown state as completion
   );
 });
 
+test("local completion refreshes the session without a document reload", () => {
+  assert.equal(
+    initialAuthenticationReloadPath("choice", "application", true),
+    null,
+  );
+  assert.equal(
+    initialAuthenticationReloadPath("choice", "application", false),
+    "/setup",
+  );
+});
+
 test("setup transitions rebootstrap before exposing cached authentication", () => {
   for (const completed of ["complete", null]) {
     for (const pending of ["choice", "password_replacement"] as const) {
@@ -77,6 +88,9 @@ test("initial authentication requires an explicit matching choice and operator p
     { confirmation: "different" },
     { minimum: 24 },
     { code: " " },
+    { code: "ACD" },
+    { code: "AC D34" },
+    { code: "ACD3479" },
     { environmentMode: false },
   ]) {
     assert.equal(

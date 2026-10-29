@@ -409,135 +409,131 @@ export function SetupRestoreView({
       />
 
       {!summary ? (
-        <Card className="border-[var(--scry-border2)] bg-[rgba(10,17,32,0.55)] p-0 shadow-none">
-          <CardContent className="space-y-5 p-5 sm:p-6">
-            <div className="space-y-3 text-sm">
-              <span className="text-sm font-semibold text-[var(--scry-ink2)]">
-                {t("setup.restoreSelectBundle")}
-              </span>
-              <input
-                id="setup-restore-file-input"
-                key={fileInputKey}
-                ref={fileInputRef}
-                type="file"
-                accept=".tar.zst,.enc,.zst"
-                className="hidden"
-                onChange={(event) => {
-                  handleBundleSelected(event.target.files?.[0] ?? null);
-                }}
-                disabled={inspecting}
-              />
-              <div
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "copy";
-                  setIsDragActive(true);
-                }}
-                onDragLeave={(event) => {
-                  event.preventDefault();
-                  if (
-                    event.currentTarget.contains(
-                      event.relatedTarget as Node | null,
-                    )
-                  ) {
-                    return;
-                  }
-                  setIsDragActive(false);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setIsDragActive(false);
-                  handleBundleSelected(event.dataTransfer.files?.[0] ?? null);
-                }}
-                className={cn(
-                  "rounded-[16px] border border-dashed px-5 py-8 transition-colors",
-                  isDragActive
-                    ? "border-[var(--scry-accent-text)] bg-[rgba(var(--scry-accent-rgb),0.12)]"
-                    : "border-[rgba(var(--scry-accent-rgb),0.34)] bg-[rgba(var(--scry-accent-rgb),0.045)] hover:border-[var(--scry-baccent)] hover:bg-[rgba(var(--scry-accent-rgb),0.075)]",
-                )}
-              >
-                <div className="mx-auto flex max-w-xl flex-col items-center gap-4 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[var(--scry-baccent)] bg-[rgba(var(--scry-accent-rgb),0.12)] text-[var(--scry-accent-text)]">
-                    <Upload className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <p
-                      className={cn(
-                        "break-all text-base font-semibold text-[var(--scry-ink2)]",
-                        selectedBundle
-                          ? "font-[var(--font-code)] text-sm"
-                          : null,
-                      )}
-                    >
-                      {selectedBundle
-                        ? selectedBundle.name
-                        : t("setup.restoreDropTargetTitle")}
-                    </p>
-                    <p className="text-sm leading-relaxed text-[var(--scry-muted)]">
-                      {selectedBundle
-                        ? bundleLooksEncrypted
-                          ? t("setup.restoreDropTargetEncryptedSelected")
-                          : t("setup.restoreDropTargetSelected")
-                        : t("setup.restoreDropTargetDescription")}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    <SetupPrimaryButton
-                      id="setup-restore-select-file"
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={inspecting}
-                    >
-                      {t("setup.restoreSelectFile")}
-                    </SetupPrimaryButton>
-                    {selectedBundle ? (
-                      <Button
-                        id="setup-restore-clear-file"
-                        type="button"
-                        variant="outline"
-                        onClick={resetSelection}
-                        disabled={inspecting}
-                        className="border-[var(--scry-danger-border)] text-[var(--scry-danger-text)] hover:bg-[var(--scry-danger-bg)] hover:text-[var(--scry-danger-text)]"
-                      >
-                        {t("setup.restoreClearFile")}
-                      </Button>
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-[var(--scry-faint)]">
-                    {t("setup.restoreDropTargetFormats")}
+        <div className="space-y-5">
+          <div className="space-y-3 text-sm">
+            <span className="text-sm font-semibold text-[var(--scry-ink2)]">
+              {t("setup.restoreSelectBundle")}
+            </span>
+            <input
+              id="setup-restore-file-input"
+              key={fileInputKey}
+              ref={fileInputRef}
+              type="file"
+              accept=".tar.zst,.enc,.zst"
+              className="hidden"
+              onChange={(event) => {
+                handleBundleSelected(event.target.files?.[0] ?? null);
+              }}
+              disabled={inspecting}
+            />
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                setIsDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                if (
+                  event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                ) {
+                  return;
+                }
+                setIsDragActive(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setIsDragActive(false);
+                handleBundleSelected(event.dataTransfer.files?.[0] ?? null);
+              }}
+              className={cn(
+                "rounded-[16px] border border-dashed px-5 py-8 transition-colors",
+                isDragActive
+                  ? "border-[var(--scry-accent-text)] bg-[rgba(var(--scry-accent-rgb),0.12)]"
+                  : "border-[rgba(var(--scry-accent-rgb),0.34)] bg-[rgba(var(--scry-accent-rgb),0.045)] hover:border-[var(--scry-baccent)] hover:bg-[rgba(var(--scry-accent-rgb),0.075)]",
+              )}
+            >
+              <div className="mx-auto flex max-w-xl flex-col items-center gap-4 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[var(--scry-baccent)] bg-[rgba(var(--scry-accent-rgb),0.12)] text-[var(--scry-accent-text)]">
+                  <Upload className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <p
+                    className={cn(
+                      "break-all text-base font-semibold text-[var(--scry-ink2)]",
+                      selectedBundle ? "font-[var(--font-code)] text-sm" : null,
+                    )}
+                  >
+                    {selectedBundle
+                      ? selectedBundle.name
+                      : t("setup.restoreDropTargetTitle")}
+                  </p>
+                  <p className="text-sm leading-relaxed text-[var(--scry-muted)]">
+                    {selectedBundle
+                      ? bundleLooksEncrypted
+                        ? t("setup.restoreDropTargetEncryptedSelected")
+                        : t("setup.restoreDropTargetSelected")
+                      : t("setup.restoreDropTargetDescription")}
                   </p>
                 </div>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <SetupPrimaryButton
+                    id="setup-restore-select-file"
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={inspecting}
+                  >
+                    {t("setup.restoreSelectFile")}
+                  </SetupPrimaryButton>
+                  {selectedBundle ? (
+                    <Button
+                      id="setup-restore-clear-file"
+                      type="button"
+                      variant="outline"
+                      onClick={resetSelection}
+                      disabled={inspecting}
+                      className="border-[var(--scry-danger-border)] text-[var(--scry-danger-text)] hover:bg-[var(--scry-danger-bg)] hover:text-[var(--scry-danger-text)]"
+                    >
+                      {t("setup.restoreClearFile")}
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="text-xs text-[var(--scry-faint)]">
+                  {t("setup.restoreDropTargetFormats")}
+                </p>
               </div>
             </div>
+          </div>
 
-            {requiresPassword ? (
-              <label className="block space-y-2 text-sm">
-                <span className="font-semibold text-[var(--scry-ink2)]">
-                  {t("settings.password")}
-                </span>
-                <Input
-                  id="setup-restore-password"
-                  type="password"
-                  ignorePasswordManagers
-                  value={password}
-                  onChange={(event) => {
-                    setError(null);
-                    setPassword(event.target.value);
-                  }}
-                  placeholder={t("settings.password")}
-                  disabled={inspecting}
-                  className="border-[var(--scry-border2)] bg-[var(--scry-page2)]"
-                />
-              </label>
-            ) : null}
+          {requiresPassword ? (
+            <label className="block space-y-2 text-sm">
+              <span className="font-semibold text-[var(--scry-ink2)]">
+                {t("settings.password")}
+              </span>
+              <Input
+                id="setup-restore-password"
+                type="password"
+                ignorePasswordManagers
+                value={password}
+                onChange={(event) => {
+                  setError(null);
+                  setPassword(event.target.value);
+                }}
+                placeholder={t("settings.password")}
+                disabled={inspecting}
+                className="border-[var(--scry-border2)] bg-[var(--scry-page2)]"
+              />
+            </label>
+          ) : null}
 
-            {error ? (
-              <p id="setup-restore-error" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
+          {error ? (
+            <p id="setup-restore-error" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-4">
           <Card className="border-[var(--scry-border2)] bg-[rgba(10,17,32,0.55)] p-0 shadow-none">

@@ -98,7 +98,19 @@ pub(crate) fn write_setup_code(
     output: &mut impl std::io::Write,
     code: &str,
 ) -> std::io::Result<()> {
-    output.write_all(format!("Scryer one-time setup code: {code}\n").as_bytes())?;
+    output.write_all(
+        format!(
+            "\n============================================================\n\
+             SCRYER FIRST-RUN SETUP — ACTION REQUIRED\n\
+             ============================================================\n\n\
+             Scryer one-time setup code: {code}\n\n\
+             Enter this code in the setup screen to configure access\n\
+             or restore a backup. Restarting replaces this code.\n\
+             Keep this code private.\n\
+             ============================================================\n\n"
+        )
+        .as_bytes(),
+    )?;
     output.flush()
 }
 
@@ -287,10 +299,11 @@ mod tests {
         }
         let mut output = RecordWriter::default();
         write_setup_code(&mut output, "ABC-234").unwrap();
-        assert_eq!(
-            output.0,
-            [b"Scryer one-time setup code: ABC-234\n".to_vec()]
-        );
+        assert_eq!(output.0.len(), 1, "the banner must be one write");
+        let banner = String::from_utf8(output.0.remove(0)).unwrap();
+        assert!(banner.contains("SCRYER FIRST-RUN SETUP — ACTION REQUIRED"));
+        assert!(banner.contains("\nScryer one-time setup code: ABC-234\n"));
+        assert!(banner.starts_with("\n================"));
     }
 
     #[test]
@@ -374,10 +387,9 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
             if *mode == "captured" {
-                assert_eq!(
-                    output.stderr,
-                    format!("Scryer one-time setup code: {CODE}\n").as_bytes()
-                );
+                let mut expected = Vec::new();
+                write_setup_code(&mut expected, CODE).unwrap();
+                assert_eq!(output.stderr, expected);
             }
         }
     }

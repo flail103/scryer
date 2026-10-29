@@ -7,7 +7,10 @@ import {
   useSearchParams,
 } from "react-router";
 import { PageShellFallback } from "@/components/root/page-shell-fallback";
-import { SetupIntroLoading } from "@/components/setup/setup-intro";
+import {
+  SetupIntroBoundary,
+  SetupIntroLoading,
+} from "@/components/setup/setup-intro";
 import { InitialAuthenticationGate } from "@/components/setup/initial-authentication-gate";
 import { TranslateContext } from "@/lib/context/translate-context";
 import { useLanguage } from "@/lib/hooks/use-language";
@@ -32,9 +35,11 @@ function RootTranslateBoundary() {
 
   return (
     <TranslateContext.Provider value={t}>
-      <InitialAuthenticationGate>
-        <Outlet />
-      </InitialAuthenticationGate>
+      <SetupIntroBoundary>
+        <InitialAuthenticationGate>
+          <Outlet />
+        </InitialAuthenticationGate>
+      </SetupIntroBoundary>
     </TranslateContext.Provider>
   );
 }

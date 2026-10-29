@@ -67,7 +67,7 @@ import { SetupSummaryView } from "./setup-summary-view";
 import SetupImportWizard from "./setup-import-wizard";
 import { SetupPluginsView } from "./setup-plugins-view";
 import { SetupRestoreView } from "./setup-restore-view";
-import { SetupIntroMark, setupIntroFlies } from "./setup-intro";
+import { useSetupIntroTarget } from "./setup-intro";
 
 const FALLBACK_PROVIDER_OPTIONS: SetupIndexerProviderOption[] = [];
 
@@ -120,20 +120,11 @@ export function SetupWizardContainer({
   const currentStep = parseInt(searchParams.get("step") || "0", 10);
   const [canRestoreSetup, setCanRestoreSetup] = useState(false);
 
-  // The welcome plays once, when setup first opens — not when it is reopened
-  // from Settings, and not on moving between steps.
-  const [intro, setIntro] = useState<"waiting" | "playing" | null>(() =>
-    !isReentry && setupIntroFlies() ? "waiting" : null,
-  );
-  const [introFlightDelayMs, setIntroFlightDelayMs] = useState(0);
-  const headerLogoRef = useRef<HTMLDivElement>(null);
-  const startIntro = useCallback((flightDelayMs: number) => {
-    setIntroFlightDelayMs(flightDelayMs);
-    setIntro("playing");
-  }, []);
-  const finishIntro = useCallback(() => setIntro(null), []);
   const [restoreAvailabilityChecked, setRestoreAvailabilityChecked] =
     useState(false);
+  const headerLogoRef = useSetupIntroTarget<HTMLDivElement>(
+    restoreAvailabilityChecked,
+  );
 
   const goToStep = useCallback(
     (step: number, path?: "fresh" | "import" | "restore") => {
@@ -582,16 +573,7 @@ export function SetupWizardContainer({
       className={cn(
         "mx-auto flex min-h-screen w-full flex-col items-center justify-center px-4 py-10",
         shellMaxWidth,
-        intro && "setup-intro",
-        intro === "playing" && "setup-intro-playing",
       )}
-      style={
-        intro === "playing"
-          ? ({
-              "--setup-intro-flight-delay": `${introFlightDelayMs}ms`,
-            } as React.CSSProperties)
-          : undefined
-      }
     >
       {wizardPath !== "import" ? (
         <div className="setup-intro-header mb-8 flex items-center">
@@ -599,14 +581,6 @@ export function SetupWizardContainer({
             <ScryerLogo className="h-20 w-20" />
           </div>
         </div>
-      ) : null}
-      {intro ? (
-        <SetupIntroMark
-          targetRef={headerLogoRef}
-          ready={restoreAvailabilityChecked}
-          onStart={startIntro}
-          onDone={finishIntro}
-        />
       ) : null}
 
       {currentStep > 0 && (
