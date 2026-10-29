@@ -1773,6 +1773,7 @@ impl AppUseCase {
         &self,
         budget: std::time::Duration,
     ) -> AppResult<RssSyncReport> {
+        let _priority = self.runtime.acquisition.walk_priority.begin_rss();
         let now = Utc::now();
         let sync_start = std::time::Instant::now();
         let deadline = sync_start + budget;

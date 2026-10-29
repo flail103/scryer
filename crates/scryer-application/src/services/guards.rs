@@ -2,6 +2,88 @@ use super::*;
 
 const CACHED_SUBMISSION_STATE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// RSS admission and background yielding share one lock, including when they
+/// arrive simultaneously. A yielded generation is never reused by a later walk.
+#[derive(Clone, Default)]
+pub(crate) struct AcquisitionWalkPriority {
+    state: Arc<std::sync::Mutex<AcquisitionWalkPriorityState>>,
+}
+
+#[derive(Default)]
+struct AcquisitionWalkPriorityState {
+    rss: usize,
+    background: Option<tokio_util::sync::CancellationToken>,
+}
+
+pub(crate) struct RssWalkPriorityGuard(AcquisitionWalkPriority);
+
+impl Drop for RssWalkPriorityGuard {
+    fn drop(&mut self) {
+        self.0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .rss -= 1;
+    }
+}
+
+impl AcquisitionWalkPriority {
+    pub(crate) fn begin_rss(&self) -> RssWalkPriorityGuard {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.rss += 1;
+        if let Some(background) = &state.background {
+            background.cancel();
+        }
+        RssWalkPriorityGuard(self.clone())
+    }
+
+    pub(crate) fn begin_background(&self) -> Option<tokio_util::sync::CancellationToken> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.rss > 0 {
+            return None;
+        }
+        let token = tokio_util::sync::CancellationToken::new();
+        state.background = Some(token.clone());
+        Some(token)
+    }
+}
+
+#[cfg(test)]
+mod walk_priority_tests {
+    use super::*;
+
+    #[test]
+    fn rss_priority_is_held_until_every_visit_drops_and_never_poisons_a_new_walk() {
+        let priority = AcquisitionWalkPriority::default();
+        let previous = priority.begin_background().unwrap();
+        let first = priority.begin_rss();
+        let second = priority.begin_rss();
+        assert!(previous.is_cancelled());
+        assert!(priority.begin_background().is_none());
+        drop(first);
+        assert!(priority.begin_background().is_none());
+        drop(second);
+        let next = priority.begin_background().unwrap();
+        assert!(!next.is_cancelled());
+        let priority_for_panic = priority.clone();
+        assert!(
+            std::panic::catch_unwind(move || {
+                let _guard = priority_for_panic.begin_rss();
+                panic!("synthetic RSS failure");
+            })
+            .is_err()
+        );
+        assert!(next.is_cancelled());
+        assert!(!priority.begin_background().unwrap().is_cancelled());
+    }
+}
+
 /// Per-title exclusion for the staged acquisition walk.
 ///
 /// Two walkers can reach one title: the background convergence cycle and an

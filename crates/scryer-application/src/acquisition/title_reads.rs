@@ -25,6 +25,8 @@ use tokio::sync::OnceCell;
 use crate::{AppResult, AppUseCase, EpisodeScopedMediaFile, ScopedExternalId, TitleMediaFile};
 
 pub(crate) struct TitleCatalogReads {
+    #[cfg(test)]
+    pub(crate) scoring_preparations: std::sync::atomic::AtomicUsize,
     title_id: String,
     episodes: OnceCell<Arc<Vec<Episode>>>,
     collections: OnceCell<Arc<Vec<Collection>>>,
@@ -40,6 +42,8 @@ pub(crate) struct TitleCatalogReads {
 impl TitleCatalogReads {
     pub(crate) fn new(title_id: &str) -> Self {
         Self {
+            #[cfg(test)]
+            scoring_preparations: Default::default(),
             title_id: title_id.to_string(),
             episodes: OnceCell::new(),
             collections: OnceCell::new(),

@@ -2587,6 +2587,7 @@ impl AppUseCase {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) async fn evaluate_search_results_for_subject(
         &self,
         title: &Title,
@@ -2659,14 +2660,7 @@ impl AppUseCase {
             .await;
 
         let dl_snapshot = crate::acquisition_workflow::DownloadClientSnapshot::fetch(self).await;
-        let existing_files = reads
-            .media_files(self)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .filter(|file| file.role.is_primary())
-            .cloned()
-            .collect::<Vec<_>>();
+        let existing_files = reads.primary_file_cutoffs(self).await.unwrap_or_default();
         let delay_profiles = self.load_delay_profiles().await;
         let now = Utc::now();
         let movie_availability = if title.facet == MediaFacet::Movie {
@@ -2825,7 +2819,7 @@ impl AppUseCase {
                     .services
                     .workflow
                     .pending_releases
-                    .list_pending_releases_for_title(&title.id)
+                    .list_active_pending_releases_for_title(&title.id, &[])
                     .await
                     .unwrap_or_default()
                     .iter()
@@ -2846,10 +2840,6 @@ impl AppUseCase {
                             )
                     })
         };
-        let existing_file_summaries: Vec<_> = existing_files
-            .iter()
-            .map(crate::MediaFileCutoffSummary::from)
-            .collect();
         let evaluation_context = AutoCandidateEvaluationContext {
             title,
             subject,
@@ -2869,7 +2859,7 @@ impl AppUseCase {
             now: &now,
             dl_snapshot: Some(&dl_snapshot),
             db_blocklist: &db_blocklist,
-            existing_files: &existing_file_summaries,
+            existing_files: &existing_files,
             delay_profiles: &delay_profiles,
             failed_routes: None,
             minimum_seeders: &minimum_seeders,
