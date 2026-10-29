@@ -1350,6 +1350,17 @@ mod metadata_language_tests {
     }
 
     #[test]
+    fn czech_metadata_is_preserved_at_every_override_level() {
+        for (title, library, global) in [
+            (Some(" CES "), Some("deu"), "eng"),
+            (None, Some("ces"), "eng"),
+            (None, None, "ces"),
+        ] {
+            assert_eq!(resolve_metadata_language_overrides(title, library, global), "ces");
+        }
+    }
+
+    #[test]
     fn metadata_language_overrides_ignore_invalid_values() {
         assert_eq!(
             resolve_metadata_language_overrides(Some("not-a-language"), Some("jpn"), "eng"),

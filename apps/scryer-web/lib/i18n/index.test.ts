@@ -31,6 +31,16 @@ test("offers Dutch for metadata hydration", () => {
   );
 });
 
+test("offers Czech metadata using the canonical language code", () => {
+  assert.deepEqual(
+    METADATA_LANGUAGES.find(({ code }) => code === "ces"),
+    { code: "ces", label: "Čeština" },
+  );
+  for (const locale of ["ces", "cs", "cs-CZ", "CS_cz"]) {
+    assert.equal(metadataLanguageForUi(locale), "ces");
+  }
+});
+
 test("keeps regional UI languages separate from generic Chinese metadata", () => {
   assert.equal(metadataLanguageForUi("zh-HK"), "zho");
   assert.equal(metadataLanguageForUi("zh-TW"), "zho");
