@@ -25,6 +25,7 @@ pub(super) struct MockReleaseAttemptRepo {
 #[derive(Default)]
 pub(super) struct MockBlocklistRepo {
     pub(super) entries: Arc<Mutex<Vec<BlocklistEntry>>>,
+    pub(super) title_reads: std::sync::atomic::AtomicUsize,
     pub(super) fail_writes: std::sync::atomic::AtomicBool,
     pub(super) fail_reads: std::sync::atomic::AtomicBool,
 }
@@ -202,6 +203,8 @@ impl BlocklistRepository for MockBlocklistRepo {
     }
 
     async fn list_for_title(&self, title_id: &str, limit: usize) -> AppResult<Vec<BlocklistEntry>> {
+        self.title_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut entries: Vec<_> = self
             .entries
             .lock()
@@ -357,6 +360,7 @@ pub(super) struct TrackingDownloadSubmissionRepo {
     pub(super) deleted_identity_state_download_ids:
         Arc<Mutex<Vec<scryer_domain::download_identity::DownloadId>>>,
     pub(super) list_for_title_calls: Arc<Mutex<Vec<String>>>,
+    pub(super) active_unbound_title_calls: Arc<Mutex<Vec<String>>>,
     /// Make `list_for_title` skip submissions with no client item id, as the
     /// real store does.
     pub(super) list_for_title_requires_item_id: Arc<std::sync::atomic::AtomicBool>,
@@ -1568,6 +1572,10 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         &self,
         title_id: &str,
     ) -> AppResult<Vec<DownloadSubmission>> {
+        self.active_unbound_title_calls
+            .lock()
+            .await
+            .push(title_id.to_owned());
         let entries = self.store.lock().await;
         Ok(entries
             .iter()
@@ -1820,6 +1828,8 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
 #[derive(Default, Clone)]
 pub(super) struct TrackingPendingReleaseRepo {
     pub(super) store: Arc<Mutex<Vec<PendingRelease>>>,
+    pub(super) title_history_reads: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) active_title_reads: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     pub(super) deleted_title_ids: Arc<Mutex<Vec<String>>>,
     pub(super) delete_error: Arc<Mutex<Option<String>>>,
     /// Standby inserts allowed before the store starts refusing them. Models the
@@ -2041,12 +2051,42 @@ impl PendingReleaseRepository for TrackingPendingReleaseRepo {
         &self,
         title_id: &str,
     ) -> AppResult<Vec<PendingRelease>> {
+        self.title_history_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(self
             .store
             .lock()
             .await
             .iter()
             .filter(|release| release.title_id == title_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn list_active_pending_releases_for_title(
+        &self,
+        title_id: &str,
+        replay_ids: &[String],
+    ) -> AppResult<Vec<PendingRelease>> {
+        self.active_title_reads
+            .lock()
+            .await
+            .push((title_id.to_owned(), replay_ids.to_vec()));
+        Ok(self
+            .store
+            .lock()
+            .await
+            .iter()
+            .filter(|release| release.title_id == title_id)
+            .filter(|release| {
+                matches!(
+                    release.status,
+                    PendingReleaseStatus::Waiting
+                        | PendingReleaseStatus::Standby
+                        | PendingReleaseStatus::Processing
+                        | PendingReleaseStatus::NeedsReview
+                ) || replay_ids.contains(&release.id)
+            })
             .cloned()
             .collect())
     }

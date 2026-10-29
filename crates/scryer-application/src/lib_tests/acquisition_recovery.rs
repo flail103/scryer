@@ -11977,43 +11977,117 @@ async fn rss_does_not_grab_paused_scope() {
 
 #[tokio::test]
 async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
-    assert_rss_title_visit_read_budget(MediaFacet::Series).await;
+    assert_rss_title_visit_read_budget(MediaFacet::Series, false).await;
+}
+
+#[tokio::test]
+async fn rss_pending_replay_hits_the_narrow_query_with_its_frozen_row_id() {
+    let submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let pending = Arc::new(TrackingPendingReleaseRepo::default());
+    let wanted = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let (app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default()),
+        submissions.clone(),
+        pending.clone(),
+        wanted.clone(),
+        Arc::new(FixedFeedRssIndexerClient { results: vec![] }),
+    );
+    let (title, wanted_id) =
+        seed_movie_wanted_for_acquisition(&app, &user, &wanted, "RSS Replay Guard", 2024).await;
+    let mut release = pending_movie_release(
+        &wanted_id,
+        &title,
+        "RSS.Replay.Guard.2024.1080p.WEB-DL-GRP",
+        PendingReleaseStatus::Waiting,
+    );
+    release.indexer_source = Some("nzbgeek".into());
+    release.release_listing_json = Some(STANDBY_LISTING_SNAPSHOT.into());
+    let pending_id = pending.insert_pending_release(&release).await.unwrap();
+    pending.active_title_reads.lock().await.clear();
+    pending.title_history_reads.store(0, Ordering::SeqCst);
+
+    let report =
+        crate::test_wait::within_deadline("RSS pending replay", app.run_scheduled_rss_sync())
+            .await
+            .expect("RSS replay cycle");
+    assert_eq!(report.releases_grabbed, 1, "{report:?}");
+    assert_eq!(
+        *pending.active_title_reads.lock().await,
+        vec![(title.id, vec![pending_id])],
+        "replay must pass the exact durable row ID through the narrow query"
+    );
+    assert_eq!(
+        pending.title_history_reads.load(Ordering::SeqCst),
+        0,
+        "replay must not fall back to loading the title's entire pending history"
+    );
+    let submitted = submissions.store.lock().await;
+    assert_eq!(submitted.len(), 1);
+    let snapshot: serde_json::Value = serde_json::from_str(
+        submitted[0]
+            .release_listing_json
+            .as_deref()
+            .expect("frozen listing"),
+    )
+    .unwrap();
+    assert_eq!(
+        snapshot["extra"]["synthetic_listing_attribute"], "standby",
+        "the narrow lookup must preserve the replay's frozen facts"
+    );
 }
 
 #[tokio::test]
 async fn rss_anime_title_visit_reuses_catalog_reads_through_subject_resolution() {
-    assert_rss_title_visit_read_budget(MediaFacet::Anime).await;
+    assert_rss_title_visit_read_budget(MediaFacet::Anime, false).await;
 }
 
-async fn assert_rss_title_visit_read_budget(facet: MediaFacet) {
+#[tokio::test]
+async fn rss_title_visit_refreshes_blocklist_after_the_first_submission() {
+    assert_rss_title_visit_read_budget(MediaFacet::Anime, true).await;
+}
+
+async fn assert_rss_title_visit_read_budget(facet: MediaFacet, block_later_scopes: bool) {
     let submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     let wanted = Arc::new(TrackingAcquisitionScopeStateRepo::default());
-    let results = [
+    let pending = Arc::new(TrackingPendingReleaseRepo::default());
+    let blocklist = Arc::new(MockBlocklistRepo::default());
+    let client = Arc::new(StubDownloadClient::default().with_unique_job_ids());
+    let release_names = [
         "Cascade.Falls.S01E01.1080p.WEB-DL-GRP",
         "Cascade.Falls.S01E02.1080p.WEB-DL-GRP",
         "Cascade.Falls.S01.COMPLETE.1080p.WEB-DL-GRP",
-    ]
-    .into_iter()
-    .map(|name| {
-        let mut result = FixedReleaseIndexerClient::new(name)
-            .with_listing_facts()
-            .release();
-        result.guid = Some(name.to_string());
-        result.download_url = Some(format!("https://example.invalid/{name}.nzb"));
-        result
-    })
-    .collect();
+    ];
+    // Ordinary series exercise two episodes plus a season pack. The anime
+    // bridge fixture exercises two unambiguous episode scopes.
+    let evaluated_scopes = if facet == MediaFacet::Anime { 2 } else { 3 };
+    let results = release_names
+        .iter()
+        .copied()
+        .take(evaluated_scopes)
+        .map(|name| {
+            let mut result = FixedReleaseIndexerClient::new(name)
+                .with_listing_facts()
+                .release();
+            result.guid = Some(name.to_string());
+            result.download_url = Some(format!("https://example.invalid/{name}.nzb"));
+            result
+        })
+        .collect();
     let (mut app, user) = bootstrap_with_acquisition_tracking_and_indexer(
-        Arc::new(StubDownloadClient::default().with_unique_job_ids()),
+        client.clone(),
         submissions.clone(),
-        Arc::new(TrackingPendingReleaseRepo::default()),
+        pending.clone(),
         wanted.clone(),
         Arc::new(FixedFeedRssIndexerClient { results }),
     );
     let shows = Arc::new(MockShowRepo::default());
     let files = Arc::new(MockMediaFileRepo::default());
     app.services.catalog.shows = shows.clone();
-    app = app.with_test_overrides(|services| services.with_media_files(files.clone()));
+    app = app.with_test_overrides(|services| {
+        services
+            .with_media_files(files.clone())
+            .with_blocklist_repo(blocklist.clone())
+    });
     let title = app
         .add_title(
             &user,
@@ -12086,16 +12160,61 @@ async fn assert_rss_title_visit_read_budget(facet: MediaFacet) {
         files.title_file_reads.load(Ordering::SeqCst),
     ];
     let bridge_reads_before = shows.anime_bridge_reads.load(Ordering::SeqCst);
-    let report = app.run_scheduled_rss_sync().await.expect("RSS cycle");
+    let cutoff_reads_before = files.primary_cutoff_reads.load(Ordering::SeqCst);
+    let blocklist_reads_before = blocklist.title_reads.load(Ordering::SeqCst);
+    submissions.list_for_title_calls.lock().await.clear();
+    submissions.active_unbound_title_calls.lock().await.clear();
+    pending.active_title_reads.lock().await.clear();
+    pending.title_history_reads.store(0, Ordering::SeqCst);
+    let report = if block_later_scopes {
+        let release_first = Arc::new(tokio::sync::Notify::new());
+        *client.submit_gate.lock().await = Some(release_first.clone());
+        let block_after_first_enters = async {
+            crate::test_wait::within_deadline(
+                "first RSS submission",
+                client.submit_started.notified(),
+            )
+            .await;
+            // The first scope passed its guards. Change the exclusion while it
+            // is in the client, before any later scope can be evaluated.
+            for name in release_names {
+                blocklist
+                    .block(&NewBlocklistEntry {
+                        title_id: title.id.clone(),
+                        release_name: name.into(),
+                        indexer_id: String::new(),
+                        info_hash: None,
+                        reason: Some("blocked during RSS visit".into()),
+                    })
+                    .await
+                    .unwrap();
+            }
+            *client.submit_gate.lock().await = None;
+            release_first.notify_one();
+        };
+        let (report, ()) = tokio::join!(
+            crate::test_wait::within_deadline(
+                "RSS guard refresh cycle",
+                app.run_scheduled_rss_sync()
+            ),
+            block_after_first_enters,
+        );
+        report.expect("RSS cycle")
+    } else {
+        crate::test_wait::within_deadline("RSS read budget cycle", app.run_scheduled_rss_sync())
+            .await
+            .expect("RSS cycle")
+    };
+    let expected_grabs = if block_later_scopes { 1 } else { 2 };
     assert_eq!(
         report.releases_grabbed,
-        2,
+        expected_grabs,
         "report: {report:?}; submissions: {:?}",
         submissions.store.lock().await
     );
     let submitted = submissions.store.lock().await;
-    assert_eq!(submitted.len(), 2);
-    for id in ids {
+    assert_eq!(submitted.len(), expected_grabs);
+    for id in ids.iter().filter(|_| !block_later_scopes) {
         assert!(submitted.iter().any(|item| item.scope
             == SubmissionScope::Episode {
                 episode_id: id.clone()
@@ -12108,13 +12227,49 @@ async fn assert_rss_title_visit_read_budget(facet: MediaFacet) {
     ];
     assert_eq!(
         std::array::from_fn::<usize, 3, _>(|i| after[i] - before[i]),
-        [2, 1, 1],
+        [2, 1, 0],
         "one shared evaluation read, plus the canonical submission guard's independent episode read"
     );
     assert_eq!(
         shows.anime_bridge_reads.load(Ordering::SeqCst) - bridge_reads_before,
         1,
         "routing, scoring and subject resolution share the numbering bridge"
+    );
+    assert_eq!(
+        files.primary_cutoff_reads.load(Ordering::SeqCst) - cutoff_reads_before,
+        1,
+        "RSS uses one compact projection and never falls back to full title-file rows"
+    );
+    assert_eq!(
+        pending.title_history_reads.load(Ordering::SeqCst),
+        0,
+        "RSS must not rehydrate terminal pending history"
+    );
+    let active_reads = pending.active_title_reads.lock().await;
+    assert_eq!(
+        active_reads.len(),
+        evaluated_scopes,
+        "pending state is refreshed for every evaluated scope, even when scoring excludes its release"
+    );
+    assert!(
+        active_reads
+            .iter()
+            .all(|(id, replay_ids)| id == &title.id && replay_ids.is_empty())
+    );
+    assert_eq!(
+        blocklist.title_reads.load(Ordering::SeqCst) - blocklist_reads_before,
+        evaluated_scopes * 2,
+        "every scoring batch refreshes exclusions; every grab attempt checks them independently"
+    );
+    assert_eq!(
+        *submissions.active_unbound_title_calls.lock().await,
+        vec![title.id.clone()],
+        "the guarded canonical submission still checks uncertain acceptance"
+    );
+    assert_eq!(
+        *submissions.list_for_title_calls.lock().await,
+        vec![title.id.clone(), title.id.clone()],
+        "one queue snapshot plus an independent read under the canonical submission guard"
     );
 }
 
