@@ -6757,6 +6757,27 @@ async fn missing_adopted_submission_defers_without_failed_signature_or_blocklist
 
     app.run_background_acquisition_cycle_once().await;
 
+    // Retry directly so scheduler backoff cannot hide a missing submission
+    // fence. Both repeated grabs must stop before calling the client again.
+    for _ in 0..2 {
+        let error = app
+            .queue_existing_title_download(
+                &user,
+                &title.id,
+                QueuedReleaseSelection {
+                    source_hint: Some("https://example.invalid/recovered.nzb".to_string()),
+                    source_kind: Some(DownloadSourceKind::NzbUrl),
+                    source_title: Some(release_title.to_string()),
+                    ..Default::default()
+                },
+                SubmissionScope::Title,
+                SubmissionConflictPolicy::Abort,
+            )
+            .await
+            .expect_err("unresolved adoption must block another submission");
+        assert!(error.is_download_submit_ambiguous());
+    }
+
     assert_eq!(
         download_client
             .submitted_release_titles

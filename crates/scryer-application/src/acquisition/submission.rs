@@ -232,6 +232,15 @@ impl AppUseCase {
             .find_by_canonical_download_id(&effective_download_id)
             .await?
         else {
+            // Adoption may already have withdrawn our pending intent. Keep
+            // the title fenced until this unknown acceptance is reconciled.
+            self.runtime
+                .acquisition
+                .download_submission_guards
+                .mark_uncertain(
+                    title_id,
+                    UncertainDownloadSubmissionClaim::ambiguous(effective_download_id, None),
+                );
             return Err(AppError::DownloadSubmitAmbiguous(format!(
                 "download client reused canonical identity {effective_download_id}, but its submission could not be loaded"
             )));
@@ -305,6 +314,13 @@ impl AppUseCase {
                     .find_by_canonical_download_id(&download_id)
                     .await?
                 else {
+                    self.runtime
+                        .acquisition
+                        .download_submission_guards
+                        .mark_uncertain(
+                            title_id,
+                            UncertainDownloadSubmissionClaim::ambiguous(download_id, None),
+                        );
                     return Err(AppError::DownloadSubmitAmbiguous(format!(
                         "download client reused canonical identity {download_id}, but its submission could not be loaded"
                     )));
