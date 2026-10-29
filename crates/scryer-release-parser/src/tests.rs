@@ -9,10 +9,80 @@ use crate::{
 };
 
 #[test]
+fn parenthetical_qualifiers_do_not_create_independent_title_identities() {
+    for (name, full_title) in [
+        ("The Office (US)", "THE OFFICE US"),
+        ("The Office (UK)", "THE OFFICE UK"),
+        ("The Office (us)", "THE OFFICE US"),
+        (
+            "Love (ft. Marriage and Divorce)",
+            "LOVE FT MARRIAGE AND DIVORCE",
+        ),
+        (
+            "Love (Featuring Marriage and Divorce)",
+            "LOVE FEATURING MARRIAGE AND DIVORCE",
+        ),
+    ] {
+        for marker in ["S01E12", "(Season 01)"] {
+            let raw = format!("{name} {marker} [1080p]");
+            let parsed =
+                crate::best_parse_for_target(&raw, &context(ContextFacetHint::Unknown, ""));
+            assert_eq!(parsed.normalized_title_variants, vec![full_title], "{raw}");
+            let episode = parsed.episode.expect(&raw);
+            assert_eq!(episode.season, Some(1), "{raw}");
+            assert_eq!(episode.full_season, marker == "(Season 01)", "{raw}");
+        }
+    }
+}
+
+#[test]
+fn four_digit_episode_ranges_preserve_coverage_without_consuming_trailing_years() {
+    for facet in [
+        ContextFacetHint::Unknown,
+        ContextFacetHint::Anime,
+        ContextFacetHint::Series,
+    ] {
+        let target = context(facet, "Voyage");
+        for (marker, expected) in [
+            ("S01E998-999", vec![998, 999]),
+            ("S01E999-1001", vec![999, 1000, 1001]),
+            ("S01E1000-1002", vec![1000, 1001, 1002]),
+            ("S01E1000-E1002", vec![1000, 1001, 1002]),
+            ("S01E1000-S01E1002", vec![1000, 1001, 1002]),
+            ("S01E1999-2001", vec![1999, 2000, 2001]),
+            ("S01E01-2026", vec![1]),
+            ("S01E01-1999", vec![1]),
+        ] {
+            let raw = format!("Voyage.{marker}.1080p.WEB-DL");
+            let parsed = crate::best_parse_for_target(&raw, &target);
+            assert_eq!(parsed.normalized_title, "VOYAGE", "{raw}");
+            let episode = parsed.episode.expect(&raw);
+            assert_eq!(episode.season, Some(1), "{raw}");
+            assert_eq!(episode.episode_numbers, expected, "{raw}");
+            assert!(!episode.full_season, "{raw}");
+        }
+    }
+}
+
+#[test]
 fn parenthetical_dual_names_produce_context_free_title_variants() {
-    for (name, expected) in [
-        ("Lantern Verge (Touka no Sora)", "TOUKA NO SORA"),
-        ("Lantern Verge (Lantern Verge)", "LANTERN VERGE"),
+    for (name, primary, expected) in [
+        (
+            "Lantern Verge (Touka no Sora)",
+            "LANTERN VERGE",
+            "TOUKA NO SORA",
+        ),
+        (
+            "Lantern Verge (Lantern Verge)",
+            "LANTERN VERGE",
+            "LANTERN VERGE",
+        ),
+        (
+            "Erased (Boku dake ga Inai Machi)",
+            "ERASED",
+            "BOKU DAKE GA INAI MACHI",
+        ),
+        ("Beautiful World (Sekai)", "BEAUTIFUL WORLD", "SEKAI"),
     ] {
         for marker in ["- S01E12", "(Season 01)"] {
             let raw = format!(
@@ -20,7 +90,7 @@ fn parenthetical_dual_names_produce_context_free_title_variants() {
             );
             let parsed =
                 crate::best_parse_for_target(&raw, &context(ContextFacetHint::Unknown, ""));
-            for title in ["LANTERN VERGE", expected] {
+            for title in [primary, expected] {
                 assert!(
                     parsed
                         .normalized_title_variants
@@ -180,7 +250,8 @@ fn episode_revision_preserves_real_episode_after_known_title_and_bounds_ranges()
     assert_eq!(episode.episode_numbers, vec![4]);
     assert_eq!(parsed.anime_version, Some(2));
     let target = context(ContextFacetHint::Series, "Hero Academy");
-    for marker in ["S07E12-E1000v2", "S07E12-1000v3", "S07E12-S07E1000v2"] {
+    // Bound the expansion to 1,000 members, not to episode numbers below 1,000.
+    for marker in ["S07E12-E1012v2", "S07E12-1012v3", "S07E12-S07E1012v2"] {
         let parsed = crate::best_parse_for_target(
             &format!("Hero Academy {marker} 1080p WEB-DL-GRP"),
             &target,

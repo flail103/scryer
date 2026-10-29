@@ -22960,6 +22960,38 @@ mod tests {
     }
 
     #[test]
+    fn exact_title_guard_preserves_parenthetical_qualifiers() {
+        let numbering_context = IndexerSearchNumberingContext::default();
+        for (query, qualified) in [
+            ("The Office", "The Office (US)"),
+            ("The Office", "The Office (UK)"),
+            ("Love", "Love (ft. Marriage and Divorce)"),
+        ] {
+            let expected = format!("{query} S01E12 1080p");
+            let other = format!("{qualified} S01E12 1080p");
+            let context = FilterStrategyContext {
+                query,
+                season: Some(1),
+                episode: Some(12),
+                numbering_context: &numbering_context,
+                tagged_aliases: &[],
+                title_guard_mode: TitleGuardMode::ExactTitleMatch,
+                strategy_label: "freetext",
+                is_rss_request: false,
+            };
+            assert_eq!(
+                surviving_titles(&[&expected, &other], &context),
+                vec![expected]
+            );
+            let qualified_context = FilterStrategyContext {
+                query: qualified,
+                ..context
+            };
+            assert_eq!(surviving_titles(&[&other], &qualified_context), vec![other]);
+        }
+    }
+
+    #[test]
     fn exact_title_guard_keeps_parenthetical_dual_names_without_aliases() {
         let numbering_context = IndexerSearchNumberingContext::default();
         for query in ["Lantern Verge", "Touka no Sora"] {

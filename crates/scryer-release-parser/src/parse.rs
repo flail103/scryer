@@ -5253,7 +5253,17 @@ fn parenthetical_title_split(tokens: &[Token], indices: &[usize]) -> Option<usiz
     let first = tokens.get(*alternate.first()?)?;
     let last = tokens.get(*alternate.last()?)?;
     let group = first.group_id?;
+    // A regional disambiguator or a dependent "featuring" phrase belongs
+    // to the primary title; it is not another name for the same work.
+    let regional_qualifier = alternate.len() == 1
+        && matches!(
+            first.normalized.as_str(),
+            "US" | "UK" | "GB" | "AU" | "CA" | "NZ"
+        );
+    let dependent_phrase = matches!(first.normalized.as_str(), "FT" | "FEAT" | "FEATURING");
     if primary.is_empty()
+        || regional_qualifier
+        || dependent_phrase
         || primary
             .iter()
             .any(|index| tokens[*index].group_id.is_some())
@@ -6847,20 +6857,24 @@ fn parse_hyphenated_standard_episode_range_at(
     }
     let endpoint = split_episode_revision(&next.normalized)
         .map_or(next.normalized.as_str(), |(episode, _)| episode);
+    let range_start = *episode_numbers.first()?;
     let range_end = parse_episode_component(endpoint)
-        .filter(|end| *end <= 999)
+        // A bare year after a short episode coordinate is release metadata.
+        // Four-digit episode coordinates and explicit E/SxxE endpoints remain
+        // valid; bound the number of members below instead of their values.
+        .filter(|end| {
+            !(range_start < 1000
+                && endpoint.len() == 4
+                && endpoint.bytes().all(|byte| byte.is_ascii_digit())
+                && (1900..=2099).contains(end))
+        })
         .or_else(|| {
             let (end_season, end_episodes) =
                 parse_standard_episode_token(next.normalized.as_str())?;
             let range_end = *end_episodes.first()?;
-            // Split episode ranges already limit their endpoint to three digits.
-            // Apply the same bound to the newly accepted repeated-standard form
-            // before materializing the inclusive range.
-            (end_season == season && end_episodes.len() == 1 && range_end <= 999)
-                .then_some(range_end)
+            (end_season == season && end_episodes.len() == 1).then_some(range_end)
         })?;
-    let range_start = *episode_numbers.first()?;
-    if range_end < range_start {
+    if range_end < range_start || range_end - range_start > 999 {
         return Some((season, episode_numbers, index));
     }
     Some((season, (range_start..=range_end).collect(), index + 1))

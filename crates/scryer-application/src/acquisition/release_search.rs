@@ -3907,6 +3907,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parenthetical_qualifiers_cannot_anchor_a_different_title() {
+        for (name, qualified) in [
+            ("The Office", "The Office (US)"),
+            ("The Office", "The Office (UK)"),
+            ("Love", "Love (ft. Marriage and Divorce)"),
+        ] {
+            let mut title = spelling_title(name, "eng");
+            title.facet = MediaFacet::Series;
+            title.year = None;
+            title.imdb_id = None;
+            title.aliases.clear();
+            let evidence = spelling_evidence(&title, std::slice::from_ref(&title)).await;
+            let raw = format!("{qualified} S01E12 1080p");
+            assert!(
+                candidate_title_match(&make_candidate(&raw, None), &evidence).is_none(),
+                "{raw}"
+            );
+            title.name = qualified.into();
+            let evidence = spelling_evidence(&title, std::slice::from_ref(&title)).await;
+            assert!(
+                candidate_title_match(&make_candidate(&raw, None), &evidence).is_some(),
+                "{raw}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn slash_separated_anime_titles_match_with_standard_episode_markers() {
         let mut title = spelling_title("Battle Through the Heavens", "eng");
         title.facet = MediaFacet::Anime;
