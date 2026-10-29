@@ -28,6 +28,22 @@ use scryer_domain::{DomainEventPayload, ReleaseGrabbedEventData};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 
+/// Owned by one title visit, then dropped before the next title. Mutable
+/// blocklists, pending releases and submission claims are deliberately not cached.
+struct RssTitleContext {
+    reads: crate::acquisition::title_reads::TitleCatalogReads,
+    scoring: Option<crate::catalog::release_search::PreparedReleaseScoringInputs>,
+}
+
+impl RssTitleContext {
+    fn new(title_id: &str) -> Self {
+        Self {
+            reads: crate::acquisition::title_reads::TitleCatalogReads::new(title_id),
+            scoring: None,
+        }
+    }
+}
+
 /// How many GUIDs each indexer's seen set keeps between its own polls: the
 /// ten feed pages of a hundred items one RSS poll may hand on. A poll that
 /// returns more than this keeps all of them.
@@ -123,14 +139,10 @@ pub const RSS_TARGET_INTERVAL_ENV: &str = "SCRYER_RSS_TARGET_INTERVAL_SECS";
 pub const MINIMUM_RSS_TARGET_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 /// How often the sync worker wakes when the cadence is the shipped default.
 ///
-/// The worker only *considers* RSS on a tick; whether a given indexer is due is
-/// the scheduler's decision, and that decision is a quarter of an hour apart by
-/// default. Each indexer owns one tick of every cadence (three ticks at the
-/// defaults), so a tick polls about a third of the indexers rather than all of
-/// them every third tick. Five minutes is the resolution of the whole RSS lane,
-/// and no cadence shorter than that can take effect unless the worker wakes at
-/// least that often — which is why a shortened cadence pulls this down with it.
-pub const DEFAULT_RSS_SYNC_TICK: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// Every cycle considers all due indexers, with bounded poll concurrency.
+/// The scheduler still owns per-indexer quota/backoff and learned cadence.
+/// Shortened test cadences pull the worker interval down with them.
+pub const DEFAULT_RSS_SYNC_TICK: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 /// Shortens (or lengthens) how often the sync worker wakes, independently of
 /// the cadence itself. A harness that shortens the cadence normally wants the
 /// tick to follow it, which happens automatically; this exists for the reverse
@@ -2148,7 +2160,7 @@ impl AppUseCase {
             }
             titles_processed += 1;
             title_started = Some(std::time::Instant::now());
-            let Some(releases) = matched_by_title.get(title_id) else {
+            let Some(releases) = matched_by_title.remove(title_id) else {
                 continue;
             };
             if locked_titles.contains(title_id) {
@@ -2173,13 +2185,15 @@ impl AppUseCase {
             // pass touches.
             let queue = self.title_queue_snapshot(&title.id, &dl_snapshot).await;
             let queue = queue.as_ref();
+            let mut context = RssTitleContext::new(&title.id);
 
             if has_episodes {
                 // For series: route each release to its covered episode(s) or
                 // pack, gated on per-scope monitoring + missing/below-cutoff.
                 self.process_rss_series_releases(
                     &title,
-                    releases,
+                    &releases,
+                    &mut context,
                     &dl_snapshot,
                     queue,
                     &delay_profiles,
@@ -2190,7 +2204,8 @@ impl AppUseCase {
                 .await;
                 self.process_rss_series_movie_releases(
                     &title,
-                    releases,
+                    &releases,
+                    &mut context,
                     &dl_snapshot,
                     queue,
                     &delay_profiles,
@@ -2215,7 +2230,8 @@ impl AppUseCase {
                 }
                 self.process_rss_title_releases(
                     &title,
-                    releases,
+                    &releases,
+                    &mut context,
                     &dl_snapshot,
                     queue,
                     &delay_profiles,
@@ -2456,6 +2472,7 @@ impl AppUseCase {
         &self,
         title: &Title,
         releases: &[IndexerSearchResult],
+        context: &mut RssTitleContext,
         dl_snapshot: &super::acquisition_workflow::DownloadClientSnapshot,
         queue: Option<&TitleQueueSnapshot>,
         delay_profiles: &[DelayProfile],
@@ -2500,6 +2517,7 @@ impl AppUseCase {
         // Score all releases against quality profile
         let scored = match self
             .score_rss_releases(
+                context,
                 releases,
                 &title.id,
                 &title.library_id,
@@ -2529,6 +2547,7 @@ impl AppUseCase {
 
         // Try to grab the best candidate using the same logic as acquisition
         self.try_grab_rss_release(
+            &context.reads,
             title,
             &wanted,
             &scored,
@@ -2555,6 +2574,7 @@ impl AppUseCase {
         &self,
         title: &Title,
         releases: &[IndexerSearchResult],
+        context: &mut RssTitleContext,
         dl_snapshot: &super::acquisition_workflow::DownloadClientSnapshot,
         queue: Option<&TitleQueueSnapshot>,
         delay_profiles: &[DelayProfile],
@@ -2576,25 +2596,13 @@ impl AppUseCase {
         let title_parse_context =
             build_release_parse_context(title, None, None, Some(category.as_str()));
 
-        let catalog_episodes = self
-            .services
-            .catalog
-            .shows
-            .list_episodes_for_title(&title.id)
-            .await
-            .unwrap_or_default();
-        let catalog_collections = self
-            .services
-            .catalog
-            .shows
-            .list_collections_for_title(&title.id)
-            .await
-            .unwrap_or_default();
+        let catalog_episodes = context.reads.episodes(self).await.unwrap_or_default();
+        let catalog_collections = context.reads.collections(self).await.unwrap_or_default();
         let episodes_by_id = catalog_episodes
             .iter()
             .map(|episode| (episode.id.clone(), episode.clone()))
             .collect::<HashMap<_, _>>();
-        let absolute_scale = scryer_domain::AbsoluteScale::for_catalog(&catalog_episodes);
+        let absolute_scale = scryer_domain::AbsoluteScale::for_catalog(catalog_episodes.iter());
         let monitored_collection_ids = catalog_collections
             .iter()
             .filter(|collection| collection.monitored)
@@ -2604,11 +2612,9 @@ impl AppUseCase {
         // item named `S04E20` belongs to the episode the bridge says it is, not
         // to the season-4 slot the catalog does not have. Loaded once per
         // title; `None` for every title with no stored bridge.
-        let anime_numbering_bridge = self
-            .services
-            .catalog
-            .shows
-            .get_anime_numbering_bridge(&title.id)
+        let anime_numbering_bridge = context
+            .reads
+            .anime_numbering_bridge(self)
             .await
             .unwrap_or_default();
 
@@ -2709,6 +2715,7 @@ impl AppUseCase {
             let owned_releases: Vec<IndexerSearchResult> = episode_releases.to_vec();
             let scored = match self
                 .score_rss_releases(
+                    context,
                     &owned_releases,
                     &title.id,
                     &title.library_id,
@@ -2736,6 +2743,7 @@ impl AppUseCase {
             };
 
             self.try_grab_rss_release(
+                &context.reads,
                 title,
                 &wanted,
                 &scored,
@@ -2754,6 +2762,7 @@ impl AppUseCase {
         for (coverage, release) in pack_items {
             self.process_rss_pack_release(
                 title,
+                context,
                 &coverage,
                 &release,
                 &category,
@@ -2838,6 +2847,7 @@ impl AppUseCase {
     async fn process_rss_pack_release(
         &self,
         title: &Title,
+        context: &mut RssTitleContext,
         coverage: &crate::acquisition_coverage::ReleaseCoverage,
         release: &IndexerSearchResult,
         category: &str,
@@ -2898,6 +2908,7 @@ impl AppUseCase {
             .and_then(|value| value.parse::<u32>().ok());
         let scored = match self
             .score_rss_releases(
+                context,
                 std::slice::from_ref(release),
                 &title.id,
                 &title.library_id,
@@ -2943,6 +2954,7 @@ impl AppUseCase {
         // release's coverage inside the grab path, so no per-episode fan-out and
         // no duplicate submission of the same pack.
         self.try_grab_rss_release(
+            &context.reads,
             title,
             &wanted,
             &scored,
@@ -2969,6 +2981,7 @@ impl AppUseCase {
         &self,
         title: &Title,
         releases: &[IndexerSearchResult],
+        context: &mut RssTitleContext,
         dl_snapshot: &super::acquisition_workflow::DownloadClientSnapshot,
         queue: Option<&TitleQueueSnapshot>,
         delay_profiles: &[DelayProfile],
@@ -3020,7 +3033,13 @@ impl AppUseCase {
 
             let search_title = series_movie_search_title(title, &link);
             let subject = match self
-                .resolve_release_search_subject_for_wanted_item(title, &search_title, &wanted, None)
+                .resolve_release_search_subject_for_wanted_item_with_reads(
+                    title,
+                    &search_title,
+                    &wanted,
+                    None,
+                    Some(&context.reads),
+                )
                 .await
             {
                 Ok(subject) => subject,
@@ -3074,8 +3093,9 @@ impl AppUseCase {
             let indexer_routing = self
                 .resolve_indexer_routing(Some(title.library_id.as_str()), scope_id.as_deref())
                 .await;
+            let mut scoring = None;
             let scored = match self
-                .score_release_results(
+                .score_release_results_with_prepared(
                     matched_releases,
                     &quality_profile,
                     &subject.title_id,
@@ -3085,6 +3105,10 @@ impl AppUseCase {
                     subject.season,
                     subject.episode,
                     subject.absolute_episode,
+                    &mut scoring,
+                    Some(&context.reads),
+                    false,
+                    None,
                     *now,
                 )
                 .await
@@ -3105,6 +3129,7 @@ impl AppUseCase {
             };
 
             self.try_grab_rss_release(
+                &context.reads,
                 title,
                 &wanted,
                 &scored,
@@ -3128,6 +3153,7 @@ impl AppUseCase {
     )]
     async fn score_rss_releases(
         &self,
+        context: &mut RssTitleContext,
         releases: &[IndexerSearchResult],
         title_id: &str,
         library_id: &str,
@@ -3155,7 +3181,7 @@ impl AppUseCase {
             .resolve_indexer_routing(Some(library_id), scope_id.as_deref())
             .await;
 
-        self.score_release_results(
+        self.score_release_results_with_prepared(
             releases.to_vec(),
             &quality_profile,
             title_id,
@@ -3165,6 +3191,10 @@ impl AppUseCase {
             season,
             episode,
             absolute_episode,
+            &mut context.scoring,
+            Some(&context.reads),
+            false,
+            None,
             now,
         )
         .await
@@ -3188,6 +3218,7 @@ impl AppUseCase {
     )]
     async fn try_grab_rss_release(
         &self,
+        reads: &crate::acquisition::title_reads::TitleCatalogReads,
         title: &Title,
         wanted: &AcquisitionScopeState,
         scored: &[IndexerSearchResult],
@@ -3218,14 +3249,15 @@ impl AppUseCase {
             None => None,
         };
         let search_title = self
-            .release_search_title_for_wanted_item(title, &wanted, episode.as_ref(), None)
+            .release_search_title_for_wanted_item(title, &wanted, episode.as_ref(), Some(reads))
             .await;
         let mut subject = match self
-            .resolve_release_search_subject_for_wanted_item(
+            .resolve_release_search_subject_for_wanted_item_with_reads(
                 title,
                 &search_title,
                 &wanted,
                 episode.as_ref(),
+                Some(reads),
             )
             .await
         {
@@ -3238,18 +3270,8 @@ impl AppUseCase {
         if let Some(scope) = scope_override.as_ref() {
             subject.submission_scope = scope.clone();
         }
-        // The episode list, collections and media files are read by the gate,
-        // the admission subject, the scope membership and the submit block
-        // below; one memo serves all of them for this release.
-        let reads = crate::acquisition::title_reads::TitleCatalogReads::new(&title.id);
-        let existing_files = reads
-            .media_files(self)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .filter(|file| file.role.is_primary())
-            .cloned()
-            .collect::<Vec<_>>();
+        // Catalog rows belong to the title visit, shared across all scopes.
+        let existing_files = reads.primary_file_cutoffs(self).await.unwrap_or_default();
         let cutoff_scope = self.cutoff_scope_for(&subject.submission_scope).await;
         let analyzed_cutoff_quality =
             crate::acquisition::decision_helpers::analyzed_cutoff_quality_for_scope(
@@ -3325,13 +3347,13 @@ impl AppUseCase {
                 &scoring_context,
                 None,
                 crate::quality::canonical_context::SubjectIntent::Grab,
-                &reads,
+                reads,
             )
             .await;
         // D18: whatever this title already has in flight, compared on the same
         // ladder as a file on disk. `queue` was read once for the whole title.
         let membership = self
-            .scope_membership_for_with_reads(title, &subject.submission_scope, &reads)
+            .scope_membership_for_with_reads(title, &subject.submission_scope, reads)
             .await;
         let mut queued = Vec::new();
         if let Some(queue) = queue {
@@ -3369,11 +3391,17 @@ impl AppUseCase {
         };
         admission = admission.with_queued(queued);
 
+        let replay_ids: Vec<String> = scored
+            .iter()
+            .filter_map(|candidate| candidate.extra.get("_rss_reconstructed_pending_id"))
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .collect();
         let title_pending = self
             .services
             .workflow
             .pending_releases
-            .list_pending_releases_for_title(&title.id)
+            .list_active_pending_releases_for_title(&title.id, &replay_ids)
             .await
             .unwrap_or_default();
         let pending_scopes = title_pending
@@ -3403,7 +3431,7 @@ impl AppUseCase {
                 admission.clone()
             } else {
                 let membership = self
-                    .scope_membership_for_with_reads(title, scope, &reads)
+                    .scope_membership_for_with_reads(title, scope, reads)
                     .await;
                 let queued = if let Some(queue) = queue {
                     self.queued_releases_for_scope(
@@ -3442,7 +3470,7 @@ impl AppUseCase {
                     &scoring_context,
                     None,
                     crate::quality::canonical_context::SubjectIntent::Grab,
-                    &reads,
+                    reads,
                 )
                 .await
                 .with_queued(queued)
@@ -4207,6 +4235,7 @@ impl AppUseCase {
                     // route-unavailable observation; the marker makes the
                     // evaluator skip that route and continue to another one.
                     Box::pin(self.try_grab_rss_release(
+                        reads,
                         title,
                         &wanted,
                         &scored[best_index..],
@@ -4230,6 +4259,7 @@ impl AppUseCase {
                     // itself. Continue this ranked pass with the next viable
                     // candidate, rather than waiting for another RSS interval.
                     Box::pin(self.try_grab_rss_release(
+                        reads,
                         title,
                         &wanted,
                         &scored[best_index + 1..],
@@ -4296,6 +4326,7 @@ impl AppUseCase {
                     }
                 }
                 Box::pin(self.try_grab_rss_release(
+                    reads,
                     title,
                     &wanted,
                     &scored[best_index + 1..],
@@ -4444,7 +4475,7 @@ mod tests {
             None,
             "this test asserts the unset default; the suite must not set the override"
         );
-        assert_eq!(DEFAULT_RSS_SYNC_TICK, std::time::Duration::from_secs(300));
+        assert_eq!(DEFAULT_RSS_SYNC_TICK, std::time::Duration::from_secs(900));
         assert_eq!(rss_sync_tick_period(), DEFAULT_RSS_SYNC_TICK);
         assert_eq!(
             rss_sync_tick_period_for(DEFAULT_RSS_TARGET_INTERVAL, DEFAULT_RSS_SYNC_TICK),
@@ -4622,6 +4653,7 @@ mod tests {
                 scryer_rules::UserRulesEngine::build(&policies).unwrap();
             let rss = app
                 .score_rss_releases(
+                    &mut RssTitleContext::new(&title.id),
                     std::slice::from_ref(&release),
                     &title.id,
                     &title.library_id,

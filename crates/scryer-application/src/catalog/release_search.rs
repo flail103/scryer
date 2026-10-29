@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-struct PreparedReleaseScoringInputs {
+pub(crate) struct PreparedReleaseScoringInputs {
     blocklist: TitleReleaseBlocklistSignatures,
     has_usenet_client: bool,
     has_torrent_client: bool,
@@ -21,8 +21,8 @@ struct PreparedReleaseScoringInputs {
     enabled_protocols: Option<(bool, bool)>,
     title: Title,
     canonical_context: crate::quality::canonical_context::ResolvedScoringContext,
-    catalog_episodes: Vec<Episode>,
-    catalog_collections: Vec<Collection>,
+    catalog_episodes: Arc<Vec<Episode>>,
+    catalog_collections: Arc<Vec<Collection>>,
     /// The title's community numbering layout, loaded once per scoring batch.
     /// `None` for every non-anime title and for anime SMG has no bridge for,
     /// which is what keeps their numbering handling byte-for-byte as it was.
@@ -1058,6 +1058,7 @@ impl AppUseCase {
             .collect()
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn score_release_results(
         &self,
@@ -1084,6 +1085,7 @@ impl AppUseCase {
             episode,
             absolute_episode,
             &mut prepared,
+            None,
             false,
             None,
             now,
@@ -1095,7 +1097,7 @@ impl AppUseCase {
         clippy::too_many_arguments,
         reason = "release scoring needs the full search context to produce deterministic ranking decisions"
     )]
-    async fn score_release_results_with_prepared(
+    pub(crate) async fn score_release_results_with_prepared(
         &self,
         mut raw_results: Vec<IndexerSearchResult>,
         quality_profile: &QualityProfile,
@@ -1113,6 +1115,7 @@ impl AppUseCase {
         episode: Option<u32>,
         absolute_episode: Option<u32>,
         prepared: &mut Option<PreparedReleaseScoringInputs>,
+        catalog_reads: Option<&crate::acquisition::title_reads::TitleCatalogReads>,
         preserve_duplicate_sources: bool,
         // Set only for an operator's whole-season search: the season whose
         // multi-episode releases are the only ones kept. Applied here, before
@@ -1130,6 +1133,17 @@ impl AppUseCase {
         timer.outcome("error");
         metrics::counter!("scryer_scoring_batch_candidates_total", "purpose" => "live")
             .increment(raw_results.len() as u64);
+        let local_reads = crate::acquisition::title_reads::TitleCatalogReads::new(title_id);
+        let reads = catalog_reads
+            .filter(|reads| reads.covers(title_id))
+            .unwrap_or(&local_reads);
+        // RSS evaluates multiple scopes and may block a failed release between
+        // them. Share catalog/policy inputs, but refresh this mutable exclusion.
+        if catalog_reads.is_some()
+            && let Some(prepared) = prepared.as_mut()
+        {
+            prepared.blocklist = self.load_title_release_blocklist_signatures(title_id).await;
+        }
         if prepared.is_none() {
             let blocklist = self.load_title_release_blocklist_signatures(title_id).await;
             let DownloadSourceCapabilities {
@@ -1168,29 +1182,24 @@ impl AppUseCase {
                 &canonical_context
                     .view(crate::quality_profile::CoverageSizeBasis::default(), false),
             );
-            let catalog_episodes = self
-                .services
-                .catalog
-                .shows
-                .list_episodes_for_title(title_id)
-                .await
-                .unwrap_or_default();
-            let catalog_collections = self
-                .services
-                .catalog
-                .shows
-                .list_collections_for_title(title_id)
-                .await
-                .unwrap_or_default();
+            // A reusable RSS snapshot must never turn a failed catalog read
+            // into an empty success retained for every later scope.
+            let (catalog_episodes, catalog_collections) = if catalog_reads.is_some() {
+                (reads.episodes(self).await?, reads.collections(self).await?)
+            } else {
+                (
+                    reads.episodes(self).await.unwrap_or_default(),
+                    reads.collections(self).await.unwrap_or_default(),
+                )
+            };
             // Read once per title and reused for every release scored against
             // it; `None` for every title with no stored bridge.
-            let anime_numbering_bridge = self
-                .services
-                .catalog
-                .shows
-                .get_anime_numbering_bridge(title_id)
-                .await
-                .unwrap_or_default();
+            let bridge = reads.anime_numbering_bridge(self).await;
+            let anime_numbering_bridge = if catalog_reads.is_some() {
+                bridge?
+            } else {
+                bridge.unwrap_or_default()
+            };
             let indexer_priority_by_name =
                 self.build_indexer_priority_by_name(indexer_routing).await;
             *prepared = Some(PreparedReleaseScoringInputs {
@@ -1286,20 +1295,16 @@ impl AppUseCase {
                 .as_ref()
                 .is_some_and(|episode| episode.is_series_pack);
             let pack_below_missing_threshold = if is_series_pack {
-                if prepared.primary_episode_ids.is_none() {
+                if prepared.primary_episode_ids.is_none()
+                    || (catalog_reads.is_some()
+                        && matches!(prepared.primary_episode_ids, Some(None)))
+                {
                     prepared.primary_episode_ids = Some(
-                        match self
-                            .services
-                            .library
-                            .media_files
-                            .list_media_files_for_title(title_id)
-                            .await
-                        {
+                        match reads.primary_file_cutoffs(self).await {
                             Ok(files) => Some(
                                 files
-                                    .into_iter()
-                                    .filter(|file| file.role.is_primary())
-                                    .filter_map(|file| file.episode_id)
+                                    .iter()
+                                    .filter_map(|file| file.episode_id.clone())
                                     .collect::<std::collections::HashSet<_>>(),
                             ),
                             Err(error) => {
@@ -1867,6 +1872,7 @@ impl AppUseCase {
                     episode,
                     absolute_episode,
                     &mut scoring_inputs,
+                    None,
                     mode == SearchMode::Auto,
                     multi_episode_season,
                     scoring_now,
