@@ -1933,9 +1933,21 @@ enum CollectionTypeValue {
 The operator's explicit first-run authentication decision.
 """
 input CompleteInitialAuthenticationInput {
+	"""
+	Authentication mode explicitly selected by the operator.
+	"""
 	mode: InitialAuthenticationMode!
+	"""
+	Administrator password; required only when selecting password authentication.
+	"""
 	password: String
+	"""
+	Explicit acknowledgement that disabling authentication permits unauthenticated access.
+	"""
 	acknowledgeNoAuthentication: Boolean!
+	"""
+	One-time setup code authorizing the initial authentication decision.
+	"""
 	setupCode: String
 }
 
@@ -9318,12 +9330,27 @@ type IndexerSearchResultPayload {
 Authentication mode explicitly selected during initial setup.
 """
 enum InitialAuthenticationMode {
+	"""
+	Require a local password login for this instance.
+	"""
 	PASSWORD
+	"""
+	Allow unauthenticated access after the operator explicitly acknowledges it.
+	"""
 	NO_AUTHENTICATION
 }
 
+"""
+Result of the operator's first-run authentication decision.
+"""
 type InitialAuthenticationPayload {
+	"""
+	Whether the initial authentication decision is durably complete.
+	"""
 	completed: Boolean!
+	"""
+	Login tokens for password authentication; null when authentication is disabled.
+	"""
 	login: LoginPayload
 }
 
@@ -19832,7 +19859,12 @@ type MutationRoot {
 	"""
 	Completes the mandatory authentication decision on a new database.
 	"""
-	completeInitialAuthentication(input: CompleteInitialAuthenticationInput!): InitialAuthenticationPayload!
+	completeInitialAuthentication(
+		"""
+		The operator's authentication choice and setup authorization.
+		"""
+		input: CompleteInitialAuthenticationInput!
+	): InitialAuthenticationPayload!
 	"""
 	Replaces an administrator-provided temporary password and issues the full session.
 	"""
@@ -20985,9 +21017,13 @@ type MutationRoot {
 		"""
 		bundleUpload: Upload!,
 		"""
-		Bundle password; null or blank selects an unencrypted bundle.
+		Password required to decrypt the backup bundle.
 		"""
-		password: String
+		password: String,
+		"""
+		One-time setup code authorizing restore while initial authentication is pending.
+		"""
+		setupCode: String
 	): RestoreJobPayload!
 	"""
 	Compatibility operation; accepted work survives a disconnected caller.
@@ -20998,9 +21034,13 @@ type MutationRoot {
 		"""
 		bundleUpload: Upload!,
 		"""
-		Bundle password; null selects an unencrypted bundle.
+		Password required to decrypt the backup bundle.
 		"""
-		password: String
+		password: String,
+		"""
+		One-time setup code authorizing restore while initial authentication is pending.
+		"""
+		setupCode: String
 	): RestoreInspectPayload!
 	"""
 	Stage an inspected restore bundle for application on restart and schedule that restart.
@@ -21011,9 +21051,13 @@ type MutationRoot {
 		"""
 		uploadId: ID!,
 		"""
-		Bundle password; null or blank selects an unencrypted bundle.
+		Password required to decrypt the backup bundle.
 		"""
-		password: String
+		password: String,
+		"""
+		One-time setup code authorizing restore while initial authentication is pending.
+		"""
+		setupCode: String
 	): RestoreJobPayload!
 	"""
 	Compatibility operation; restoration is owned by the coordinator.
@@ -21024,9 +21068,13 @@ type MutationRoot {
 		"""
 		uploadId: ID!,
 		"""
-		Bundle password; null selects an unencrypted bundle.
+		Password required to decrypt the backup bundle.
 		"""
-		password: String
+		password: String,
+		"""
+		One-time setup code authorizing restore while initial authentication is pending.
+		"""
+		setupCode: String
 	): RestoreApplyPayload!
 	"""
 	Save the caller's external-import secret draft and report whether another draft was replaced.
@@ -23964,7 +24012,12 @@ type QueryRoot {
 	"""
 	Observe the current restore without extending its deadline or starting work.
 	"""
-	restoreStatus: RestoreJobPayload
+	restoreStatus(
+		"""
+		One-time setup code authorizing restore while initial authentication is pending.
+		"""
+		setupCode: String
+	): RestoreJobPayload
 	"""
 	List a permission-filtered title catalog page with optional facet, filter, search, sort, and pagination controls.
 	"""

@@ -2667,10 +2667,8 @@ pub fn search_relevant_managed_indexer_metadata(raw: Option<&str>) -> serde_json
         return serde_json::Value::Null;
     };
     let mut projected = serde_json::Map::new();
-    for key in ["enable_automatic_search"] {
-        if let Some(value) = object.get(key) {
-            projected.insert(key.to_string(), value.clone());
-        }
+    if let Some(value) = object.get("enable_automatic_search") {
+        projected.insert("enable_automatic_search".to_string(), value.clone());
     }
     serde_json::Value::Object(projected)
 }
@@ -2993,8 +2991,14 @@ impl IndexerSearchStrategyEventSink {
         Self { sender }
     }
 
-    pub async fn send(&self, event: IndexerSearchStrategyEvent) -> Result<(), ()> {
-        self.sender.send(event).await.map_err(|_| ())
+    pub async fn send(
+        &self,
+        event: IndexerSearchStrategyEvent,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<()>> {
+        self.sender
+            .send(event)
+            .await
+            .map_err(|_| tokio::sync::mpsc::error::SendError(()))
     }
 }
 
@@ -3048,23 +3052,29 @@ impl IndexerSearchPageSink {
         })
     }
 
-    pub async fn send(&self, results: Vec<IndexerSearchResult>) -> Result<(), ()> {
+    pub async fn send(
+        &self,
+        results: Vec<IndexerSearchResult>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<()>> {
         let Some(reservation) = self.reserve().await else {
-            return Err(());
+            return Err(tokio::sync::mpsc::error::SendError(()));
         };
         reservation.send(results).await
     }
 }
 
 impl IndexerSearchPageReservation {
-    pub async fn send(mut self, results: Vec<IndexerSearchResult>) -> Result<(), ()> {
+    pub async fn send(
+        mut self,
+        results: Vec<IndexerSearchResult>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<()>> {
         self.sender
             .send(IndexerSearchPage {
                 results,
                 _reservation: self.permit.take(),
             })
             .await
-            .map_err(|_| ())
+            .map_err(|_| tokio::sync::mpsc::error::SendError(()))
     }
 }
 

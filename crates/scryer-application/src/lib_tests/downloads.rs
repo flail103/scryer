@@ -7059,7 +7059,7 @@ async fn automatic_disc_import_holds_unmapped_encrypted_and_unknown_images() {
         )
         .unwrap();
         if kind == "encrypted" {
-            for packet in clip.chunks_exact_mut(192) {
+            for packet in clip.as_chunks_mut::<192>().0 {
                 if packet[4] == 0x47 {
                     packet[7] |= 0x80;
                 }

@@ -82,7 +82,7 @@ async fn library_scope(
     actor: &User,
     path: LibraryPath,
     permission: scryer_domain::LibraryPermission,
-) -> Result<Option<String>, Response> {
+) -> Result<Option<String>, Box<Response>> {
     if !state.scoped {
         return Ok(None);
     }
@@ -100,15 +100,15 @@ async fn library_scope(
         .iter()
         .any(|library| library.id == id && state.flavor.facets().contains(&library.facet))
     {
-        return Err(validation(
+        return Err(Box::new(validation(
             "libraryId",
             "The selected library is unavailable or incompatible with this endpoint",
-        ));
+        )));
     }
     Ok(Some(id))
 }
 
-async fn actor(state: &CompatState, headers: &HeaderMap) -> Result<User, Response> {
+async fn actor(state: &CompatState, headers: &HeaderMap) -> Result<User, Box<Response>> {
     let key = headers
         .get("x-api-key")
         .and_then(|value| value.to_str().ok())
@@ -135,7 +135,7 @@ async fn status(
 ) -> Response {
     let actor = match actor(&state, &headers).await {
         Ok(actor) => actor,
-        Err(error) => return error,
+        Err(error) => return *error,
     };
     if let Err(error) = library_scope(
         &state,
@@ -145,7 +145,7 @@ async fn status(
     )
     .await
     {
-        return error;
+        return *error;
     }
     Json(json!({ "version": crate::VERSION })).into_response()
 }
@@ -153,12 +153,12 @@ async fn status(
 async fn tags(State(state): State<CompatState>, path: LibraryPath, headers: HeaderMap) -> Response {
     let actor = match actor(&state, &headers).await {
         Ok(actor) => actor,
-        Err(error) => return error,
+        Err(error) => return *error,
     };
     if let Err(error) =
         library_scope(&state, &actor, path, scryer_domain::LibraryPermission::View).await
     {
-        return error;
+        return *error;
     }
     Json(json!([])).into_response()
 }
@@ -330,7 +330,7 @@ async fn push(
 ) -> Response {
     let actor = match actor(&state, &headers).await {
         Ok(actor) => actor,
-        Err(error) => return error,
+        Err(error) => return *error,
     };
     let body = match body {
         Ok(Json(body)) => body,
@@ -349,7 +349,7 @@ async fn push(
     .await
     {
         Ok(id) => id,
-        Err(error) => return error,
+        Err(error) => return *error,
     };
     match state.auth.app.submit_arr_compat_release(&actor, input, state.flavor.facets(), library_id.as_deref()).await {
         Ok(outcome) => Json(json!([{
@@ -386,12 +386,12 @@ async fn titles(
 ) -> Response {
     let actor = match actor(&state, &headers).await {
         Ok(actor) => actor,
-        Err(error) => return error,
+        Err(error) => return *error,
     };
     let library_ids =
         match library_scope(&state, &actor, path, scryer_domain::LibraryPermission::View).await {
             Ok(id) => id.map(|id| vec![id]),
-            Err(error) => return error,
+            Err(error) => return *error,
         };
     // Each body chunk contains at most one bounded catalog page. A read error
     // aborts the stream rather than returning a silently truncated JSON array.

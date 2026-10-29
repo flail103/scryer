@@ -1172,8 +1172,11 @@ fn password_retry_recovery_queue_item(submission: DownloadSubmission) -> Downloa
         queued_at: None,
         last_updated_at: None,
         attention_required: true,
-        attention_reason_code: None,
-        attention_reason: Some(crate::DOWNLOAD_PASSWORD_RETRY_REASON.into()),
+        attention_reason_code: Some(crate::DOWNLOAD_PASSWORD_RETRY_REASON.into()),
+        attention_reason: Some(
+            "A download password retry is awaiting reconciliation. Remove this download if the client no longer has the job."
+                .into(),
+        ),
         download_client_item_id: submission.download_client_item_id,
         download_id: Some(submission.download_id.to_wire()),
         import_status: None,
@@ -2223,6 +2226,21 @@ mod queue_query_unit_tests {
             scope,
             release_listing_json: None,
         }
+    }
+
+    #[test]
+    fn password_retry_recovery_exposes_a_localizable_reason_code() {
+        let item = password_retry_recovery_queue_item(submission(SubmissionScope::Title));
+
+        assert!(item.attention_required);
+        assert_eq!(
+            item.attention_reason_code.as_deref(),
+            Some(crate::DOWNLOAD_PASSWORD_RETRY_REASON),
+        );
+        assert!(item.attention_reason.as_deref().is_some_and(|reason| {
+            !reason.is_empty() && reason != crate::DOWNLOAD_PASSWORD_RETRY_REASON
+        }));
+        assert_eq!(item.tracked_state, Some(TrackedDownloadState::ImportBlocked));
     }
 
     #[test]

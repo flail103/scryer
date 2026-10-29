@@ -2474,6 +2474,13 @@ mod tests {
                     .map_err(|error| AppError::Repository(error.to_string()))?;
             let definition_count = u64::try_from(definition_count)
                 .expect("setting definition count must be nonnegative");
+            let setting_value_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM settings_values")
+                    .fetch_one(source.sqlite.as_ref().expect("sqlite source").pool())
+                    .await
+                    .map_err(|error| AppError::Repository(error.to_string()))?;
+            let setting_value_count = u64::try_from(setting_value_count)
+                .expect("setting value count must be nonnegative");
             target.seed_stale_ephemeral_rows().await?;
             let outcome = source.export_backup(&bundle_path, passphrase).await?;
             let inspected = inspect_backup_bundle(&bundle_path, Some(passphrase))?;
@@ -2505,7 +2512,7 @@ mod tests {
             );
             assert_eq!(
                 inspected.row_counts.get("settings_values").copied(),
-                Some(5),
+                Some(setting_value_count),
                 "inspected bundle should persist the seeded setting value row count"
             );
             assert_eq!(

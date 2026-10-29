@@ -1818,15 +1818,12 @@ pub(crate) async fn graphql_handler(
         Ok(state) => state.filter(|state| state.is_pending()),
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     };
-    if let Some(stage) = setup.as_ref() {
-        if batch
+    if let Some(stage) = setup.as_ref()
+        && batch
             .iter()
             .any(|request| !crate::initial_auth::allows_graphql(request, stage))
-        {
-            return crate::initial_auth::refused(
-                scryer_application::initial_auth::refusal::REQUIRED,
-            );
-        }
+    {
+        return crate::initial_auth::refused(scryer_application::initial_auth::refusal::REQUIRED);
     }
     let rate_limit_provenance = rate_limit_provenance(&headers, remote_addr, &state.rate_limiter);
     let initial_authentication_request = scryer_interface::InitialAuthenticationRequest {

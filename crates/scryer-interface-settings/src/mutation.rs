@@ -2611,6 +2611,7 @@ impl SettingsMutations {
     async fn complete_initial_authentication(
         &self,
         ctx: &Context<'_>,
+        #[graphql(desc = "The operator's authentication choice and setup authorization.")]
         input: CompleteInitialAuthenticationInput,
     ) -> GqlResult<InitialAuthenticationPayload> {
         use scryer_application::initial_auth::refusal;

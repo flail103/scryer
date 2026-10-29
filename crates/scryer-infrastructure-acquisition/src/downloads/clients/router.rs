@@ -2447,7 +2447,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             DownloadFeedbackReadKind::Queue,
             DownloadFeedbackReadKind::History,
         ] {
-            if self.feedback_backoff_remaining(&config, kind).is_some() {
+            if self.feedback_backoff_remaining(config, kind).is_some() {
                 return Ok(DownloadClientObservation::Unknown {
                     reason: "original download client is in feedback backoff".into(),
                     next_history_offset: offset,
@@ -2468,7 +2468,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             Ok(observation) => observation,
             Err(error) => {
                 self.record_feedback_read_failure(
-                    &config,
+                    config,
                     DownloadFeedbackReadKind::History,
                     started.elapsed(),
                 );
@@ -3968,7 +3968,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
         {
             Ok(item) => {
                 self.record_feedback_read_success(
-                    &config,
+                    config,
                     DownloadFeedbackReadKind::RecentCompletedDownloads,
                 );
                 Ok(item.map(|mut item| {
@@ -3994,7 +3994,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             }
             Err(error) => {
                 self.record_feedback_read_failure(
-                    &config,
+                    config,
                     DownloadFeedbackReadKind::RecentCompletedDownloads,
                     started_at.elapsed(),
                 );

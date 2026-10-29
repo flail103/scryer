@@ -170,6 +170,18 @@ fn encoder_workspace_for_large_attributes_and_references() {
                 );
             }
         }
+        // Compiled redaction expressions and search caches outlive an item.
+        // Initialize those dependencies before measuring encoder-owned workspace.
+        for attribute in &result.response_attributes.original {
+            drop(scryer_application::url_redaction::redact_url_credentials(
+                &attribute.value,
+            ));
+        }
+        if let Some(size) = result.size_bytes {
+            drop(scryer_application::url_redaction::redact_url_credentials(
+                &size.to_string(),
+            ));
+        }
         for xml in [true, false] {
             let estimate = feed::scratch_bytes(
                 &result,

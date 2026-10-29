@@ -217,25 +217,25 @@ pub(crate) fn allows_graphql(request: &async_graphql::Request, stage: &SetupStat
             }
             *budget -= 1;
             let ok = match &item.node {
-                Selection::Field(field) => match (mutation, field.node.name.node.as_str(), stage) {
-                    (false, "authRuntimeState", _) => true,
-                    (true, "completeInitialAuthentication", SetupState::Choice) => true,
-                    (false, "restoreStatus", SetupState::Choice) => true,
-                    (
-                        true,
-                        "startInspectRestoreBundle"
-                        | "inspectRestoreBundle"
-                        | "startApplyRestoreBundle"
-                        | "applyRestoreBundle",
-                        SetupState::Choice,
-                    ) => true,
-                    (
-                        true,
-                        "login" | "completeRequiredPasswordChange",
-                        SetupState::PasswordReplacement { .. },
-                    ) => true,
-                    _ => false,
-                },
+                Selection::Field(field) => matches!(
+                    (mutation, field.node.name.node.as_str(), stage),
+                    (false, "authRuntimeState", _)
+                        | (true, "completeInitialAuthentication", SetupState::Choice)
+                        | (false, "restoreStatus", SetupState::Choice)
+                        | (
+                            true,
+                            "startInspectRestoreBundle"
+                                | "inspectRestoreBundle"
+                                | "startApplyRestoreBundle"
+                                | "applyRestoreBundle",
+                            SetupState::Choice,
+                        )
+                        | (
+                            true,
+                            "login" | "completeRequiredPasswordChange",
+                            SetupState::PasswordReplacement { .. },
+                        )
+                ),
                 Selection::InlineFragment(fragment) => allowed(
                     &fragment.node.selection_set.node,
                     document,

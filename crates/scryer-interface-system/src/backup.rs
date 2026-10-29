@@ -184,7 +184,11 @@ impl BackupQueries {
     async fn restore_status(
         &self,
         ctx: &Context<'_>,
-        #[graphql(secret)] setup_code: Option<String>,
+        #[graphql(
+            secret,
+            desc = "One-time setup code authorizing restore while initial authentication is pending."
+        )]
+        setup_code: Option<String>,
     ) -> GqlResult<Option<RestoreJobPayload>> {
         require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
@@ -337,7 +341,11 @@ impl BackupMutations {
         #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
-        #[graphql(secret)] setup_code: Option<String>,
+        #[graphql(
+            secret,
+            desc = "One-time setup code authorizing restore while initial authentication is pending."
+        )]
+        setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
         require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
@@ -441,7 +449,11 @@ impl BackupMutations {
         #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
-        #[graphql(secret)] setup_code: Option<String>,
+        #[graphql(
+            secret,
+            desc = "One-time setup code authorizing restore while initial authentication is pending."
+        )]
+        setup_code: Option<String>,
     ) -> GqlResult<RestoreInspectPayload> {
         let job = self
             .start_inspect_restore_bundle(ctx, bundle_upload, password, setup_code)
@@ -464,7 +476,11 @@ impl BackupMutations {
         #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
-        #[graphql(secret)] setup_code: Option<String>,
+        #[graphql(
+            secret,
+            desc = "One-time setup code authorizing restore while initial authentication is pending."
+        )]
+        setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
         require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
@@ -579,7 +595,11 @@ impl BackupMutations {
         #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
-        #[graphql(secret)] setup_code: Option<String>,
+        #[graphql(
+            secret,
+            desc = "One-time setup code authorizing restore while initial authentication is pending."
+        )]
+        setup_code: Option<String>,
     ) -> GqlResult<RestoreApplyPayload> {
         let job = self
             .start_apply_restore_bundle(ctx, upload_id, password, setup_code)

@@ -863,8 +863,10 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     }
     // Folder creation adds one mutation: 283->284.
     assert!(mutation_field_names.contains(&"createFolder"));
+    // The first-run authentication decision adds one mutation: 284->285.
+    assert!(mutation_field_names.contains(&"completeInitialAuthentication"));
     assert_eq!(
-        mutation_field_count, 284,
+        mutation_field_count, 285,
         "mutation fields: {mutation_field_names:?}"
     );
     // Cross-library transfer (T082, FR-055/FR-056) surfaces destination-title
@@ -1252,14 +1254,22 @@ async fn graphql_introspection_schema_census_matches_contract_baseline() {
     ] {
         assert!(public_type_names.contains(&name), "missing type {name}");
     }
+    // Initial authentication adds its choice enum, input, and result payload.
+    for name in [
+        "InitialAuthenticationMode",
+        "CompleteInitialAuthenticationInput",
+        "InitialAuthenticationPayload",
+    ] {
+        assert!(public_type_names.contains(&name), "missing type {name}");
+    }
     assert_eq!(
         public_types.len(),
-        987,
+        990,
         "public types: {public_type_names:?}"
     );
-    assert_eq!(kind_count("OBJECT"), 533);
-    assert_eq!(kind_count("INPUT_OBJECT"), 242);
-    assert_eq!(kind_count("ENUM"), 200);
+    assert_eq!(kind_count("OBJECT"), 534);
+    assert_eq!(kind_count("INPUT_OBJECT"), 243);
+    assert_eq!(kind_count("ENUM"), 201);
     assert_eq!(kind_count("SCALAR"), 10);
     assert_eq!(kind_count("UNION"), 2);
     assert!(mutation_field_names.contains(&"mediaFileDiscEpisodeTargets"));

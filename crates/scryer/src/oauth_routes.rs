@@ -109,7 +109,7 @@ async fn oauth_authorize_decision(
 ) -> Response {
     match oauth_authorize_decision_inner(state, headers, input).await {
         Ok(response) => Json(response).into_response(),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -117,7 +117,7 @@ async fn oauth_authorize_decision_inner(
     state: OAuthRouteState,
     headers: HeaderMap,
     input: OAuthAuthorizeDecisionRequest,
-) -> Result<OAuthAuthorizeDecisionResponse, Response> {
+) -> Result<OAuthAuthorizeDecisionResponse, Box<Response>> {
     let form_login_enabled = state.auth_runtime.snapshot().effective_form_login_enabled;
     let authless_authorization = !form_login_enabled;
     state
@@ -132,8 +132,7 @@ async fn oauth_authorize_decision_inner(
                 "unsupported_response_type",
                 "only response_type=code is supported",
                 input.state.as_deref(),
-            )
-            .map_err(|response| *response)?,
+            )?,
         });
     }
     let scope = match state
@@ -154,8 +153,7 @@ async fn oauth_authorize_decision_inner(
                     "invalid_scope",
                     &oauth_error_description(&err),
                     input.state.as_deref(),
-                )
-                .map_err(|response| *response)?,
+                )?,
             });
         }
     };
@@ -166,8 +164,7 @@ async fn oauth_authorize_decision_inner(
                 "access_denied",
                 "authorization was denied",
                 input.state.as_deref(),
-            )
-            .map_err(|response| *response)?,
+            )?,
         });
     }
     let (user, authorization_source, auth_session_version, security_action_verified_until) =
@@ -211,11 +208,11 @@ async fn oauth_authorize_decision_inner(
                 || claims.is_oauth_access_token()
                 || AppUseCase::is_reserved_recovery_username(&user.username)
             {
-                return Err(oauth_error(
+                return Err(Box::new(oauth_error(
                     StatusCode::FORBIDDEN,
                     "access_denied",
                     "this session cannot authorize OAuth clients",
-                ));
+                )));
             }
             (
                 user,
@@ -228,11 +225,11 @@ async fn oauth_authorize_decision_inner(
         && security_action_verified_until
             .is_none_or(|verified_until| verified_until <= chrono::Utc::now().timestamp())
     {
-        return Err(oauth_error(
+        return Err(Box::new(oauth_error(
             StatusCode::UNAUTHORIZED,
             "reauthentication_required",
             "sign in again before authorizing this OAuth client",
-        ));
+        )));
     }
     let code = state
         .app

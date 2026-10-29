@@ -120,7 +120,8 @@ test("password retry recovery rows show localized actionable detail", () => {
       state: "FAILED",
       titleId: "synthetic-title",
       trackedMatchType: "SUBMISSION",
-      attentionReason: "download_password_retry",
+      attentionReasonCode: "download_password_retry",
+      attentionReason: "A download password retry is awaiting reconciliation.",
       trackedStatusMessages: ["Additional client detail"],
     }),
     (key) =>

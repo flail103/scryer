@@ -459,7 +459,7 @@ fn resize_rgba_linear_box(image: &RgbaImage, width: u32, height: u32) -> AppResu
 
 fn rgba_to_premultiplied_linear(image: &RgbaImage) -> Vec<fir::pixels::F32x4> {
     let mut out = Vec::with_capacity(image.width() as usize * image.height() as usize);
-    for pixel in image.as_raw().chunks_exact(4) {
+    for pixel in image.as_raw().as_chunks::<4>().0 {
         let alpha = pixel[3] as f32 / 255.0;
         out.push(fir::pixels::F32x4::new([
             srgb_to_linear(pixel[0]) * alpha,
