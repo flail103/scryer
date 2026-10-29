@@ -30,6 +30,10 @@ Keep the pull request description current. Explain the problem, the chosen
 boundary, behavior changes, migrations or compatibility effects, and the exact
 validation performed. Call out anything relevant that was not run.
 
+For pull requests with UX changes, include screenshots in the pull request
+description so reviewers can assess the affected screens and states. Include
+before-and-after screenshots when changing an existing experience.
+
 ## Local Validation
 
 Follow the [validation cadence in AGENTS.md](AGENTS.md#validation-cadence).
