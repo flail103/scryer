@@ -44,6 +44,7 @@ pub(crate) fn build_search_queries(
     let tvdb_id = tvdb_id_from_external_ids(&title.external_ids);
     let anidb_id = anidb_id_from_external_ids(&title.external_ids);
     let mal_id = mal_id_from_external_ids(&title.external_ids);
+    let query_title = indexer_search_title(&title.name);
 
     let category = facet_registry
         .get(&title.facet)
@@ -86,9 +87,9 @@ pub(crate) fn build_search_queries(
                 if season_num > 0 && episode_num > 0 {
                     queries.push(format!(
                         "{} S{:0>2}E{:0>2}",
-                        title.name, season_num, episode_num
+                        query_title, season_num, episode_num
                     ));
-                    queries.push(format!("{} S{:0>2}", title.name, season_num));
+                    queries.push(format!("{} S{:0>2}", query_title, season_num));
                 }
 
                 if season_num == 0 && title.facet == scryer_domain::MediaFacet::Anime {
@@ -97,13 +98,13 @@ pub(crate) fn build_search_queries(
                         .as_deref()
                         .filter(|label| !label.is_empty())
                     {
-                        queries.push(format!("{} {}", title.name, label));
+                        queries.push(format!("{} {}", query_title, label));
                     }
                     if episode_num > 0 {
                         if episode.episode_type == EpisodeType::Ova {
-                            queries.push(format!("{} OVA {:0>2}", title.name, episode_num));
+                            queries.push(format!("{} OVA {:0>2}", query_title, episode_num));
                         } else {
-                            queries.push(format!("{} Special {:0>2}", title.name, episode_num));
+                            queries.push(format!("{} Special {:0>2}", query_title, episode_num));
                         }
                     }
                 }
@@ -114,11 +115,11 @@ pub(crate) fn build_search_queries(
                         .map(|value| value as usize)
                         .filter(|&value| value > 0 && value != episode_num)
                 {
-                    queries.insert(0, format!("{} {:0>3}", title.name, absolute));
+                    queries.insert(0, format!("{} {:0>3}", query_title, absolute));
                 }
 
                 if title.facet == scryer_domain::MediaFacet::Anime && !title.name.is_empty() {
-                    queries.push(title.name.clone());
+                    queries.push(query_title.clone());
                 }
 
                 // Release groups number many anime per cour, not per TVDB
@@ -150,7 +151,7 @@ pub(crate) fn build_search_queries(
             }
 
             if queries.is_empty() {
-                queries.push(title.name.clone());
+                queries.push(query_title.clone());
             }
 
             SearchQueryResult {
@@ -266,6 +267,7 @@ pub(crate) fn community_numbering_queries(
     else {
         return Vec::new();
     };
+    let query_title = indexer_search_title(&title.name);
 
     let mut queries = Vec::new();
     // Only a season number the bridge settles, and one that names no other
@@ -276,7 +278,7 @@ pub(crate) fn community_numbering_queries(
     {
         queries.push(format!(
             "{} S{:0>2}E{:0>2}",
-            title.name, season, coordinates.episode
+            query_title, season, coordinates.episode
         ));
     }
     // A cour with its own name is posted under that name with a bare episode
@@ -307,7 +309,7 @@ pub(crate) fn community_numbering_queries(
                 .filter(|&value| value > 0)
         })
     {
-        queries.push(format!("{} - {:0>2}", title.name, absolute));
+        queries.push(format!("{} - {:0>2}", query_title, absolute));
     }
     queries
 }
@@ -440,12 +442,29 @@ pub(crate) fn build_movie_search_queries(
 }
 
 pub(crate) fn movie_text_search_query(title: &str, year: Option<i32>) -> String {
-    let title = title.trim();
+    let title = indexer_search_title(title.trim());
     if title.is_empty() {
         return String::new();
     }
 
     year.map_or_else(|| title.to_string(), |year| format!("{title} {year}"))
+}
+
+fn indexer_search_title(title: &str) -> String {
+    let mut normalized = String::with_capacity(title.len());
+    let mut at_word_start = true;
+    let mut characters = title.chars().peekable();
+    while let Some(character) = characters.next() {
+        if at_word_start
+            && character == '-'
+            && characters.peek().is_some_and(|next| !next.is_whitespace())
+        {
+            continue;
+        }
+        normalized.push(character);
+        at_word_start = character.is_whitespace();
+    }
+    normalized
 }
 
 pub(crate) fn tmdb_id_from_external_ids(external_ids: &[ExternalId]) -> Option<String> {
@@ -510,6 +529,44 @@ mod tests {
             "Amber Circuit"
         );
         assert_eq!(movie_text_search_query("  ", Some(2026)), "");
+    }
+
+    #[test]
+    fn leading_hyphens_in_title_words_are_not_sent_as_exclusion_operators() {
+        assert_eq!(
+            movie_text_search_query("Show C -Foo Bar Baz-", Some(2026)),
+            "Show C Foo Bar Baz- 2026"
+        );
+        assert_eq!(indexer_search_title("Spider-Man -Foo"), "Spider-Man Foo");
+        assert_eq!(indexer_search_title("Title - 02"), "Title - 02");
+    }
+
+    #[test]
+    fn episode_queries_keep_title_hyphens_out_of_indexer_exclusions() {
+        let mut title = anime_title();
+        title.name = "Show C -Foo Bar Baz-".to_string();
+        let episode = official_episode(1, None);
+        let result = build_search_queries(
+            &title,
+            &wanted_episode_item(&episode),
+            Some(&episode),
+            &FacetRegistry::new(),
+            None,
+            AbsoluteScale::Raw,
+            None,
+        );
+
+        assert!(
+            result
+                .queries
+                .contains(&"Show C Foo Bar Baz- S01E01".to_string())
+        );
+        assert!(
+            result
+                .queries
+                .contains(&"Show C Foo Bar Baz- S01".to_string())
+        );
+        assert!(!result.queries.iter().any(|query| query.contains(" -Foo")));
     }
 
     #[test]

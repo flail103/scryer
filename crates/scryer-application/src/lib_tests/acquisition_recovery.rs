@@ -6497,6 +6497,57 @@ async fn season_pack_ambiguous_submit_error_defers_without_blocklist_entry() {
 }
 
 #[tokio::test]
+async fn missing_adopted_submission_defers_without_failed_signature_or_blocklist() {
+    let release_title = "Recovered.Movie.2024.1080p.WEB-DL-GRP";
+    let download_client = Arc::new(StubDownloadClient::default());
+    let download_submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    *download_submissions
+        .adopted_existing_download_id
+        .lock()
+        .await = Some(scryer_domain::download_identity::DownloadId::new());
+    let pending_releases = Arc::new(TrackingPendingReleaseRepo::default());
+    let wanted_items = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let indexer_client = Arc::new(FixedReleaseIndexerClient::new(release_title));
+    let (app, user, release_attempts) =
+        bootstrap_with_acquisition_tracking_and_indexer_and_release_attempts(
+            download_client.clone(),
+            download_submissions,
+            pending_releases,
+            wanted_items.clone(),
+            indexer_client,
+        );
+    let (title, _) =
+        seed_movie_wanted_for_acquisition(&app, &user, &wanted_items, "Recovered Movie", 2024)
+            .await;
+
+    app.run_background_acquisition_cycle_once().await;
+
+    assert_eq!(
+        download_client
+            .submitted_release_titles
+            .lock()
+            .await
+            .as_slice(),
+        &[release_title.to_string()]
+    );
+    let attempts = release_attempts.attempts.lock().await.clone();
+    assert!(
+        attempts
+            .iter()
+            .all(|attempt| attempt.outcome != ReleaseDownloadAttemptOutcome::Failed),
+        "a missing adopted submission may already be accepted"
+    );
+    assert!(
+        release_attempts
+            .list_failed_release_signatures_for_title(&title.id, 10)
+            .await
+            .expect("list failed signatures")
+            .is_empty()
+    );
+    assert!(title_blocklist_entries(&app, &title.id).await.is_empty());
+}
+
+#[tokio::test]
 async fn acquisition_cycle_non_unavailable_submit_error_still_records_failed_signature() {
     let release_title = "Rejected.Movie.2024.1080p.WEB-DL-GRP";
     let download_client = Arc::new(StubDownloadClient::default());
