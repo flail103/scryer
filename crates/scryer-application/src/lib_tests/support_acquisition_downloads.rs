@@ -316,6 +316,10 @@ pub(super) struct TrackingDownloadSubmissionRepo {
     pub(super) password_claim_gate: Arc<Mutex<Option<OneshotGate>>>,
     pub(super) store: Arc<Mutex<Vec<DownloadSubmission>>>,
     pub(super) record_submission_error: Arc<Mutex<Option<String>>>,
+    /// Simulate canonical identity adoption after the corresponding row has
+    /// disappeared from the submission store.
+    pub(super) adopted_existing_download_id:
+        Arc<Mutex<Option<scryer_domain::download_identity::DownloadId>>>,
     pub(super) identities: DownloadSubmissionIdentities,
     pub(super) identity_states: DownloadIdentityStates,
     pub(super) identity_state_reasons: Arc<Mutex<HashMap<String, String>>>,
@@ -1065,6 +1069,9 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
         submission_identity: DownloadSubmissionIdentity,
         _seed_goals: Option<PersistedSeedGoals>,
     ) -> AppResult<CanonicalDownloadIdentityDisposition> {
+        if let Some(download_id) = self.adopted_existing_download_id.lock().await.take() {
+            return Ok(CanonicalDownloadIdentityDisposition::AdoptedExisting { download_id });
+        }
         let requested_download_id = submission.download_id;
         let identity = ClientJobLocator::from_submission(&submission);
         if let Some(existing) = self.find_by_client_item_id(&identity).await?
