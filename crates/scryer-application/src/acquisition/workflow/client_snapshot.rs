@@ -450,9 +450,15 @@ impl DownloadClientSnapshot {
         if let Some(cached) = guards.cached_acquisition_snapshot() {
             return (*cached).clone();
         }
-        let snapshot = std::sync::Arc::new(Self::build(app).await);
-        guards.store_acquisition_snapshot(std::sync::Arc::clone(&snapshot));
-        (*snapshot).clone()
+        loop {
+            let generation = guards.client_snapshot_generation();
+            let snapshot = std::sync::Arc::new(Self::build(app).await);
+            if guards.store_acquisition_snapshot(generation, std::sync::Arc::clone(&snapshot)) {
+                return (*snapshot).clone();
+            }
+            // A configuration change or submission retired the observations
+            // while they were being read. Rebuild under the same build lock.
+        }
     }
 
     async fn build(app: &AppUseCase) -> Self {

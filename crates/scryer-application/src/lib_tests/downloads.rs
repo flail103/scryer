@@ -19119,6 +19119,52 @@ async fn saving_an_enabled_download_client_ends_its_failure_backoff() {
     );
 }
 
+#[tokio::test]
+async fn saving_client_configuration_retires_failed_and_inflight_snapshots() {
+    let client = Arc::new(StubDownloadClient::default());
+    let (app, user) = bootstrap_with_cleanup_tracking(
+        client.clone(),
+        Arc::new(TrackingDownloadSubmissionRepo::default()),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+    );
+    let config =
+        create_enabled_download_client_config(&app, &user, "Repair Fixture", "nzbget").await;
+    *client.queue_error.lock().await = Some("synthetic credential failure".into());
+    let failed = Arc::new(crate::acquisition_workflow::DownloadClientSnapshot::fetch(&app).await);
+    assert!(failed.queue_listing_failed());
+    let guards = &app.runtime.acquisition.download_submission_guards;
+    let old_generation = guards.client_snapshot_generation();
+    assert!(guards.store_client_snapshot(old_generation, Default::default()));
+    let reads_before = *client.queue_calls.lock().await;
+    *client.queue_error.lock().await = None;
+    app.update_download_client_config(
+        &user,
+        crate::DownloadClientConfigUpdate {
+            id: config.id,
+            config_json: Some(r#"{"host":"repaired-client.invalid"}"#.into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("save corrected configuration");
+    assert!(guards.cached_client_snapshot().is_none());
+    assert!(guards.cached_acquisition_snapshot().is_none());
+    assert!(
+        !guards.store_client_snapshot(old_generation, Default::default()),
+        "an older read cannot republish the client cache"
+    );
+    assert!(
+        !guards.store_acquisition_snapshot(old_generation, failed),
+        "an older read cannot republish the acquisition cache"
+    );
+    let recovered = crate::acquisition_workflow::DownloadClientSnapshot::fetch(&app).await;
+    assert!(!recovered.queue_listing_failed());
+    assert!(
+        *client.queue_calls.lock().await > reads_before,
+        "repair must force a new queue read without waiting for cache expiry"
+    );
+}
+
 /// Sonarr records one refresh outcome per client per tick. A client that
 /// answered both of its reads is authoritative and records a success; a client
 /// that was asked and errored records a failure, which is what escalates it

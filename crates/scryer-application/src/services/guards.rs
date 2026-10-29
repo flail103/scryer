@@ -200,6 +200,7 @@ pub struct DownloadSubmissionGuardTable {
     locks: Arc<tokio::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>>,
     uncertain_titles: Arc<std::sync::Mutex<HashMap<String, UncertainDownloadSubmissionClaim>>>,
     title_states: Arc<std::sync::Mutex<HashMap<String, CanonicalSubmissionTitleState>>>,
+    snapshot_generation: Arc<std::sync::atomic::AtomicU64>,
     client_snapshot: Arc<std::sync::Mutex<Option<CachedDownloadClientSnapshot>>>,
     acquisition_snapshot: Arc<std::sync::Mutex<Option<CachedAcquisitionClientSnapshot>>>,
 }
@@ -241,6 +242,7 @@ impl CanonicalSubmissionTitleState {
 
 #[derive(Clone)]
 struct CachedDownloadClientSnapshot {
+    generation: u64,
     refreshed_at: std::time::Instant,
     snapshot: DownloadClientSnapshotOutcome,
 }
@@ -252,6 +254,7 @@ struct CachedDownloadClientSnapshot {
 /// thousand-item history is not worth copying each time.
 #[derive(Clone)]
 struct CachedAcquisitionClientSnapshot {
+    generation: u64,
     refreshed_at: std::time::Instant,
     snapshot: Arc<crate::acquisition_workflow::DownloadClientSnapshot>,
 }
@@ -397,6 +400,11 @@ impl DownloadSubmissionGuardTable {
         self.invalidate_client_snapshots();
     }
 
+    pub(crate) fn client_snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// Both client-state caches stop describing the clients: a grab was just
     /// submitted, or a download settled. The next reader re-asks.
     ///
@@ -407,6 +415,8 @@ impl DownloadSubmissionGuardTable {
     /// answer could say "free" about a scope that is now claimed, and that is
     /// precisely the double-submit the guard exists to prevent.
     pub(crate) fn invalidate_client_snapshots(&self) {
+        self.snapshot_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         *self
             .client_snapshot
             .lock()
@@ -434,7 +444,10 @@ impl DownloadSubmissionGuardTable {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .filter(|cached| cached.refreshed_at.elapsed() <= CACHED_SUBMISSION_STATE_MAX_AGE)
+            .filter(|cached| {
+                cached.generation == self.client_snapshot_generation()
+                    && cached.refreshed_at.elapsed() <= CACHED_SUBMISSION_STATE_MAX_AGE
+            })
             .map(|cached| cached.snapshot.clone())
     }
 
@@ -448,33 +461,51 @@ impl DownloadSubmissionGuardTable {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .filter(|cached| cached.refreshed_at.elapsed() <= CACHED_SUBMISSION_STATE_MAX_AGE)
+            .filter(|cached| {
+                cached.generation == self.client_snapshot_generation()
+                    && cached.refreshed_at.elapsed() <= CACHED_SUBMISSION_STATE_MAX_AGE
+            })
             .map(|cached| Arc::clone(&cached.snapshot))
     }
 
     pub(crate) fn store_acquisition_snapshot(
         &self,
+        generation: u64,
         snapshot: Arc<crate::acquisition_workflow::DownloadClientSnapshot>,
-    ) {
-        *self
+    ) -> bool {
+        let mut cached = self
             .acquisition_snapshot
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(CachedAcquisitionClientSnapshot {
-                refreshed_at: std::time::Instant::now(),
-                snapshot,
-            });
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if generation != self.client_snapshot_generation() {
+            return false;
+        }
+        *cached = Some(CachedAcquisitionClientSnapshot {
+            generation,
+            refreshed_at: std::time::Instant::now(),
+            snapshot,
+        });
+        true
     }
 
-    pub(crate) fn store_client_snapshot(&self, snapshot: DownloadClientSnapshotOutcome) {
-        *self
+    pub(crate) fn store_client_snapshot(
+        &self,
+        generation: u64,
+        snapshot: DownloadClientSnapshotOutcome,
+    ) -> bool {
+        let mut cached = self
             .client_snapshot
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(CachedDownloadClientSnapshot {
-                refreshed_at: std::time::Instant::now(),
-                snapshot,
-            });
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if generation != self.client_snapshot_generation() {
+            return false;
+        }
+        *cached = Some(CachedDownloadClientSnapshot {
+            generation,
+            refreshed_at: std::time::Instant::now(),
+            snapshot,
+        });
+        true
     }
 
     pub(crate) fn mark_uncertain(&self, title_id: &str, claim: UncertainDownloadSubmissionClaim) {

@@ -628,6 +628,31 @@ impl AppUseCase {
     }
 }
 impl AppUseCase {
+    pub(crate) async fn has_pending_external_import_monitor_snapshot_for_library(
+        &self,
+        facet: &MediaFacet,
+        library_id: &str,
+    ) -> AppResult<bool> {
+        let entry_kind = if *facet == MediaFacet::Movie {
+            ExternalImportMonitorSnapshotEntryKind::Movie
+        } else {
+            ExternalImportMonitorSnapshotEntryKind::Series
+        };
+        let chunks = self
+            .services
+            .workflow
+            .external_import_monitor_snapshots
+            .list_external_import_monitor_snapshot_chunk_batch(
+                &crate::external_import_monitor_apply_session_id_for_library(library_id),
+                facet.clone(),
+                entry_kind,
+                None,
+                1,
+            )
+            .await?;
+        Ok(!chunks.is_empty())
+    }
+
     pub(crate) async fn apply_pending_external_import_monitor_snapshot_for_library(
         &self,
         facet: &MediaFacet,

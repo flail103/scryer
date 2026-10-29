@@ -1455,6 +1455,11 @@ impl AppUseCase {
         job_key: JobKey,
         trigger_source: JobTriggerSource,
     ) -> AppResult<()> {
+        // First-run import supplies authoritative source identities. Automatic
+        // scans must not bind those folders before the wizard has installed them.
+        if trigger_source != JobTriggerSource::Manual && !self.setup_complete().await? {
+            return Ok(());
+        }
         let facet = job_key_library_facet(job_key).expect("library job facet");
         let libraries = self.services.catalog.libraries.list(Some(facet)).await?;
         if libraries.is_empty() {
@@ -1466,6 +1471,18 @@ impl AppUseCase {
 
         let mut first_error = None;
         for library in libraries {
+            // Setup can finish before its hinted full scan starts. Keep automatic
+            // scans behind that scan until it consumes the source monitoring state.
+            if trigger_source != JobTriggerSource::Manual
+                && self
+                    .has_pending_external_import_monitor_snapshot_for_library(
+                        &library.facet,
+                        &library.id,
+                    )
+                    .await?
+            {
+                continue;
+            }
             if let Err(error) = self.ensure_job_can_start(job_key, Some(&library.id)).await {
                 if first_error.is_none() {
                     first_error = Some(error.to_string());

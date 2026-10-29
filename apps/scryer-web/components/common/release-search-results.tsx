@@ -382,6 +382,7 @@ function SearchResultRow({
             {hasLog ? (
               <button
                 type="button"
+                data-ui="score-log-toggle"
                 onClick={() => setExpanded((prev) => !prev)}
                 aria-expanded={expanded}
                 aria-label={
@@ -508,6 +509,7 @@ function SearchResultRow({
                 {hasLog ? (
                   <button
                     type="button"
+                    data-ui="score-log-toggle"
                     onClick={() => setExpanded((prev) => !prev)}
                     aria-expanded={expanded}
                     aria-label={
@@ -710,6 +712,7 @@ function SearchResultRow({
               <button
                 type="button"
                 className={`text-sm font-[var(--font-code)] underline-offset-2 hover:underline ${scoreToneClassName(decision.releaseScore)}`}
+                data-ui="score-log-toggle"
                 onClick={() => setExpanded((prev) => !prev)}
                 aria-label={
                   expanded ? t("nzb.hideScoringLog") : t("nzb.showScoringLog")

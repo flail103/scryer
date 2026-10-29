@@ -146,6 +146,7 @@ export function ProxyTestForm({
               type="button"
               variant="secondary"
               disabled={isTesting}
+              id="settings-proxy-test-close"
               onClick={onClose}
             >
               {t("label.close")}

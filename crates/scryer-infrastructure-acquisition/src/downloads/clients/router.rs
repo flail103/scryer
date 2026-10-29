@@ -250,6 +250,12 @@ enum DownloadFeedbackReadKind {
     RecentCompletedDownloads,
 }
 
+type FeedbackReadBackoffKey = (
+    String,
+    DownloadFeedbackReadKind,
+    chrono::DateTime<chrono::Utc>,
+);
+
 #[derive(Clone, Copy, Debug)]
 struct FeedbackReadBackoffState {
     consecutive_failures: u32,
@@ -324,8 +330,7 @@ pub struct PrioritizedDownloadClientRouter {
     seeding_profiles: Option<Arc<dyn SeedingProfileRepository>>,
     feedback_read_timeout: Duration,
     category_snapshot_store: DownloadClientCategorySnapshotStore,
-    feedback_read_backoff:
-        Arc<Mutex<HashMap<(String, DownloadFeedbackReadKind), FeedbackReadBackoffState>>>,
+    feedback_read_backoff: Arc<Mutex<HashMap<FeedbackReadBackoffKey, FeedbackReadBackoffState>>>,
     /// Durable per-client failure record. `None` routes without it, which is
     /// the pre-status behaviour.
     download_client_status: Option<Arc<dyn DownloadClientStatusRepository>>,
@@ -1064,7 +1069,7 @@ impl PrioritizedDownloadClientRouter {
 
     fn feedback_backoff_remaining(
         &self,
-        client_id: &str,
+        config: &DownloadClientConfig,
         kind: DownloadFeedbackReadKind,
     ) -> Option<Duration> {
         if Self::feedback_read_bypasses_backoff(kind) {
@@ -1075,8 +1080,11 @@ impl PrioritizedDownloadClientRouter {
             .feedback_read_backoff
             .lock()
             .expect("feedback read backoff mutex");
-        let key = (client_id.to_string(), kind);
+        // A read started with older credentials may finish after a save. Its
+        // cooldown belongs only to that configuration revision.
+        let key = (config.id.clone(), kind, config.updated_at);
         let now = Instant::now();
+        backoff.retain(|_, state| state.blocked_until > now);
         match backoff.get(&key).copied() {
             Some(state) if state.blocked_until > now => {
                 Some(state.blocked_until.saturating_duration_since(now))
@@ -1158,7 +1166,7 @@ impl PrioritizedDownloadClientRouter {
                     skipped_client_ids.push(config.id.clone());
                     return None;
                 }
-                if let Some(remaining) = self.feedback_backoff_remaining(&config.id, read_kind) {
+                if let Some(remaining) = self.feedback_backoff_remaining(&config, read_kind) {
                     debug!(
                         client_id = %config.id,
                         client = %config.name,
@@ -1258,7 +1266,7 @@ impl PrioritizedDownloadClientRouter {
         for (config, elapsed, result) in reads {
             match result {
                 Ok(mut items) => {
-                    self.record_feedback_read_success(&config.id, read_kind);
+                    self.record_feedback_read_success(&config, read_kind);
                     read_summary.record_success();
                     for item in &mut items {
                         item.client_id = config.id.clone();
@@ -1267,7 +1275,7 @@ impl PrioritizedDownloadClientRouter {
                     listing.items.extend(items);
                 }
                 Err(error) => {
-                    self.record_feedback_read_failure(&config.id, read_kind, elapsed);
+                    self.record_feedback_read_failure(&config, read_kind, elapsed);
                     read_summary.record_error(&error);
                     listing.unreadable_client_ids.push(config.id.clone());
                     match read_kind {
@@ -1315,17 +1323,21 @@ impl PrioritizedDownloadClientRouter {
         .await
     }
 
-    fn record_feedback_read_success(&self, client_id: &str, kind: DownloadFeedbackReadKind) {
+    fn record_feedback_read_success(
+        &self,
+        config: &DownloadClientConfig,
+        kind: DownloadFeedbackReadKind,
+    ) {
         let mut backoff = self
             .feedback_read_backoff
             .lock()
             .expect("feedback read backoff mutex");
-        backoff.remove(&(client_id.to_string(), kind));
+        backoff.remove(&(config.id.clone(), kind, config.updated_at));
     }
 
     fn record_feedback_read_failure(
         &self,
-        client_id: &str,
+        config: &DownloadClientConfig,
         kind: DownloadFeedbackReadKind,
         failed_read_elapsed: Duration,
     ) {
@@ -1333,7 +1345,9 @@ impl PrioritizedDownloadClientRouter {
             .feedback_read_backoff
             .lock()
             .expect("feedback read backoff mutex");
-        let key = (client_id.to_string(), kind);
+        // A read started with older credentials may finish after a save. Its
+        // cooldown belongs only to that configuration revision.
+        let key = (config.id.clone(), kind, config.updated_at);
         let failures = backoff
             .get(&key)
             .map(|state| state.consecutive_failures.saturating_add(1))
@@ -2433,7 +2447,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             DownloadFeedbackReadKind::Queue,
             DownloadFeedbackReadKind::History,
         ] {
-            if self.feedback_backoff_remaining(&config.id, kind).is_some() {
+            if self.feedback_backoff_remaining(&config, kind).is_some() {
                 return Ok(DownloadClientObservation::Unknown {
                     reason: "original download client is in feedback backoff".into(),
                     next_history_offset: offset,
@@ -2454,7 +2468,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             Ok(observation) => observation,
             Err(error) => {
                 self.record_feedback_read_failure(
-                    &config.id,
+                    &config,
                     DownloadFeedbackReadKind::History,
                     started.elapsed(),
                 );
@@ -3233,7 +3247,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             match result {
                 Ok(mut items) => {
                     self.record_feedback_read_success(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::TitleQueue,
                     );
                     read_summary.record_success();
@@ -3245,7 +3259,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::TitleQueue,
                         elapsed,
                     );
@@ -3307,7 +3321,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             match result {
                 Ok(mut items) => {
                     self.record_feedback_read_success(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentActivity,
                     );
                     read_summary.record_success();
@@ -3320,7 +3334,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentActivity,
                         elapsed,
                     );
@@ -3373,7 +3387,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             queue_read_outcomes.push((download_client_metric_labels(&config), read_ok));
             match result {
                 Ok(mut items) => {
-                    self.record_feedback_read_success(&config.id, DownloadFeedbackReadKind::Queue);
+                    self.record_feedback_read_success(&config, DownloadFeedbackReadKind::Queue);
                     any_client_read_succeeded = true;
                     queue_successes.insert(config.id.clone());
                     for item in &mut items {
@@ -3384,7 +3398,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::Queue,
                         elapsed,
                     );
@@ -3434,7 +3448,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 match result {
                     Ok((mut items, completed)) => {
                         self.record_feedback_read_success(
-                            &config.id,
+                            &config,
                             DownloadFeedbackReadKind::RecentActivity,
                         );
                         any_client_read_succeeded = true;
@@ -3486,7 +3500,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                     }
                     Err(error) => {
                         self.record_feedback_read_failure(
-                            &config.id,
+                            &config,
                             DownloadFeedbackReadKind::RecentActivity,
                             elapsed,
                         );
@@ -3559,7 +3573,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             match result {
                 Ok(mut items) => {
                     self.record_feedback_read_success(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::TitleRecentActivity,
                     );
                     read_summary.record_success();
@@ -3572,7 +3586,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::TitleRecentActivity,
                         elapsed,
                     );
@@ -3625,10 +3639,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             client_priorities.insert(config.id.clone(), config.client_priority);
             match result {
                 Ok(mut items) => {
-                    self.record_feedback_read_success(
-                        &config.id,
-                        DownloadFeedbackReadKind::History,
-                    );
+                    self.record_feedback_read_success(&config, DownloadFeedbackReadKind::History);
                     read_summary.record_success();
                     for item in &mut items {
                         item.client_id = config.id.clone();
@@ -3638,7 +3649,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::History,
                         elapsed,
                     );
@@ -3690,7 +3701,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             match result {
                 Ok(mut items) => {
                     self.record_feedback_read_success(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentCompletedDownloads,
                     );
                     tracing::debug!(
@@ -3714,7 +3725,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentCompletedDownloads,
                         elapsed,
                     );
@@ -3817,7 +3828,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             match result {
                 Ok(mut items) => {
                     self.record_feedback_read_success(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentCompletedDownloads,
                     );
                     let raw_count = items.len();
@@ -3847,7 +3858,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
                 }
                 Err(error) => {
                     self.record_feedback_read_failure(
-                        &config.id,
+                        &config,
                         DownloadFeedbackReadKind::RecentCompletedDownloads,
                         elapsed,
                     );
@@ -3957,7 +3968,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
         {
             Ok(item) => {
                 self.record_feedback_read_success(
-                    &config.id,
+                    &config,
                     DownloadFeedbackReadKind::RecentCompletedDownloads,
                 );
                 Ok(item.map(|mut item| {
@@ -3983,7 +3994,7 @@ impl DownloadClient for PrioritizedDownloadClientRouter {
             }
             Err(error) => {
                 self.record_feedback_read_failure(
-                    &config.id,
+                    &config,
                     DownloadFeedbackReadKind::RecentCompletedDownloads,
                     started_at.elapsed(),
                 );
@@ -9481,6 +9492,37 @@ mod tests {
             parse_download_client_feedback_timeout(Some("invalid"), default),
             default
         );
+    }
+
+    #[test]
+    fn feedback_cooldown_is_scoped_to_the_saved_configuration_revision() {
+        let router = PrioritizedDownloadClientRouter::new(
+            Arc::new(MockDownloadClientConfigRepository {
+                configs: Vec::new(),
+            }),
+            Arc::new(MockSettingsRepository::default()),
+            null_staged_nzb_store(),
+            test_pipeline_limit(),
+            None,
+        );
+        let old = test_config("repair-client", "Repair Fixture", "nzbget", 0);
+        let mut repaired = old.clone();
+        repaired.updated_at += chrono::Duration::nanoseconds(1);
+        let kind = DownloadFeedbackReadKind::Queue;
+        router.record_feedback_read_failure(&old, kind, Duration::ZERO);
+        assert!(router.feedback_backoff_remaining(&old, kind).is_some());
+        assert!(router.feedback_backoff_remaining(&repaired, kind).is_none());
+        // A read using the previous credentials can finish after the save.
+        router.record_feedback_read_failure(&old, kind, Duration::ZERO);
+        assert!(router.feedback_backoff_remaining(&repaired, kind).is_none());
+        router.record_feedback_read_failure(&repaired, kind, Duration::ZERO);
+        router.record_feedback_read_success(&old, kind);
+        assert!(
+            router.feedback_backoff_remaining(&repaired, kind).is_some(),
+            "an old success must not erase a current failure"
+        );
+        router.record_feedback_read_success(&repaired, kind);
+        assert!(router.feedback_backoff_remaining(&repaired, kind).is_none());
     }
 
     #[test]

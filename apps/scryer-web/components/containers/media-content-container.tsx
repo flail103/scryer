@@ -5605,6 +5605,8 @@ export const MediaContentContainer = React.memo(function MediaContentContainer({
               onRemoveFromCatalogOnly={() => setDeleteFilesOnDisk(false)}
               typedConfirmation={titleDeleteTypedConfirmation}
               onTypedConfirmationChange={setTitleDeleteTypedConfirmation}
+              typedConfirmationPromptId="title-delete-typed-confirmation-prompt"
+              typedConfirmationInputId="title-delete-typed-confirmation"
             />
           ) : null}
         </div>

@@ -483,6 +483,10 @@ impl AppUseCase {
             })
             .await?;
         drop(proxy_assignment);
+        self.runtime
+            .acquisition
+            .download_submission_guards
+            .invalidate_client_snapshots();
         // A save is the operator's correction: an enabled client is routed
         // again at once instead of after its backoff, and the next refresh
         // judges the saved configuration afresh.

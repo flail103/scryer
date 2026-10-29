@@ -549,15 +549,21 @@ impl AppUseCase {
                 {
                     snapshot
                 } else {
-                    let snapshot = self
-                        .services
-                        .integrations
-                        .download_client
-                        .list_snapshot_outcome_excluding_client_types(100, &[])
-                        .await
-                        .map_err(|error| AppError::DownloadSubmitUnavailable(error.to_string()))?;
-                    guards.store_client_snapshot(snapshot.clone());
-                    snapshot
+                    loop {
+                        let generation = guards.client_snapshot_generation();
+                        let snapshot = self
+                            .services
+                            .integrations
+                            .download_client
+                            .list_snapshot_outcome_excluding_client_types(100, &[])
+                            .await
+                            .map_err(|error| {
+                                AppError::DownloadSubmitUnavailable(error.to_string())
+                            })?;
+                        if guards.store_client_snapshot(generation, snapshot.clone()) {
+                            break snapshot;
+                        }
+                    }
                 };
                 Some(snapshot)
             }
