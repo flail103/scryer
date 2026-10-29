@@ -409,10 +409,12 @@ impl AppUseCase {
             ..Default::default()
         };
         let mut grabbed_urls = HashSet::new();
+        let mut context = super::RssTitleContext::new(&title.id);
         if has_episodes {
             self.process_rss_series_releases(
                 title,
                 releases,
+                &mut context,
                 &snapshot,
                 queue.as_ref(),
                 &profiles,
@@ -424,6 +426,7 @@ impl AppUseCase {
             self.process_rss_series_movie_releases(
                 title,
                 releases,
+                &mut context,
                 &snapshot,
                 queue.as_ref(),
                 &profiles,
@@ -436,6 +439,7 @@ impl AppUseCase {
             self.process_rss_title_releases(
                 title,
                 releases,
+                &mut context,
                 &snapshot,
                 queue.as_ref(),
                 &profiles,

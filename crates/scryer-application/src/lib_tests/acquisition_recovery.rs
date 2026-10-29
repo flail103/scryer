@@ -11975,6 +11975,118 @@ async fn rss_does_not_grab_paused_scope() {
     assert!(download_submissions.store.lock().await.is_empty());
 }
 
+#[tokio::test]
+async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
+    let submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
+    let wanted = Arc::new(TrackingAcquisitionScopeStateRepo::default());
+    let results = [
+        "Cascade.Falls.S01E01.1080p.WEB-DL-GRP",
+        "Cascade.Falls.S01E02.1080p.WEB-DL-GRP",
+        "Cascade.Falls.S01.COMPLETE.1080p.WEB-DL-GRP",
+    ]
+    .into_iter()
+    .map(|name| {
+        let mut result = FixedReleaseIndexerClient::new(name)
+            .with_listing_facts()
+            .release();
+        result.guid = Some(name.to_string());
+        result.download_url = Some(format!("https://example.invalid/{name}.nzb"));
+        result
+    })
+    .collect();
+    let (mut app, user) = bootstrap_with_acquisition_tracking_and_indexer(
+        Arc::new(StubDownloadClient::default().with_unique_job_ids()),
+        submissions.clone(),
+        Arc::new(TrackingPendingReleaseRepo::default()),
+        wanted.clone(),
+        Arc::new(FixedFeedRssIndexerClient { results }),
+    );
+    let shows = Arc::new(MockShowRepo::default());
+    let files = Arc::new(MockMediaFileRepo::default());
+    app.services.catalog.shows = shows.clone();
+    app = app.with_test_overrides(|services| services.with_media_files(files.clone()));
+    let title = app
+        .add_title(
+            &user,
+            NewTitle {
+                name: "Cascade Falls".into(),
+                facet: MediaFacet::Series,
+                monitored: true,
+                content_status: Some("Continuing".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("series");
+    wanted
+        .remember_title_facet(&title.id, MediaFacet::Series)
+        .await;
+    let season = app
+        .create_collection(
+            &user,
+            title.id.clone(),
+            "season".into(),
+            "1".into(),
+            Some("Season 1".into()),
+            None,
+            Some("1".into()),
+            Some("2".into()),
+        )
+        .await
+        .expect("season");
+    let mut ids = Vec::new();
+    for number in 1..=2 {
+        let episode = app
+            .create_episode(
+                &user,
+                title.id.clone(),
+                Some(season.id.clone()),
+                "standard".into(),
+                Some(number.to_string()),
+                Some("1".into()),
+                Some(format!("S01E{number:02}")),
+                Some(format!("Episode {number}")),
+                Some("2024-01-01".into()),
+                Some(1_440),
+                false,
+                false,
+            )
+            .await
+            .expect("episode");
+        ids.push(episode.id);
+    }
+    let before = [
+        shows.title_episode_reads.load(Ordering::SeqCst),
+        shows.title_collection_reads.load(Ordering::SeqCst),
+        files.title_file_reads.load(Ordering::SeqCst),
+    ];
+    let report = app.run_scheduled_rss_sync().await.expect("RSS cycle");
+    assert_eq!(
+        report.releases_grabbed,
+        2,
+        "report: {report:?}; submissions: {:?}",
+        submissions.store.lock().await
+    );
+    let submitted = submissions.store.lock().await;
+    assert_eq!(submitted.len(), 2);
+    for id in ids {
+        assert!(submitted.iter().any(|item| item.scope
+            == SubmissionScope::Episode {
+                episode_id: id.clone()
+            }));
+    }
+    let after = [
+        shows.title_episode_reads.load(Ordering::SeqCst),
+        shows.title_collection_reads.load(Ordering::SeqCst),
+        files.title_file_reads.load(Ordering::SeqCst),
+    ];
+    assert_eq!(
+        std::array::from_fn::<usize, 3, _>(|i| after[i] - before[i]),
+        [2, 1, 1],
+        "one shared evaluation read, plus the canonical submission guard's independent episode read"
+    );
+}
+
 /// A season pack matching two monitored, missing episodes is grabbed once at
 /// pack granularity (§D5 #3): a single submission carrying the pack submission
 /// scope, not one grab per member episode.

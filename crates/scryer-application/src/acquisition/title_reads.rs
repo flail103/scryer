@@ -29,6 +29,7 @@ pub(crate) struct TitleCatalogReads {
     episodes: OnceCell<Arc<Vec<Episode>>>,
     collections: OnceCell<Arc<Vec<Collection>>>,
     media_files: OnceCell<Arc<Vec<TitleMediaFile>>>,
+    primary_media_files: OnceCell<Arc<Vec<TitleMediaFile>>>,
     collection_episodes: Mutex<HashMap<String, Arc<Vec<Episode>>>>,
     collection_external_ids: Mutex<HashMap<String, Arc<Vec<ScopedExternalId>>>>,
     episode_external_ids: OnceCell<Arc<HashMap<String, Vec<ScopedExternalId>>>>,
@@ -42,6 +43,7 @@ impl TitleCatalogReads {
             episodes: OnceCell::new(),
             collections: OnceCell::new(),
             media_files: OnceCell::new(),
+            primary_media_files: OnceCell::new(),
             collection_episodes: Mutex::new(HashMap::new()),
             collection_external_ids: Mutex::new(HashMap::new()),
             episode_external_ids: OnceCell::new(),
@@ -86,6 +88,27 @@ impl TitleCatalogReads {
                     .list_collections_for_title(&self.title_id)
                     .await
                     .map(Arc::new)
+            })
+            .await
+            .cloned()
+    }
+
+    /// The primary-file projection is shared too: per-scope cutoff checks
+    /// must not clone the title's entire file list again for every episode.
+    pub(crate) async fn primary_media_files(
+        &self,
+        app: &AppUseCase,
+    ) -> AppResult<Arc<Vec<TitleMediaFile>>> {
+        self.primary_media_files
+            .get_or_try_init(|| async {
+                let files = self.media_files(app).await?;
+                Ok(Arc::new(
+                    files
+                        .iter()
+                        .filter(|file| file.role.is_primary())
+                        .cloned()
+                        .collect(),
+                ))
             })
             .await
             .cloned()
