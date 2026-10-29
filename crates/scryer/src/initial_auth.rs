@@ -985,13 +985,17 @@ mod tests {
             Some(&async_graphql::Value::from(refusal::REQUIRED))
         );
         // Exercise the browser's multipart upload boundary as well as JSON controls.
-        for supplied_code in ["wrong", code.as_str()] {
+        for (supplied_code, filename) in [
+            ("wrong", "fixture.enc"),
+            (code.as_str(), "fixture.tar.zst"),
+            (code.as_str(), "fixture.ENC"),
+        ] {
             let operations = serde_json::json!({
                 "query": "mutation($file: Upload!, $code: String) { startInspectRestoreBundle(bundleUpload: $file, setupCode: $code) { id } }",
                 "variables": {"file": null, "code": supplied_code},
             });
             let body = format!(
-                "--fixture-boundary\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{operations}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{{\"0\":[\"variables.file\"]}}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"0\"; filename=\"fixture.tar.zst\"\r\nContent-Type: application/octet-stream\r\n\r\ninvalid-fixture-bundle\r\n--fixture-boundary--\r\n"
+                "--fixture-boundary\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{operations}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{{\"0\":[\"variables.file\"]}}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"0\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\ninvalid-fixture-bundle\r\n--fixture-boundary--\r\n"
             );
             let mut request = Request::builder()
                 .method("POST")
@@ -1020,6 +1024,13 @@ mod tests {
                 assert_eq!(
                     body["errors"][0]["extensions"]["reason"],
                     refusal::CODE_INVALID,
+                    "{body}"
+                );
+                assert!(context.app.restore_coordinator().snapshot().is_none());
+            } else if filename.ends_with(".tar.zst") {
+                assert_eq!(
+                    body["errors"][0]["extensions"]["reason"],
+                    scryer_application::error_reasons::security::BACKUP_BUNDLE_INVALID,
                     "{body}"
                 );
                 assert!(context.app.restore_coordinator().snapshot().is_none());

@@ -3393,7 +3393,7 @@ const zh_HK: LocaleDictionary = {
   "setup.restoreDropTargetSelected": "已選取套件，準備檢查。",
   "setup.restoreDropTargetEncryptedSelected":
     "已選取加密套件。請輸入建立備份時使用的密碼以繼續。",
-  "setup.restoreDropTargetFormats": "支援的格式：.tar.zst 與 .enc",
+  "setup.restoreDropTargetFormats": "僅支援加密的 .enc 備份。",
   "setup.restoreSelectFile": "選取檔案",
   "setup.restoreClearFile": "清除選取",
   "setup.restoreNoFile": "請選取備份套件以繼續。",

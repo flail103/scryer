@@ -334,8 +334,9 @@ impl BackupMutations {
         ctx: &Context<'_>,
         #[graphql(desc = "Backup bundle supplied through GraphQL multipart upload.")]
         bundle_upload: Upload,
-        #[graphql(desc = "Bundle password; null or blank selects an unencrypted bundle.")]
-        password: Option<String>,
+        #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
+            String,
+        >,
         #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
         require_restore_permission(ctx, setup_code.as_deref()).await?;
@@ -352,6 +353,12 @@ impl BackupMutations {
             ))
         })?;
         let password = normalize_password(password);
+        if !upload.filename.to_ascii_lowercase().ends_with(".enc") {
+            return Err(to_gql_error(AppError::validation_refused(
+                scryer_application::error_reasons::security::BACKUP_BUNDLE_INVALID,
+                "restore requires an encrypted .enc backup bundle",
+            )));
+        }
         let guard = app.try_acquire_system_maintenance().map_err(to_gql_error)?;
 
         if !app
@@ -431,7 +438,7 @@ impl BackupMutations {
         ctx: &Context<'_>,
         #[graphql(desc = "Backup bundle supplied through GraphQL multipart upload.")]
         bundle_upload: Upload,
-        #[graphql(desc = "Bundle password; null selects an unencrypted bundle.")] password: Option<
+        #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
         #[graphql(secret)] setup_code: Option<String>,
@@ -454,8 +461,9 @@ impl BackupMutations {
         &self,
         ctx: &Context<'_>,
         #[graphql(desc = "Temporary upload ID returned by inspectRestoreBundle.")] upload_id: ID,
-        #[graphql(desc = "Bundle password; null or blank selects an unencrypted bundle.")]
-        password: Option<String>,
+        #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
+            String,
+        >,
         #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
         require_restore_permission(ctx, setup_code.as_deref()).await?;
@@ -568,7 +576,7 @@ impl BackupMutations {
         &self,
         ctx: &Context<'_>,
         #[graphql(desc = "Temporary upload ID returned by inspectRestoreBundle.")] upload_id: ID,
-        #[graphql(desc = "Bundle password; null selects an unencrypted bundle.")] password: Option<
+        #[graphql(desc = "Password required to decrypt the backup bundle.")] password: Option<
             String,
         >,
         #[graphql(secret)] setup_code: Option<String>,

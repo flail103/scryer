@@ -283,15 +283,26 @@ export function SetupRestoreView({
       )
     : [];
 
-  const handleBundleSelected = React.useCallback((file: File | null) => {
-    setError(null);
-    setSelectedBundle(file);
-    setUploadId(null);
-    setSummary(null);
-    if (!file?.name.toLowerCase().endsWith(".enc")) {
-      setPassword("");
-    }
-  }, []);
+  const handleBundleSelected = React.useCallback(
+    (file: File | null) => {
+      if (file && !file.name.toLowerCase().endsWith(".enc")) {
+        setError(t("setup.restoreDropTargetFormats"));
+        setSelectedBundle(null);
+        setUploadId(null);
+        setSummary(null);
+        setPassword("");
+        return;
+      }
+      setError(null);
+      setSelectedBundle(file);
+      setUploadId(null);
+      setSummary(null);
+      if (!file?.name.toLowerCase().endsWith(".enc")) {
+        setPassword("");
+      }
+    },
+    [t],
+  );
 
   const resetSelection = React.useCallback(() => {
     setSelectedBundle(null);
@@ -402,24 +413,17 @@ export function SetupRestoreView({
 
   return (
     <SetupPanel className="w-full space-y-6 bg-[linear-gradient(180deg,rgba(12,18,35,0.82),rgba(8,13,26,0.72))]">
-      <SetupStepHeader
-        icon={DatabaseBackup}
-        title={t("setup.restoreTitle")}
-        subtitle={t("setup.restoreDescription")}
-      />
+      <SetupStepHeader icon={DatabaseBackup} title={t("setup.restoreTitle")} />
 
       {!summary ? (
         <div className="space-y-5">
           <div className="space-y-3 text-sm">
-            <span className="text-sm font-semibold text-[var(--scry-ink2)]">
-              {t("setup.restoreSelectBundle")}
-            </span>
             <input
               id="setup-restore-file-input"
               key={fileInputKey}
               ref={fileInputRef}
               type="file"
-              accept=".tar.zst,.enc,.zst"
+              accept=".enc"
               className="hidden"
               onChange={(event) => {
                 handleBundleSelected(event.target.files?.[0] ?? null);
@@ -456,9 +460,6 @@ export function SetupRestoreView({
               )}
             >
               <div className="mx-auto flex max-w-xl flex-col items-center gap-4 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[var(--scry-baccent)] bg-[rgba(var(--scry-accent-rgb),0.12)] text-[var(--scry-accent-text)]">
-                  <Upload className="h-5 w-5" />
-                </div>
                 <div className="space-y-1">
                   <p
                     className={cn(
@@ -469,13 +470,6 @@ export function SetupRestoreView({
                     {selectedBundle
                       ? selectedBundle.name
                       : t("setup.restoreDropTargetTitle")}
-                  </p>
-                  <p className="text-sm leading-relaxed text-[var(--scry-muted)]">
-                    {selectedBundle
-                      ? bundleLooksEncrypted
-                        ? t("setup.restoreDropTargetEncryptedSelected")
-                        : t("setup.restoreDropTargetSelected")
-                      : t("setup.restoreDropTargetDescription")}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-3">
@@ -500,9 +494,6 @@ export function SetupRestoreView({
                     </Button>
                   ) : null}
                 </div>
-                <p className="text-xs text-[var(--scry-faint)]">
-                  {t("setup.restoreDropTargetFormats")}
-                </p>
               </div>
             </div>
           </div>

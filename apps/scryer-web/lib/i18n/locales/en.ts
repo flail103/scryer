@@ -8184,7 +8184,8 @@ const en: LocaleDictionary = {
   "setup.restoreDropTargetSelected": "Bundle selected and ready to inspect.",
   "setup.restoreDropTargetEncryptedSelected":
     "Encrypted bundle selected. Enter the password used during backup creation to continue.",
-  "setup.restoreDropTargetFormats": "Supported formats: .tar.zst and .enc",
+  "setup.restoreDropTargetFormats":
+    "Only encrypted .enc backups are supported.",
   "setup.restoreSelectFile": "Select file",
   "setup.restoreClearFile": "Clear selection",
   "setup.restoreNoFile": "Choose a backup bundle to continue.",

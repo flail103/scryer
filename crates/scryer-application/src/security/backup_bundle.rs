@@ -1929,8 +1929,9 @@ fn open_bundle_payload_reader(
         let reader = AeadChunkReader::new(reader, header, passphrase)?;
         Ok(Box::new(reader))
     } else {
-        Ok(Box::new(
-            std::io::Cursor::new(prefix[..read].to_vec()).chain(reader),
+        Err(AppError::validation_refused(
+            crate::error_reasons::security::BACKUP_BUNDLE_INVALID,
+            "restore requires an encrypted backup bundle",
         ))
     }
 }
@@ -2890,23 +2891,22 @@ mod tests {
 
     #[cfg(feature = "runtime-backups")]
     #[test]
-    fn plaintext_backup_extracts_plain_ndjson_parts() {
+    fn plaintext_backup_is_rejected_even_with_encrypted_extension() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let bundle_path = temp.path().join("plain.scryer-backup.tar.zst");
-        write_legacy_plaintext_test_bundle(&bundle_path).expect("write bundle");
-
-        let summary = inspect_backup_bundle(&bundle_path, None).expect("inspect");
-        assert!(!summary.encrypted);
-
-        let extracted = extract_bundle_to_tempdir(&bundle_path, None).expect("extract");
-        assert!(
-            extracted
-                .path()
-                .join(backup_table_part_relative_path("titles"))
-                .exists()
-        );
-        assert!(!extracted.path().join("tables/titles.ndjson.zst").exists());
-        assert!(!extracted.path().join("payload.tar.zst").exists());
+        for name in ["plain.tar.zst", "renamed.enc"] {
+            let bundle_path = temp.path().join(name);
+            write_legacy_plaintext_test_bundle(&bundle_path).expect("write bundle");
+            for password in [None, Some("password")] {
+                let error =
+                    inspect_backup_bundle(&bundle_path, password).expect_err("plaintext refused");
+                assert_eq!(
+                    error.validation_reason(),
+                    Some(crate::error_reasons::security::BACKUP_BUNDLE_INVALID)
+                );
+                assert!(extract_bundle_to_tempdir(&bundle_path, password).is_err());
+            }
+            assert!(bundle_path.is_file(), "rejection must preserve the input");
+        }
     }
 
     #[test]
@@ -3022,27 +3022,35 @@ mod tests {
     #[test]
     fn inspect_rejects_legacy_bundle_format_version() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let bundle_path = temp.path().join("legacy-format.scryer-backup.tar.zst");
-        write_legacy_plaintext_test_bundle(&bundle_path).expect("write bundle");
+        let bundle_path = temp.path().join("legacy-format.scryer-backup.enc");
+        write_test_bundle(&bundle_path, "password").expect("write bundle");
 
-        let extracted = extract_bundle_to_tempdir(&bundle_path, None).expect("extract");
+        let extracted = extract_bundle_to_tempdir(&bundle_path, Some("password")).expect("extract");
         let mut manifest = load_manifest(extracted.path()).expect("manifest");
         manifest.format_version = "scryer-backup-bundle-v1".to_string();
         write_json_file(&extracted.path().join(MANIFEST_FILENAME), &manifest).expect("rewrite");
 
-        let rebuilt_path = temp.path().join("legacy-rebuilt.scryer-backup.tar.zst");
+        let rebuilt_path = temp.path().join("legacy-rebuilt.scryer-backup.enc");
         let writer = write_bundle_payload(
             extracted.path(),
-            AtomicOutputWriter::new(&rebuilt_path).expect("create output"),
+            AeadChunkWriter::new(
+                AtomicOutputWriter::new(&rebuilt_path).expect("create output"),
+                "password",
+            )
+            .expect("encrypt output"),
         )
         .expect("rebuild bundle");
-        writer.finish().expect("persist rebuilt bundle");
+        writer
+            .finish()
+            .expect("finish encryption")
+            .finish()
+            .expect("persist rebuilt bundle");
 
-        let error = inspect_backup_bundle(&rebuilt_path, None).expect_err("legacy format");
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported backup format version")
+        let error =
+            inspect_backup_bundle(&rebuilt_path, Some("password")).expect_err("legacy format");
+        assert_eq!(
+            error.validation_reason(),
+            Some(crate::error_reasons::security::BACKUP_FORMAT_VERSION_UNSUPPORTED)
         );
     }
 

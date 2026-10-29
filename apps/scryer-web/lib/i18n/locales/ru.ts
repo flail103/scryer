@@ -4087,7 +4087,8 @@ const ru: LocaleDictionary = {
   "setup.restoreDropTargetEncryptedSelected":
     "Выбран зашифрованный архив. Введите пароль, указанный при создании резервной копии.",
 
-  "setup.restoreDropTargetFormats": "Поддерживаемые форматы: .tar.zst и .enc",
+  "setup.restoreDropTargetFormats":
+    "Поддерживаются только зашифрованные резервные копии .enc.",
 
   "setup.restoreSelectFile": "Выбрать файл",
   "setup.restoreClearFile": "Очистить выбор",

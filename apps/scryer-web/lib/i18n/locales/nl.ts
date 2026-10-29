@@ -3313,7 +3313,8 @@ const nl: LocaleDictionary = {
     "Bundel geselecteerd en klaar om te inspecteren.",
   "setup.restoreDropTargetEncryptedSelected":
     "Versleutelde bundel geselecteerd. Voer het wachtwoord in dat je bij het maken van de backup hebt gebruikt om door te gaan.",
-  "setup.restoreDropTargetFormats": "Ondersteunde formaten: .tar.zst en .enc",
+  "setup.restoreDropTargetFormats":
+    "Alleen versleutelde .enc-back-ups worden ondersteund.",
   "setup.restoreSelectFile": "Bestand selecteren",
   "setup.restoreClearFile": "Selectie wissen",
   "setup.restoreNoFile": "Kies een backupbundel om door te gaan.",
