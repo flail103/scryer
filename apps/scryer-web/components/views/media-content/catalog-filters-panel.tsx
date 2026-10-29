@@ -394,6 +394,7 @@ export function CatalogFiltersPanel({
           </span>
           <button
             type="button"
+            data-ui="catalog-filters-clear"
             disabled={!hasActiveFilters}
             onClick={() => {
               onClear();
@@ -421,6 +422,7 @@ export function CatalogFiltersPanel({
       <div className="relative mb-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--scry-muted2)]" />
         <Input
+          data-ui="catalog-title-filter"
           placeholder={t("title.filterPlaceholder")}
           value={searchValue}
           onChange={(event) => onSearchValueChange(event.target.value)}

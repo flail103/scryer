@@ -404,6 +404,9 @@ export function SettingsOverviewContainer({
       <TrustedProxiesPanel />
       <ConfirmDialog
         open={experimentalFeaturesConfirmationOpen}
+        contentId="settings-general-experimental-features-dialog"
+        confirmButtonId="settings-general-experimental-features-confirm"
+        cancelButtonId="settings-general-experimental-features-cancel"
         title={t("settings.experimentalFeaturesLabel")}
         description={t("settings.experimentalFeaturesHelp")}
         confirmLabel={t("label.enable")}

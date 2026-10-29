@@ -540,6 +540,7 @@ export function SettingsRecycleBinSection({
                   size="sm"
                   variant="outline"
                   disabled={selectedActionableItems.length === 0 || isBusy}
+                  id="settings-recycle-bin-restore-selected"
                   onClick={() => onRestoreItems(selectedActionableItems)}
                 >
                   <Undo2 className="mr-2 h-4 w-4" />
@@ -549,6 +550,7 @@ export function SettingsRecycleBinSection({
                   size="sm"
                   variant="outline"
                   disabled={selectedActionableItems.length === 0 || isBusy}
+                  id="settings-recycle-bin-delete-selected"
                   onClick={() => onDeleteItems(selectedActionableItems)}
                   className="text-[var(--scry-danger-text-soft)] hover:text-[var(--scry-danger-text)]"
                 >
@@ -559,6 +561,7 @@ export function SettingsRecycleBinSection({
                   size="sm"
                   variant="ghost"
                   disabled={selectedItems.length === 0 || isBusy}
+                  id="settings-recycle-bin-clear-selection"
                   onClick={() => onSelectedItemIdsChange([])}
                 >
                   {t("settings.recycleBinClearSelection")}

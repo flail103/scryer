@@ -193,7 +193,10 @@ function SetupCodeInput({
     if (incoming) inputs.current[Math.min(index + incoming.length, 5)]?.focus();
   };
   return (
-    <fieldset aria-describedby="setup-code-help">
+    <fieldset
+      id="initial-authentication-setup-code"
+      aria-describedby="setup-code-help"
+    >
       <legend className="mb-2">{label}</legend>
       <div className="flex items-center gap-1.5 sm:gap-2">
         {characters.map((character, index) => (
@@ -207,6 +210,7 @@ function SetupCodeInput({
               ref={(element) => {
                 inputs.current[index] = element;
               }}
+              id={`initial-authentication-setup-code-${index + 1}`}
               aria-label={`${label} ${index + 1}`}
               autoComplete={index === 0 ? "one-time-code" : "off"}
               autoCapitalize="characters"
@@ -360,9 +364,18 @@ function AuthenticationChoice({
   }
   return (
     <SetupFrame>
-      <h1 className="text-2xl font-semibold">{t("initialAuth.title")}</h1>
+      <h1
+        id="initial-authentication-heading"
+        className="text-2xl font-semibold"
+      >
+        {t("initialAuth.title")}
+      </h1>
       <p className="text-muted-foreground">{t("initialAuth.description")}</p>
-      <form onSubmit={(event) => void submit(event)} className="space-y-6">
+      <form
+        id="initial-authentication-form"
+        onSubmit={(event) => void submit(event)}
+        className="space-y-6"
+      >
         <fieldset disabled={fetching} className="space-y-3">
           <legend className="mb-3 font-medium">
             {t("initialAuth.choose")}
@@ -371,6 +384,11 @@ function AuthenticationChoice({
             <label key={choice} className="flex gap-3 rounded-lg border p-4">
               <input
                 type="radio"
+                id={
+                  choice === "PASSWORD"
+                    ? "initial-authentication-mode-password"
+                    : "initial-authentication-mode-no-authentication"
+                }
                 name="authentication-mode"
                 value={choice}
                 checked={mode === choice}
@@ -400,6 +418,7 @@ function AuthenticationChoice({
                 type="password"
                 autoComplete="new-password"
                 required
+                id="initial-authentication-password"
                 minLength={minimum}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -411,6 +430,7 @@ function AuthenticationChoice({
                 type="password"
                 autoComplete="new-password"
                 required
+                id="initial-authentication-password-confirmation"
                 value={confirmation}
                 onChange={(e) => setConfirmation(e.target.value)}
               />
@@ -424,6 +444,7 @@ function AuthenticationChoice({
           <label className="flex gap-3">
             <input
               type="checkbox"
+              id="initial-authentication-acknowledge"
               checked={acknowledged}
               onChange={(e) => setAcknowledged(e.target.checked)}
             />
@@ -445,8 +466,13 @@ function AuthenticationChoice({
             </span>
           </div>
         )}
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <p id="initial-authentication-error" role="alert">
+            {error}
+          </p>
+        )}
         <Button
+          id="initial-authentication-submit"
           type="submit"
           disabled={!canSubmit || fetching}
           className="w-full"
@@ -468,6 +494,7 @@ function AuthenticationChoice({
           (state.initialAuthenticationCodeRequired &&
             setupCode.replace(/\s/g, "").length !== 6)
         }
+        id="initial-authentication-restore"
         onClick={() => setRestoring(true)}
       >
         {t("setup.restoreTitle")}

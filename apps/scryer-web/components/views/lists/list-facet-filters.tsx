@@ -189,6 +189,7 @@ export function ListFacetFilters({
               <Button
                 type="button"
                 size="sm"
+                id={`${idPrefix}-rating-match-${value}`}
                 variant={value === ratingMatch ? "default" : "ghost"}
               >
                 {t(`lists.filter.${value}`)}
@@ -294,6 +295,7 @@ export function ListFacetFilters({
               )}
             >
               <Input
+                id={`${idPrefix}-canonical-search`}
                 aria-label={t("lists.filter.searchCanonical")}
                 placeholder={t("lists.filter.searchCanonical")}
                 value={search}
@@ -371,6 +373,7 @@ export function ListFacetFilters({
                 {...decimalInputProps}
                 className="w-20"
                 disabled={disabled}
+                id={`${idPrefix}-rating-${source}`}
                 aria-label={info.label}
                 placeholder={`0–${SCALES[source] ?? 10}`}
                 value={listRatingInputText(

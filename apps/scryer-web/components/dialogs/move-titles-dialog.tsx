@@ -798,6 +798,7 @@ export function MoveTitlesDialog({
             <Button
               variant="outline"
               className="h-auto flex-col gap-3 whitespace-normal p-6 text-base has-[>svg]:px-6"
+              id="move-titles-method-managed"
               onClick={() => chooseMethod("MOVE_WITH_SCRYER")}
             >
               <img
@@ -811,6 +812,7 @@ export function MoveTitlesDialog({
             <Button
               variant="outline"
               className="h-auto flex-col gap-3 whitespace-normal p-6 text-base has-[>svg]:px-6"
+              id="move-titles-method-manual"
               onClick={() => chooseMethod("USER_MOVED_FILES")}
             >
               <User

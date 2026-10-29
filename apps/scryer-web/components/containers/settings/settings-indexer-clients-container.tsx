@@ -809,6 +809,7 @@ export function SettingsIndexerClientsContainer() {
                             variant="outline"
                             size="sm"
                             className="ml-auto"
+                            id="indexer-client-revealed-dismiss"
                             onClick={() => setRevealed(null)}
                           >
                             {t("label.dismiss")}
@@ -994,6 +995,7 @@ export function SettingsIndexerClientsContainer() {
                             >
                               <Checkbox
                                 id={`indexer-client-grant-${source.id}`}
+                                data-indexer-name={source.name}
                                 aria-label={source.name}
                                 checked={!!grant}
                                 disabled={busy}
@@ -1104,6 +1106,7 @@ export function SettingsIndexerClientsContainer() {
                   type="button"
                   variant="outline"
                   disabled={busy}
+                  id="indexer-client-cancel"
                   onClick={closeEditor}
                 >
                   {t("label.cancel")}
@@ -1127,6 +1130,9 @@ export function SettingsIndexerClientsContainer() {
       ) : null}
 
       <ConfirmDialog
+        contentId="indexer-client-key-confirmation"
+        confirmButtonId="indexer-client-key-confirm"
+        cancelButtonId="indexer-client-key-cancel"
         open={confirmation !== null}
         title={
           confirmation

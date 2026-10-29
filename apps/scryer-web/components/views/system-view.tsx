@@ -954,7 +954,11 @@ export function SystemView({
         </div>
       </section>
 
-      <section className={SYSTEM_PANEL_CLASS}>
+      <section
+        id="system-indexer-stats"
+        data-state={indexerStats === null ? "loading" : "ready"}
+        className={SYSTEM_PANEL_CLASS}
+      >
         <div className={SYSTEM_PANEL_HEADER_CLASS}>
           <h3 className={SYSTEM_PANEL_TITLE_CLASS}>Indexer Stats (Last 24h)</h3>
         </div>
@@ -995,6 +999,10 @@ export function SystemView({
               {indexerStats.map((stat) => (
                 <div
                   key={stat.indexerId}
+                  id={`system-indexer-stats-${stat.indexerId}`}
+                  data-ui="system-indexer-stats-card"
+                  data-indexer-id={stat.indexerId}
+                  data-indexer-name={stat.indexerName}
                   className={`${SYSTEM_INSET_CLASS} p-4`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -1016,11 +1024,13 @@ export function SystemView({
                     </span>
                   </div>
                   <div className="mt-3 space-y-2 text-xs">
-                    <p>
+                    <p data-ui="system-indexer-observed-requests">
                       <span className={SYSTEM_MUTED_TEXT_CLASS}>
                         Observed calls today:
                       </span>{" "}
-                      {stat.apiRequestsToday}
+                      <span data-ui="system-indexer-observed-count">
+                        {stat.apiRequestsToday}
+                      </span>
                       {stat.apiRequestsWindowStartedAt ? (
                         <span className={SYSTEM_MUTED_TEXT_CLASS}>
                           {" "}
@@ -1049,7 +1059,11 @@ export function SystemView({
                           : ""}
                       </p>
                     ) : null}
-                    <p>
+                    <p
+                      data-ui="system-indexer-search-runs"
+                      data-query-count={stat.queriesLast24H}
+                      data-failed-count={stat.failedLast24H}
+                    >
                       <span className={SYSTEM_MUTED_TEXT_CLASS}>
                         Search runs:
                       </span>{" "}
@@ -1062,7 +1076,7 @@ export function SystemView({
                       )}
                     </p>
                     {stat.apiMax !== null && (
-                      <p>
+                      <p data-ui="system-indexer-api-usage">
                         <span className={SYSTEM_MUTED_TEXT_CLASS}>
                           Provider API usage:
                         </span>{" "}
@@ -1077,7 +1091,7 @@ export function SystemView({
                       </p>
                     )}
                     {stat.grabMax !== null && (
-                      <p>
+                      <p data-ui="system-indexer-grab-usage">
                         <span className={SYSTEM_MUTED_TEXT_CLASS}>
                           Provider grab usage:
                         </span>{" "}

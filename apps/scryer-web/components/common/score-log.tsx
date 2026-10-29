@@ -187,6 +187,8 @@ export function ScoreStat({
               event.stopPropagation();
               setExpanded((previous) => !previous);
             }}
+            id={id ? `${id}-toggle` : undefined}
+            data-ui="score-log-toggle"
             aria-expanded={expanded}
             aria-label={
               expanded ? t("nzb.hideScoringLog") : t("nzb.showScoringLog")

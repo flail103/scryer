@@ -610,6 +610,7 @@ export function SettingsRecycleBinContainer() {
           <div className="space-y-2 text-sm">
             <label className="flex cursor-pointer items-start gap-2">
               <input
+                id="settings-recycle-bin-conflict-keep-both"
                 type="radio"
                 name="settings-recycle-bin-conflict-policy"
                 checked={pendingAction.conflictPolicy === "KEEP_BOTH"}
@@ -630,6 +631,7 @@ export function SettingsRecycleBinContainer() {
             </label>
             <label className="flex cursor-pointer items-start gap-2">
               <input
+                id="settings-recycle-bin-conflict-replace-existing"
                 type="radio"
                 name="settings-recycle-bin-conflict-policy"
                 checked={pendingAction.conflictPolicy === "REPLACE_EXISTING"}

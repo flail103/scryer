@@ -110,7 +110,11 @@ export function TimePicker({
               onValueChange={(nextHour) => updateValue(nextHour, minute)}
               disabled={disabled}
             >
-              <SelectTrigger className="w-full" aria-label={hourLabel}>
+              <SelectTrigger
+                id={id ? `${id}-hour` : undefined}
+                className="w-full"
+                aria-label={hourLabel}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" className="max-h-72">
@@ -136,7 +140,11 @@ export function TimePicker({
               onValueChange={(nextMinute) => updateValue(hour, nextMinute)}
               disabled={disabled}
             >
-              <SelectTrigger className="w-full" aria-label={minuteLabel}>
+              <SelectTrigger
+                id={id ? `${id}-minute` : undefined}
+                className="w-full"
+                aria-label={minuteLabel}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" className="max-h-72">

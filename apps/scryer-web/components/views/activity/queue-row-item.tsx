@@ -368,6 +368,7 @@ export const QueueRowItem = memo(function QueueRowItem({
           type="button"
           size="sm"
           variant="destructive"
+          id={selectorId("activity", activeTab, "delete", rowSelectorKey)}
           className={`flex-1 ${rowActionVisualClass}`}
           disabled={isRowFullyBusy}
           onClick={() => {

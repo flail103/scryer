@@ -370,6 +370,7 @@ export const QueueTableRow = memo(function QueueTableRow({
             )}
             {row.canIgnore && (
               <QueueIconAction
+                id={selectorId("activity", activeTab, "ignore", rowSelectorKey)}
                 className={`h-10 w-10 border border-border/50 bg-muted/70 text-foreground hover:bg-accent/90 ${rowActionVisualClass}`}
                 disabled={isRowFullyBusy}
                 label={t("queue.ignore")}
@@ -437,6 +438,7 @@ export const QueueTableRow = memo(function QueueTableRow({
             <QueueIconAction
               className={`h-10 w-10 border border-[var(--scry-danger-border)] bg-[var(--scry-danger-bg)] text-[var(--scry-danger-text)] hover:bg-[var(--scry-danger-bg-strong)] ${rowActionVisualClass}`}
               disabled={isRowFullyBusy}
+              id={selectorId("activity", activeTab, "delete", rowSelectorKey)}
               label={t("queue.removeFromDownloader")}
               onClick={() => {
                 if (isActionLoading || isRowBlocked) {

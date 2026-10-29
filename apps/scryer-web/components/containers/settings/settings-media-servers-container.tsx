@@ -896,6 +896,9 @@ export function SettingsMediaServersContainer() {
       />
       <ConfirmDialog
         open={pendingEditorAction !== null}
+        contentId="settings-media-server-discard-dialog"
+        confirmButtonId="settings-media-server-discard-confirm"
+        cancelButtonId="settings-media-server-discard-cancel"
         title={t("settings.mediaServerConfirmDiscardTitle")}
         description={t("settings.mediaServerConfirmDiscardDescription")}
         confirmLabel={

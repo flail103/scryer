@@ -310,7 +310,15 @@ function DynamicConfigField({
           </SelectTrigger>
           <SelectContent>
             {field.options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
+              <SelectItem
+                id={selectorId(
+                  "settings-notification-option",
+                  field.key,
+                  opt.value,
+                )}
+                key={opt.value}
+                value={opt.value}
+              >
                 {opt.label}
               </SelectItem>
             ))}

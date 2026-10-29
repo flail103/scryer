@@ -141,6 +141,7 @@ export function ListTable({
               key={subscription.id}
               id={`list-row-${subscription.id}`}
               data-ui="list-subscription-row"
+              data-list-name={subscription.name}
               className="cursor-pointer hover:bg-[var(--scry-hover)]"
               onClick={() => onOpen(subscription)}
             >
@@ -149,6 +150,7 @@ export function ListTable({
                   <ProviderTile provider={provider} size="sm" />
                   <div className="min-w-0">
                     <button
+                      id={`list-open-${subscription.id}`}
                       type="button"
                       className="block max-w-full truncate text-left text-[14px] font-semibold text-[var(--scry-ink)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--scry-focus)]"
                       onClick={(event) => {

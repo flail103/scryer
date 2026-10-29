@@ -1168,6 +1168,7 @@ export default function LoginPage() {
               ) : null}
               <button
                 type="button"
+                id="login-mfa-enrollment-authenticator"
                 onClick={() => void startJellyfinMfaEnrollment()}
                 disabled={jellyfinMfaBusy || loginEnrollmentPasskeyBusy}
                 className={AUTH_SECONDARY_BUTTON_CLASS}

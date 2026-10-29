@@ -270,6 +270,7 @@ export function TitleTagsPicker({
         >
           <Command shouldFilter={false}>
             <CommandInput
+              wrapperId={`${idPrefix}-tags-search`}
               value={search}
               onValueChange={(value) => {
                 setSearch(value);
@@ -316,6 +317,7 @@ export function TitleTagsPicker({
                 ))}
               {canCreate ? (
                 <CommandItem
+                  data-action-id={`${idPrefix}-tags-create`}
                   value={`create-${candidate}`}
                   onSelect={() => void createAndSelect()}
                   disabled={creating}

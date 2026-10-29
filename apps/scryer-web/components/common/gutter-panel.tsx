@@ -210,6 +210,7 @@ export function GutterPanelButton({
       type="button"
       variant={open ? "outline" : "primary"}
       className="h-10 shrink-0 rounded-[10px] px-3 text-[13px]"
+      id={`${panelId}-toggle`}
       aria-controls={panelId}
       aria-expanded={open}
       onClick={() => onOpenChange(!open)}

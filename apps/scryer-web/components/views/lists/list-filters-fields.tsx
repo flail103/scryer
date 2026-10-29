@@ -117,6 +117,7 @@ export function ListFiltersFields({
           }
           disabled={disabled}
           triggerId={`${idPrefix}-filter-languages`}
+          optionIdPrefix={`${idPrefix}-filter-language`}
           modal
         />
       </div>

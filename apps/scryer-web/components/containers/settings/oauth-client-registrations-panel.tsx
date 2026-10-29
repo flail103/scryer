@@ -754,6 +754,9 @@ export function OAuthClientRegistrationsPanel() {
           {customClients.map((registeredClient) => (
             <div
               key={registeredClient.clientId}
+              id={`oauth-client-${registeredClient.clientId}`}
+              data-ui="oauth-client-registration"
+              data-client-name={registeredClient.displayName}
               className={`${INSET_CLASS} space-y-3 p-3 ${registeredClient.enabled ? "" : "opacity-70"}`}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -773,6 +776,7 @@ export function OAuthClientRegistrationsPanel() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    id={`oauth-client-edit-${registeredClient.clientId}`}
                     type="button"
                     variant="outline"
                     size="sm"
@@ -807,6 +811,7 @@ export function OAuthClientRegistrationsPanel() {
         </div>
 
         <form
+          id="oauth-client-form"
           className={`${INSET_CLASS} space-y-4 p-3`}
           onSubmit={(event) => {
             event.preventDefault();
@@ -825,6 +830,7 @@ export function OAuthClientRegistrationsPanel() {
                 variant="ghost"
                 size="sm"
                 disabled={busy}
+                id="oauth-client-cancel"
                 onClick={resetDraft}
               >
                 Cancel
@@ -885,7 +891,7 @@ export function OAuthClientRegistrationsPanel() {
               className="rounded-[10px] border border-[var(--scry-line2)] px-3 py-2"
             />
           ) : null}
-          <Button type="submit" disabled={busy}>
+          <Button id="oauth-client-save" type="submit" disabled={busy}>
             {busy ? (
               <LoadingMark className="h-4 w-4" />
             ) : (

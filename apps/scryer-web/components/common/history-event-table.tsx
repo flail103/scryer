@@ -598,6 +598,7 @@ export function HistoryEventTable({
                       <button
                         type="button"
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/60 bg-card/80 text-muted-foreground transition hover:text-foreground"
+                        id={selectorId("history-event-expand", event.id)}
                         onClick={() => toggleExpanded(event.id)}
                         aria-expanded={isExpanded}
                         aria-controls={

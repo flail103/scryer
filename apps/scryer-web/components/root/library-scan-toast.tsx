@@ -717,6 +717,7 @@ export function LibraryScanToast({
     autoDismiss ? (
       <button
         type="button"
+        data-ui="library-scan-dismiss"
         onClick={onDismiss}
         className={cn(
           "relative flex h-9 items-center justify-center gap-[7px] overflow-hidden rounded-[9px] border border-[var(--scry-border2)] bg-[var(--scry-bg)] text-[12.5px] font-semibold text-[var(--scry-text2)] transition hover:brightness-110",
@@ -741,6 +742,7 @@ export function LibraryScanToast({
     ) : (
       <button
         type="button"
+        data-ui="library-scan-dismiss"
         onClick={onDismiss}
         className={cn(
           "h-9 rounded-[9px] border border-[var(--scry-border2)] bg-transparent text-[12.5px] font-semibold text-[var(--scry-muted)] transition hover:text-[var(--scry-text2)]",

@@ -3607,6 +3607,7 @@ export function MediaContentView({
                             <Sheet>
                               <SheetTrigger asChild>
                                 <Button
+                                  id="catalog-filters-open"
                                   type="button"
                                   variant="outline"
                                   className="h-10 min-w-0 flex-1 shrink-0 gap-2 rounded-none border-0 bg-transparent px-3 text-[13px] text-[var(--scry-body)] shadow-none transition hover:bg-[var(--scry-hover)] hover:text-[var(--scry-ink2)]"

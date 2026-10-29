@@ -679,6 +679,9 @@ function HealthLine({
             <button
               key={entry.indexerId}
               id={selectorId("indexer-search-health", entry.name)}
+              data-health-state={tone}
+              data-indexer-status={entry.status}
+              data-result-count={entry.resultCount}
               type="button"
               title={
                 [

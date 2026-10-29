@@ -376,6 +376,7 @@ export function ApiKeysPanel({
                 readOnly
                 value={revealed}
                 size={revealed.length + 2}
+                id="settings-profile-api-key-revealed"
                 aria-label="New API key"
                 className="h-10 w-auto max-w-full rounded-r-none font-[var(--font-code)] text-sm text-[var(--scry-ink2)]"
               />
@@ -402,6 +403,7 @@ export function ApiKeysPanel({
               <Button
                 type="button"
                 variant="outline"
+                id="settings-profile-api-key-dismiss"
                 onClick={() => setRevealed(null)}
               >
                 Dismiss
@@ -457,6 +459,7 @@ export function ApiKeysPanel({
                 Action
               </span>
               <Button
+                id="settings-profile-api-key-create"
                 type="submit"
                 disabled={busy || label.trim().length === 0}
                 className="h-10 w-full sm:w-auto"

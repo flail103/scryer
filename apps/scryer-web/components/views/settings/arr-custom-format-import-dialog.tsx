@@ -264,6 +264,7 @@ export default function ArrCustomFormatImportDialog({
               {(["sonarr", "radarr"] as const).map((option) => (
                 <Button
                   key={option}
+                  id={`settings-rules-arr-source-${option}`}
                   type="button"
                   variant={source === option ? "default" : "secondary"}
                   disabled={reviewing || translating}
@@ -426,13 +427,19 @@ export default function ArrCustomFormatImportDialog({
             {t("label.cancel")}
           </Button>
           {inspection ? (
-            <Button type="button" disabled={translating} onClick={translate}>
+            <Button
+              id="settings-rules-arr-translate"
+              type="button"
+              disabled={translating}
+              onClick={translate}
+            >
               {translating ? <LoadingMark className="mr-2 h-4 w-4" /> : null}
               {t("settings.arrImportTranslate")}
             </Button>
           ) : (
             <Button
               type="button"
+              id="settings-rules-arr-review"
               disabled={reviewing || !json.trim()}
               onClick={() => void review()}
             >

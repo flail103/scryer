@@ -855,7 +855,7 @@ export function SettingsBackupsContainer() {
   return (
     <>
       <div className="space-y-4 text-sm">
-        <section className={BACKUPS_PANEL_CLASS}>
+        <section id="auto-backups-panel" className={BACKUPS_PANEL_CLASS}>
           <div className={BACKUPS_PANEL_HEADER_CLASS}>
             <div className="flex items-center justify-between gap-4">
               <h2 className={`min-w-0 ${BACKUPS_PANEL_TITLE_CLASS}`}>
@@ -863,6 +863,7 @@ export function SettingsBackupsContainer() {
               </h2>
               <div className="flex shrink-0">
                 <SettingsToggleSwitch
+                  id="auto-backups-enabled"
                   checked={autoBackupSettings.enabled}
                   disabled={autoBackupSaving}
                   size="lg"

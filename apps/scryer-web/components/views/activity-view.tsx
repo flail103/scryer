@@ -1431,6 +1431,9 @@ export function ActivityView({
       />
       <ConfirmDialog
         open={deleteConfirmItem !== null}
+        contentId="activity-delete-dialog"
+        confirmButtonId="activity-delete-confirm"
+        cancelButtonId="activity-delete-cancel"
         title={t("queue.deleteConfirmTitle")}
         description={t("queue.deleteConfirmDescription")}
         confirmLabel={t("queue.removeFromDownloader")}

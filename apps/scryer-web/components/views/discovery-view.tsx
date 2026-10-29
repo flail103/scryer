@@ -558,7 +558,10 @@ function DiscoveryHero({
     ? t("discovery.add")
     : t("discovery.request");
   return (
-    <section className="group relative min-h-[340px] overflow-hidden rounded-[18px] border border-[var(--scry-border2)] bg-slate-950 lg:h-full">
+    <section
+      id="discovery-hero"
+      className="group relative min-h-[340px] overflow-hidden rounded-[18px] border border-[var(--scry-border2)] bg-slate-950 lg:h-full"
+    >
       {displayedBackdropUrl ? (
         <img
           src={displayedBackdropUrl}
@@ -586,6 +589,7 @@ function DiscoveryHero({
           <button
             type="button"
             onClick={() => onAction(item)}
+            id="discovery-hero-action"
             aria-label={`${heroActionLabel}: ${titleLabel}`}
             className="absolute inset-0 z-20 cursor-pointer rounded-[18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
           />
@@ -617,7 +621,10 @@ function DiscoveryHero({
               {itemTypeLabel(item)}
             </span>
           </div>
-          <h2 className="m-0 mb-3 font-[var(--font-space-grotesk)] text-[clamp(2rem,3vw,46px)] font-bold leading-[0.96] text-white drop-shadow">
+          <h2
+            id="discovery-hero-title"
+            className="m-0 mb-3 font-[var(--font-space-grotesk)] text-[clamp(2rem,3vw,46px)] font-bold leading-[0.96] text-white drop-shadow"
+          >
             {titleLabel}
           </h2>
           <div className="mb-3.5 flex flex-wrap items-center gap-3 text-[13px] text-[var(--scry-text2)]">

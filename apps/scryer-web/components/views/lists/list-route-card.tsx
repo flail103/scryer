@@ -115,6 +115,7 @@ export function ListRouteCard({
       disabled={disabled}
     >
       <CollapsibleTrigger
+        id={`${idPrefix}-route-${kind.toLowerCase()}-toggle`}
         className="group flex w-full items-center justify-between gap-3 rounded-[12px] p-4 text-left text-[13px] font-semibold text-[var(--scry-ink2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         disabled={disabled}
       >

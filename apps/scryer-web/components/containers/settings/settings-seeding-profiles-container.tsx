@@ -200,6 +200,9 @@ export function SettingsSeedingProfilesContainer() {
       />
       <ConfirmDialog
         open={pendingDeleteProfileId !== null}
+        contentId="settings-seeding-profile-delete-dialog"
+        confirmButtonId="settings-seeding-profile-delete-confirm"
+        cancelButtonId="settings-seeding-profile-delete-cancel"
         title={t("label.delete")}
         description={t("settings.seedingProfileDeleteConfirm")}
         confirmLabel={t("label.delete")}

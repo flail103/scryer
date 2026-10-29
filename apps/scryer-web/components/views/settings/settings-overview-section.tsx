@@ -198,6 +198,7 @@ export function SettingsOverviewSection({
       />
 
       <SingleSelectField
+        id="settings-ui-date-time-format"
         label={t("settings.dateTimeFormatLabel")}
         value={dateTimeFormat}
         disabled={dateTimeFormatLoading || dateTimeFormatSaving}
@@ -239,6 +240,7 @@ export function SettingsOverviewSection({
             <div className="flex items-center gap-3">
               <Label>{t("settings.experimentalFeaturesLabel")}</Label>
               <SettingsToggleSwitch
+                id="settings-general-experimental-features"
                 checked={generalSettings.experimentalFeaturesEnabled}
                 ariaLabel={t("settings.experimentalFeaturesLabel")}
                 disabled={generalSaving}

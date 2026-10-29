@@ -175,6 +175,9 @@ export function SettingsDelayProfilesContainer() {
       />
       <ConfirmDialog
         open={pendingDeleteProfileId !== null}
+        contentId="settings-delay-profile-delete-dialog"
+        confirmButtonId="settings-delay-profile-delete-confirm"
+        cancelButtonId="settings-delay-profile-delete-cancel"
         title={t("label.delete")}
         description={t("settings.delayProfileDeleteConfirm")}
         confirmLabel={t("label.delete")}

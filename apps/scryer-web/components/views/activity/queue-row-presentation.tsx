@@ -41,6 +41,8 @@ export function ActivityQueueStatusBadge({
       type="button"
       className={className}
       aria-expanded={isExpanded}
+      id={`${detailId}-toggle`}
+      data-ui="activity-status-details"
       aria-controls={detailId}
       aria-label={`${statusLabel}. ${expandLabel}`}
       onClick={onToggle}

@@ -190,6 +190,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
+      data-option-value={props.value}
       className={selectItemClassName(className)}
       {...props}
     >

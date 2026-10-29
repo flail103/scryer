@@ -2465,6 +2465,9 @@ export const SeriesOverviewContainer = React.memo(
         </ConfirmDialog>
         {mediaFileDeletion.dialog}
         <ConfirmDialog
+          contentId="series-overview-delete-episode-files-dialog"
+          confirmButtonId="series-overview-delete-episode-files-confirm"
+          cancelButtonId="series-overview-delete-episode-files-cancel"
           open={episodeFilesToDelete !== null}
           title={t("seriesOverview.deleteEpisodeFilesTitle")}
           description={t("seriesOverview.deleteEpisodeFilesDescription")}

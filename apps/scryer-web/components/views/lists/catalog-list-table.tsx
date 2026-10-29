@@ -285,7 +285,10 @@ export function CatalogListTable({
                         <ul className="grid max-w-[560px] grid-cols-5 gap-2">
                           {preview.titles.map((title) => (
                             <li key={title.itemKey} className="min-w-0">
-                              <ListPreviewPoster item={title} />
+                              <ListPreviewPoster
+                                item={title}
+                                idPrefix={previewId}
+                              />
                               {providerType === "simkl" ? (
                                 <SimklAttribution itemKey={title.itemKey} />
                               ) : null}
