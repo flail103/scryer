@@ -482,7 +482,12 @@ fn validate_owned_series_import_identity(
         ("imdb", hint.imdb_id.as_deref()),
         ("tmdb", hint.tmdb_id.as_deref()),
     ] {
+        // Missing provider IDs are incomplete metadata, not a conflicting identity.
         if let Some(expected) = expected
+            && owner
+                .external_ids
+                .iter()
+                .any(|id| id.source.eq_ignore_ascii_case(source))
             && !owner
                 .external_ids
                 .iter()
@@ -2578,6 +2583,35 @@ mod tests {
         candidate.identity_hint = None;
         validate_owned_series_import_identity(&candidate, &owner)
             .expect("ordinary folder scans retain ownership");
+    }
+
+    #[test]
+    fn imported_identity_allows_missing_provider_ids_on_the_folder_owner() {
+        let mut candidate = series_candidate("Namesake Series", None);
+        candidate.identity_hint = Some(crate::library_scan_metadata::MetadataIdentityHint {
+            source: crate::library_scan_metadata::MetadataIdentitySource::ExternalImportSonarr,
+            tvdb_id: Some("900001".into()),
+            imdb_id: Some("tt900001".into()),
+            tmdb_id: Some("800001".into()),
+            title: None,
+            year: None,
+        });
+        let mut owner = build_series_title("existing-owner");
+        owner.external_ids.clear();
+        validate_owned_series_import_identity(&candidate, &owner)
+            .expect("an owner without provider IDs has no known identity conflict");
+        for (source, value) in [("tvdb", "900001"), ("imdb", "tt900001"), ("tmdb", "800001")] {
+            owner.external_ids = vec![scryer_domain::ExternalId::new(source, value)];
+            validate_owned_series_import_identity(&candidate, &owner)
+                .expect("matching known identity permits missing auxiliary provider IDs");
+            owner.external_ids[0].value = "different".into();
+            assert_eq!(
+                validate_owned_series_import_identity(&candidate, &owner)
+                    .expect_err("a known provider disagreement still conflicts")
+                    .validation_reason(),
+                Some(crate::error_reasons::library::FOLDER_OWNERSHIP_CONFLICT)
+            );
+        }
     }
 
     #[test]
