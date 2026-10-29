@@ -18,7 +18,7 @@ const fr: LocaleDictionary = {
     "Je comprends que toute personne autorisée à accéder à cette instance sans authentification pourra agir comme administrateur. Les restrictions réseau existantes restent applicables.",
   "initialAuth.code": "Code de configuration",
   "initialAuth.codeHelp":
-    "Le code à usage unique figure dans la console du serveur ou la sortie du conteneur ou du service. Redémarrer Scryer remplace ce code.",
+    "Le code à usage unique figure dans la console du serveur ou la sortie du conteneur ou du service. Sur l’application de bureau, ouvrez logs/console.log dans le dossier de données de Scryer. Redémarrer Scryer remplace ce code.",
   "initialAuth.continue": "Enregistrer le mot de passe et continuer",
   "initialAuth.continueWithout":
     "Confirmer l’absence d’authentification et continuer",
@@ -35,7 +35,7 @@ const fr: LocaleDictionary = {
   "initialAuth.replaceRequired":
     "Connectez-vous avec le mot de passe administrateur temporaire et remplacez-le.",
   "initialAuth.invalidCode":
-    "Saisissez le code de configuration affiché dans la console du serveur.",
+    "Saisissez le code de configuration affiché dans la console du serveur ou, sur l’application de bureau, dans logs/console.log du dossier de données de Scryer.",
   "initialAuth.rateLimited":
     "Trop de codes incorrects. Patientez une minute, puis réessayez.",
   "initialAuth.modeConflict":
@@ -214,6 +214,8 @@ const fr: LocaleDictionary = {
   "folderBrowser.newFolderName": "Nom du dossier",
   "folderBrowser.create": "Créer",
   "folderBrowser.newFolderFailed": "Impossible de créer le dossier.",
+  "error.passwordLengthRequirement":
+    "Le mot de passe ne respecte pas la longueur requise par la configuration.",
   "error.reason.FOLDER_CREATE_NAME_REQUIRED": "Saisissez un nom de dossier.",
   "error.reason.FOLDER_CREATE_NAME_RESERVED":
     "Ce nom est réservé et ne peut pas être utilisé pour un dossier.",

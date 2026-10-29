@@ -62,6 +62,9 @@ pub struct AuthRuntimeStateSnapshot {
 #[derive(Clone)]
 pub struct AuthRuntimeStateHandle {
     pub initial_authentication: Arc<scryer_application::initial_auth::SetupChallenge>,
+    // Outer None means unread; inner None identifies an existing installation.
+    initial_authentication_cache:
+        Arc<RwLock<Option<Option<scryer_application::initial_auth::SetupState>>>>,
     snapshot: Arc<RwLock<AuthRuntimeStateSnapshot>>,
     epoch_tx: watch::Sender<u64>,
     local_login_bypass_disabled: bool,
@@ -81,9 +84,52 @@ impl AuthRuntimeStateHandle {
         Self {
             snapshot: Arc::new(RwLock::new(snapshot)),
             initial_authentication: Arc::new(Default::default()),
+            initial_authentication_cache: Arc::new(RwLock::new(None)),
             epoch_tx,
             local_login_bypass_disabled,
         }
+    }
+
+    pub async fn initial_authentication_state(
+        &self,
+        app: &AppUseCase,
+    ) -> scryer_application::AppResult<Option<scryer_application::initial_auth::SetupState>> {
+        use scryer_application::initial_auth::SetupState;
+        if app.restore_coordinator().blocks_application() {
+            // Restore can replace this state. Never carry the destination's
+            // terminal decision into the restored database or a failed restore.
+            *self
+                .initial_authentication_cache
+                .write()
+                .expect("initial auth cache lock poisoned") = None;
+        } else if let Some(state) = self
+            .initial_authentication_cache
+            .read()
+            .expect("initial auth cache lock poisoned")
+            .clone()
+        {
+            return Ok(state);
+        }
+        let setup = app.initial_authentication_state().await?;
+        // Publish the saved security policy before caching completed admission.
+        if matches!(setup, Some(SetupState::Complete)) && self.initial_authentication.is_available()
+        {
+            let settings = app.refresh_initial_authentication_settings().await?;
+            self.apply_saved_security_settings(
+                settings.form_login_enabled,
+                settings.skip_login_for_local_ips,
+            );
+            self.initial_authentication.consume();
+        }
+        if !setup.as_ref().is_some_and(SetupState::is_pending)
+            && !app.restore_coordinator().blocks_application()
+        {
+            *self
+                .initial_authentication_cache
+                .write()
+                .expect("initial auth cache lock poisoned") = Some(setup.clone());
+        }
+        Ok(setup)
     }
 
     pub fn snapshot(&self) -> AuthRuntimeStateSnapshot {
@@ -152,8 +198,13 @@ impl AuthRuntimeStateHandle {
 #[derive(Clone, Copy)]
 pub struct ConnectionAuthEpoch(pub u64);
 
-/// Set only after the HTTP boundary validates initial-setup provenance.
-pub struct InitialAuthenticationRequest;
+/// Attached to every HTTP GraphQL request with its resolved client address.
+/// This identifies the transport; callers must still verify setup state and proof.
+#[derive(Clone, Copy)]
+pub struct InitialAuthenticationRequest {
+    /// Client address resolved through the configured rate-limit proxy trust policy.
+    pub client_ip: std::net::IpAddr,
+}
 
 #[derive(Clone, Default)]
 pub struct MfaVerification {

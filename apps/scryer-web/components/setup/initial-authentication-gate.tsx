@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SetupIntroLoading } from "./setup-intro";
+import { SetupRestoreView } from "./setup-restore-view";
 
 export function InitialAuthenticationGate({
   children,
@@ -112,6 +113,7 @@ function AuthenticationChoice({
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [setupCode, setSetupCode] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [{ fetching }, complete] = useMutation<{
@@ -187,6 +189,17 @@ function AuthenticationChoice({
       adoptSession,
     ],
   );
+  if (restoring) {
+    return (
+      <SetupFrame>
+        <SetupRestoreView
+          t={t}
+          setupCode={state.initialAuthenticationCodeRequired ? setupCode : null}
+          onBack={() => setRestoring(false)}
+        />
+      </SetupFrame>
+    );
+  }
   return (
     <SetupFrame>
       <h1 className="text-2xl font-semibold">{t("initialAuth.title")}</h1>
@@ -293,6 +306,17 @@ function AuthenticationChoice({
           )}
         </Button>
       </form>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={
+          fetching ||
+          (state.initialAuthenticationCodeRequired && !setupCode.trim())
+        }
+        onClick={() => setRestoring(true)}
+      >
+        {t("setup.restoreTitle")}
+      </Button>
     </SetupFrame>
   );
 }

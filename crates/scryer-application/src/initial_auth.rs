@@ -1,5 +1,6 @@
 //! The mandatory authentication decision on newly initialized instances.
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -150,24 +151,31 @@ impl AppUseCase {
 /// Process-local proof for initial setup. The durable state is authoritative.
 pub struct SetupChallenge {
     state: Mutex<ChallengeState>,
+    clock: Box<dyn Fn() -> Instant + Send + Sync>,
 }
+const MAX_SETUP_CLIENTS: usize = 4096;
 struct ChallengeState {
     verifier: Option<blake3::Hash>,
-    failures: VecDeque<Instant>,
+    failures: HashMap<IpAddr, VecDeque<Instant>>,
     available: bool,
 }
 impl Default for SetupChallenge {
     fn default() -> Self {
+        Self::with_clock(Instant::now)
+    }
+}
+impl SetupChallenge {
+    /// Supplies monotonic time so failure-window tests need no wall-clock waits.
+    pub fn with_clock(clock: impl Fn() -> Instant + Send + Sync + 'static) -> Self {
         Self {
+            clock: Box::new(clock),
             state: Mutex::new(ChallengeState {
                 verifier: None,
-                failures: VecDeque::new(),
+                failures: HashMap::new(),
                 available: false,
             }),
         }
     }
-}
-impl SetupChallenge {
     pub fn initialize(&self) -> AppResult<String> {
         const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
         let mut code = String::new();
@@ -195,8 +203,8 @@ impl SetupChallenge {
             .verifier
             .is_some()
     }
-    pub fn verify(&self, code: Option<&str>) -> AppResult<()> {
-        self.verify_at(code, Instant::now())
+    pub fn verify(&self, client_ip: IpAddr, code: Option<&str>) -> AppResult<()> {
+        self.verify_at(client_ip, code, (self.clock)())
     }
     pub fn is_available(&self) -> bool {
         self.state
@@ -204,7 +212,8 @@ impl SetupChallenge {
             .expect("setup challenge lock poisoned")
             .available
     }
-    fn verify_at(&self, code: Option<&str>, now: Instant) -> AppResult<()> {
+    fn verify_at(&self, client_ip: IpAddr, code: Option<&str>, now: Instant) -> AppResult<()> {
+        let client_ip = client_ip.to_canonical();
         let mut state = self.state.lock().expect("setup challenge lock poisoned");
         if !state.available {
             return Err(AppError::validation_refused(
@@ -215,14 +224,20 @@ impl SetupChallenge {
         let Some(verifier) = state.verifier else {
             return Ok(());
         };
-        while state
+        state.failures.retain(|_, failures| {
+            while failures
+                .front()
+                .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(60))
+            {
+                failures.pop_front();
+            }
+            !failures.is_empty()
+        });
+        if state
             .failures
-            .front()
-            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(60))
+            .get(&client_ip)
+            .is_some_and(|failures| failures.len() >= 5)
         {
-            state.failures.pop_front();
-        }
-        if state.failures.len() >= 5 {
             return Err(AppError::validation_refused_with_facts(
                 refusal::CODE_RATE_LIMITED,
                 "too many incorrect setup codes; try again later",
@@ -237,7 +252,19 @@ impl SetupChallenge {
             .flat_map(char::to_uppercase)
             .collect();
         if normalized.len() != 6 || blake3::hash(normalized.as_bytes()) != verifier {
-            state.failures.push_back(now);
+            // Bound unauthenticated bookkeeping without making a full table
+            // lock out unrelated clients. Evict the least recent failure.
+            if state.failures.len() >= MAX_SETUP_CLIENTS
+                && !state.failures.contains_key(&client_ip)
+                && let Some(oldest) = state
+                    .failures
+                    .iter()
+                    .min_by_key(|(_, failures)| failures.back().copied())
+                    .map(|(client, _)| *client)
+            {
+                state.failures.remove(&oldest);
+            }
+            state.failures.entry(client_ip).or_default().push_back(now);
             return Err(AppError::validation_refused(
                 refusal::CODE_INVALID,
                 "enter the setup code from the server console",
@@ -249,27 +276,31 @@ impl SetupChallenge {
         let mut state = self.state.lock().expect("setup challenge lock poisoned");
         state.available = false;
         state.verifier = None;
+        state.failures.clear();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    const CLIENT: IpAddr = IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
 
     #[test]
     fn initial_auth_code_is_retryable_until_commit_and_accepts_display_variants() {
         let challenge = SetupChallenge::default();
         let code = challenge.initialize().unwrap();
         assert_eq!(code.len(), 7);
-        challenge.verify(Some(&code)).unwrap();
+        challenge.verify(CLIENT, Some(&code)).unwrap();
         challenge
-            .verify(Some(&code.to_lowercase().replace('-', "")))
+            .verify(CLIENT, Some(&code.to_lowercase().replace('-', "")))
             .unwrap();
-        challenge.verify(Some(&format!(" {code} "))).unwrap();
+        challenge
+            .verify(CLIENT, Some(&format!(" {code} ")))
+            .unwrap();
         challenge.consume();
         assert_eq!(
             challenge
-                .verify(Some(&code))
+                .verify(CLIENT, Some(&code))
                 .unwrap_err()
                 .validation_reason(),
             Some(refusal::ALREADY_COMPLETED)
@@ -284,7 +315,7 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(
                 challenge
-                    .verify_at(None, now)
+                    .verify_at(CLIENT, None, now)
                     .unwrap_err()
                     .validation_reason(),
                 Some(refusal::CODE_INVALID)
@@ -292,29 +323,79 @@ mod tests {
         }
         assert_eq!(
             challenge
-                .verify_at(Some(&code), now)
+                .verify_at(CLIENT, Some(&code), now)
                 .unwrap_err()
                 .validation_reason(),
             Some(refusal::CODE_RATE_LIMITED)
         );
         challenge
-            .verify_at(Some(&code), now + Duration::from_secs(60))
+            .verify_at(CLIENT, Some(&code), now + Duration::from_secs(60))
             .unwrap();
+        assert!(challenge.state.lock().unwrap().failures.is_empty());
+    }
+
+    #[test]
+    fn initial_auth_code_limits_are_per_client_and_canonicalize_addresses() {
+        let challenge = SetupChallenge::default();
+        let code = challenge.initialize().unwrap();
+        let now = Instant::now();
+        for _ in 0..5 {
+            assert!(challenge.verify_at(CLIENT, None, now).is_err());
+        }
+        assert_eq!(
+            challenge
+                .verify_at("::ffff:127.0.0.1".parse().unwrap(), Some(&code), now)
+                .unwrap_err()
+                .validation_reason(),
+            Some(refusal::CODE_RATE_LIMITED)
+        );
+        challenge
+            .verify_at("192.0.2.2".parse().unwrap(), Some(&code), now)
+            .unwrap();
+        challenge.initialize().unwrap();
+        assert!(challenge.state.lock().unwrap().failures.is_empty());
+    }
+
+    #[test]
+    fn initial_auth_code_client_tracking_is_bounded_without_a_global_lockout() {
+        let challenge = SetupChallenge::default();
+        let code = challenge.initialize().unwrap();
+        let now = Instant::now();
+        for index in 0..=MAX_SETUP_CLIENTS {
+            let ip = IpAddr::V6(std::net::Ipv6Addr::from(index as u128 + (1u128 << 64)));
+            assert_eq!(
+                challenge
+                    .verify_at(ip, None, now)
+                    .unwrap_err()
+                    .validation_reason(),
+                Some(refusal::CODE_INVALID)
+            );
+        }
+        assert_eq!(
+            challenge.state.lock().unwrap().failures.len(),
+            MAX_SETUP_CLIENTS
+        );
+        challenge.verify_at(CLIENT, Some(&code), now).unwrap();
+        challenge.consume();
+        assert!(challenge.state.lock().unwrap().failures.is_empty());
     }
 
     #[test]
     fn initial_auth_challenge_always_requires_a_code_and_is_single_use() {
         let challenge = SetupChallenge::default();
-        assert!(challenge.verify(None).is_err());
+        assert!(challenge.verify(CLIENT, None).is_err());
         let code = challenge.initialize().unwrap();
         assert!(challenge.code_required());
         assert_eq!(
-            challenge.verify(None).unwrap_err().validation_reason(),
+            challenge
+                .verify(CLIENT, None)
+                .unwrap_err()
+                .validation_reason(),
             Some(refusal::CODE_INVALID)
         );
-        challenge.verify(Some(&code)).unwrap();
+        challenge.verify(CLIENT, Some(&code)).unwrap();
         challenge.consume();
-        assert!(challenge.verify(None).is_err());
+        assert!(challenge.verify(CLIENT, None).is_err());
     }
 
     #[test]

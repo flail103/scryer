@@ -149,13 +149,44 @@ fn job_payload(
     })
 }
 
+// A first-run code authorizes only restore controls, never an administrator
+// session or unrelated GraphQL operations. It remains retryable until restart.
+async fn require_restore_permission(ctx: &Context<'_>, setup_code: Option<&str>) -> GqlResult<()> {
+    use scryer_application::initial_auth::{SetupState, refusal};
+    let app = app_from_ctx(ctx)?;
+    if matches!(
+        app.initial_authentication_state()
+            .await
+            .map_err(to_gql_error)?,
+        Some(SetupState::Choice)
+    ) {
+        let Some(request) = ctx.data_opt::<scryer_interface_core::InitialAuthenticationRequest>()
+        else {
+            return Err(to_gql_error(AppError::validation_refused(
+                refusal::REQUIRED,
+                "initial restore requires an admitted HTTP setup request",
+            )));
+        };
+        return scryer_interface_core::auth_runtime_from_ctx(ctx)
+            .initial_authentication
+            .verify(request.client_ip, setup_code)
+            .map_err(to_gql_error);
+    }
+    require_config_app_permission(ctx, AppPermission::ManageSystemSettings).await?;
+    Ok(())
+}
+
 #[derive(Default)]
 pub struct BackupQueries;
 #[Object]
 impl BackupQueries {
     /// Observe the current restore without extending its deadline or starting work.
-    async fn restore_status(&self, ctx: &Context<'_>) -> GqlResult<Option<RestoreJobPayload>> {
-        require_config_app_permission(ctx, AppPermission::ManageSystemSettings).await?;
+    async fn restore_status(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(secret)] setup_code: Option<String>,
+    ) -> GqlResult<Option<RestoreJobPayload>> {
+        require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
         app.restore_coordinator()
             .snapshot()
@@ -305,8 +336,9 @@ impl BackupMutations {
         bundle_upload: Upload,
         #[graphql(desc = "Bundle password; null or blank selects an unencrypted bundle.")]
         password: Option<String>,
+        #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
-        require_config_app_permission(ctx, AppPermission::ManageSystemSettings).await?;
+        require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
         ensure_setup_mode(&app).await.map_err(to_gql_error)?;
 
@@ -402,9 +434,10 @@ impl BackupMutations {
         #[graphql(desc = "Bundle password; null selects an unencrypted bundle.")] password: Option<
             String,
         >,
+        #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreInspectPayload> {
         let job = self
-            .start_inspect_restore_bundle(ctx, bundle_upload, password)
+            .start_inspect_restore_bundle(ctx, bundle_upload, password, setup_code)
             .await??;
         let app = app_from_ctx(ctx)?;
         let job = wait_for_restore(&app, job.id.as_str()).await?;
@@ -423,8 +456,9 @@ impl BackupMutations {
         #[graphql(desc = "Temporary upload ID returned by inspectRestoreBundle.")] upload_id: ID,
         #[graphql(desc = "Bundle password; null or blank selects an unencrypted bundle.")]
         password: Option<String>,
+        #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreJobPayload> {
-        require_config_app_permission(ctx, AppPermission::ManageSystemSettings).await?;
+        require_restore_permission(ctx, setup_code.as_deref()).await?;
         let app = app_from_ctx(ctx)?;
         ensure_setup_mode(&app).await.map_err(to_gql_error)?;
         if let Some(status) = app.restore_coordinator().snapshot().filter(|s| {
@@ -537,9 +571,10 @@ impl BackupMutations {
         #[graphql(desc = "Bundle password; null selects an unencrypted bundle.")] password: Option<
             String,
         >,
+        #[graphql(secret)] setup_code: Option<String>,
     ) -> GqlResult<RestoreApplyPayload> {
         let job = self
-            .start_apply_restore_bundle(ctx, upload_id, password)
+            .start_apply_restore_bundle(ctx, upload_id, password, setup_code)
             .await??;
         let app = app_from_ctx(ctx)?;
         let _ = wait_for_restore(&app, job.id.as_str()).await?;

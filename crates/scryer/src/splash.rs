@@ -306,6 +306,7 @@ fn maintenance_html(migration_progress: Option<(usize, usize)>, restoring: bool)
   <form id="restore-retry" hidden>
     <p class="detail">Restore stopped safely. Enter the backup password to try again.</p>
     <label>Backup password <input id="restore-password" type="password" autocomplete="off"/></label>
+    <label>Setup code (for a first-run restore) <input id="restore-setup-code" autocomplete="one-time-code" maxlength="32"/></label>
     <button type="submit">Retry restore</button>
     <p id="retry-message" class="detail" role="status"></p>
   </form>
@@ -329,9 +330,10 @@ fn maintenance_html(migration_progress: Option<(usize, usize)>, restoring: bool)
     message.textContent = "Starting restore…";
     try {{
       var headers = {{"Content-Type": "application/json"}};
+      var setupCode = document.getElementById("restore-setup-code").value.trim() || null;
       var token = sessionStorage.getItem("scryer_auth_token") || localStorage.getItem("scryer_auth_token_persistent");
       if (token) headers.Authorization = "Bearer " + token;
-      else {{
+      else if (!setupCode) {{
         var proofResponse = await fetch("{proof_url}", {{credentials: "include", signal: AbortSignal.timeout(10000)}});
         if (!proofResponse.ok) throw new Error("Authentication is required to retry the restore.");
         var proof = await proofResponse.json();
@@ -344,13 +346,13 @@ fn maintenance_html(migration_progress: Option<(usize, usize)>, restoring: bool)
         if (!response.ok || result.errors) throw new Error("The restore could not be started. Check authentication and retry.");
         return result.data;
       }}
-      var current = await request("query {{ restoreStatus {{ uploadId }} }}", {{}});
+      var current = await request("query($setupCode: String) {{ restoreStatus(setupCode: $setupCode) {{ uploadId }} }}", {{setupCode: setupCode}});
       if (!current.restoreStatus) throw new Error("The restore attempt is no longer available.");
       var password = document.getElementById("restore-password");
       var value = password.value;
       password.value = "";
-      await request("mutation($id: ID!, $password: String) {{ startApplyRestoreBundle(uploadId: $id, password: $password) {{ id }} }}",
-        {{id: current.restoreStatus.uploadId, password: value || null}});
+      await request("mutation($id: ID!, $password: String, $setupCode: String) {{ startApplyRestoreBundle(uploadId: $id, password: $password, setupCode: $setupCode) {{ id }} }}",
+        {{id: current.restoreStatus.uploadId, password: value || null, setupCode: setupCode}});
       retry.hidden = true;
       message.textContent = "";
     }} catch (error) {{

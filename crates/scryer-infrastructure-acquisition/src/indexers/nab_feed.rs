@@ -228,6 +228,11 @@ fn synthesized_attributes(result: &IndexerSearchResult) -> Vec<(&'static str, St
     let mut attributes = Vec::new();
     let mut push = |name: &'static str, value: Option<String>| {
         if let Some(value) = value.filter(|value| !value.is_empty()) {
+            let value = if name == "password" {
+                value
+            } else {
+                scryer_application::url_redaction::redact_url_credentials(&value)
+            };
             attributes.push((name, value));
         }
     };
