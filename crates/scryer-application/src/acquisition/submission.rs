@@ -232,7 +232,7 @@ impl AppUseCase {
             .find_by_canonical_download_id(&effective_download_id)
             .await?
         else {
-            return Err(AppError::DownloadSubmitRejected(format!(
+            return Err(AppError::DownloadSubmitAmbiguous(format!(
                 "download client reused canonical identity {effective_download_id}, but its submission could not be loaded"
             )));
         };
@@ -305,7 +305,7 @@ impl AppUseCase {
                     .find_by_canonical_download_id(&download_id)
                     .await?
                 else {
-                    return Err(AppError::DownloadSubmitRejected(format!(
+                    return Err(AppError::DownloadSubmitAmbiguous(format!(
                         "download client reused canonical identity {download_id}, but its submission could not be loaded"
                     )));
                 };
