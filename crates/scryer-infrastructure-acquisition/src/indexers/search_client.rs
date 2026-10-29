@@ -22439,13 +22439,12 @@ mod tests {
             IndexerPacing::resolve(&config, SchedulerIntent::BackgroundRss).max_wait,
             Some(crate::upstream_scheduler::rss_target_interval() / 2)
         );
-        for intent in [SchedulerIntent::BackgroundAcquisition] {
-            assert_eq!(
-                IndexerPacing::resolve(&config, intent).max_wait,
-                None,
-                "{intent:?}"
-            );
-        }
+        let intent = SchedulerIntent::BackgroundAcquisition;
+        assert_eq!(
+            IndexerPacing::resolve(&config, intent).max_wait,
+            None,
+            "{intent:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

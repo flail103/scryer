@@ -1832,11 +1832,13 @@ impl DownloadSubmissionRepository for TrackingDownloadSubmissionRepo {
     }
 }
 
+pub(super) type ActiveTitleReads = Vec<(String, Vec<String>)>;
+
 #[derive(Default, Clone)]
 pub(super) struct TrackingPendingReleaseRepo {
     pub(super) store: Arc<Mutex<Vec<PendingRelease>>>,
     pub(super) title_history_reads: Arc<std::sync::atomic::AtomicUsize>,
-    pub(super) active_title_reads: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+    pub(super) active_title_reads: Arc<Mutex<ActiveTitleReads>>,
     pub(super) deleted_title_ids: Arc<Mutex<Vec<String>>>,
     pub(super) delete_error: Arc<Mutex<Option<String>>>,
     /// Standby inserts allowed before the store starts refusing them. Models the

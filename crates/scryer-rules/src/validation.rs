@@ -2989,10 +2989,7 @@ mod tests {
         let score = |protocol: &str, raw_title: &str| {
             let mut input = synthetic_test_input();
             input.release.raw_title = raw_title.to_string();
-            input
-                .release
-                .extra
-                .insert("protocol".to_string(), serde_json::json!(protocol));
+            input.release.protocol = crate::ReleaseProtocol::parse(protocol);
             let result = evaluate_template("block-exe-torrents", input, "movie");
             assert!(result.errors.is_empty(), "{raw_title}: {:?}", result.errors);
             result
@@ -3004,6 +3001,8 @@ mod tests {
         assert!(score("torrent", "Sample.Movie.2024.1080p.WEB-DL.x264.exe"));
         assert!(score("torrent", "Sample.Movie.2024.1080p.mkv.lnk"));
         assert!(!score("usenet", "Sample.Movie.2024.1080p.WEB-DL.x264.exe"));
+        assert!(!score("http", "Sample.Movie.2024.1080p.WEB-DL.x264.exe"));
+        assert!(!score("unknown", "Sample.Movie.2024.1080p.WEB-DL.x264.exe"));
         assert!(!score(
             "torrent",
             "Sample.Batch.Movie.2024.1080p.WEB-DL.x264"

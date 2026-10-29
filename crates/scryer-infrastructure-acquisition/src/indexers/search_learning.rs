@@ -3621,6 +3621,16 @@ pub(crate) mod tests {
         .execute(&pool)
         .await
         .map_err(repo_err)?;
+        // Cleanup also retires listing state; keep its production schema local
+        // to this fixture's single connection.
+        let listing_schema = include_str!(
+            "../../../scryer/src/db/postgres/migrations/0314_indexer_search_listings.sql"
+        )
+        .replace("CREATE TABLE", "CREATE TEMP TABLE");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(listing_schema.as_str()))
+            .execute(&pool)
+            .await
+            .map_err(repo_err)?;
         sqlx::query(
             "INSERT INTO indexer_search_learning (indexer_id)
              VALUES ('idx-pruned'), ('idx-pruned'), ('idx-kept')",
