@@ -206,6 +206,8 @@ pub(crate) struct BackgroundAcquisitionCycleOutcome {
 /// its work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WalkStopReason {
+    /// RSS was admitted; finish current queries and leave the remaining work.
+    RssPriority,
     /// The walk's time budget ran out.
     Deadline,
     /// A title spent [`BACKGROUND_TITLE_WALK_QUERY_BUDGET`] searches.
@@ -215,6 +217,7 @@ pub(crate) enum WalkStopReason {
 impl WalkStopReason {
     fn as_str(self) -> &'static str {
         match self {
+            Self::RssPriority => "rss_priority",
             Self::Deadline => "deadline",
             Self::QueryBudget => "query_budget",
         }
@@ -224,6 +227,7 @@ impl WalkStopReason {
     /// time ends the whole walk, a spent search budget only ends one title.
     fn combine(current: Option<Self>, next: Self) -> Option<Self> {
         match current {
+            Some(Self::RssPriority) => Some(Self::RssPriority),
             Some(Self::Deadline) => Some(Self::Deadline),
             _ => Some(next),
         }
@@ -297,6 +301,9 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
     if pass == BackgroundAcquisitionPass::FailureCheckWalkHeld {
         return BackgroundAcquisitionCycleOutcome::default();
     }
+    let Some(rss_yield) = app.runtime.acquisition.walk_priority.begin_background() else {
+        return BackgroundAcquisitionCycleOutcome::default();
+    };
     let scope_reopened = app
         .runtime
         .acquisition
@@ -384,6 +391,18 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
     let mut indexer_queries = 0usize;
     let mut stop: Option<WalkStopReason> = None;
     while budget > 0 {
+        if rss_yield.is_cancelled() {
+            if titles_walked == 0 {
+                app.runtime
+                    .acquisition
+                    .interrupted_walk_scope_keys
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(carried_scope_keys);
+            }
+            stop = WalkStopReason::combine(stop, WalkStopReason::RssPriority);
+            break;
+        }
         if titles_walked > 0 && deadline_passed(deadline) {
             stop = WalkStopReason::combine(stop, WalkStopReason::Deadline);
             break;
@@ -430,6 +449,7 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
             &dl_snapshot,
             deadline,
             titles_walked,
+            &rss_yield,
         )
         .await
         else {
@@ -513,6 +533,10 @@ pub(crate) async fn run_background_acquisition_cycle_with_blocked_facets(
     let stop_reason = stop.map_or("none", WalkStopReason::as_str);
     let elapsed_secs = cycle_started.elapsed().as_secs();
     match stop {
+        Some(WalkStopReason::RssPriority) => debug!(
+            titles_walked,
+            indexer_queries, "background acquisition cycle yielded to RSS"
+        ),
         Some(WalkStopReason::Deadline) => info!(
             titles_walked,
             titles_stopped_midway,
@@ -616,6 +640,7 @@ async fn walk_selected_scopes(
     dl_snapshot: &DownloadClientSnapshot,
     deadline: Option<tokio::time::Instant>,
     titles_walked_before: usize,
+    rss_yield: &tokio_util::sync::CancellationToken,
 ) -> Option<SelectedScopesWalk> {
     // Count selected episode scopes per (title_id, season_num). Season pack
     // search is only worthwhile when >= 2 episodes from the same season are in
@@ -672,7 +697,7 @@ async fn walk_selected_scopes(
             if titles_walked_before + dispatched > 0 && deadline_passed(deadline) {
                 out_of_time = true;
             }
-            if out_of_time {
+            if out_of_time || rss_yield.is_cancelled() {
                 break;
             }
             let Some(title_work) = ready_titles.pop_front() else {
@@ -709,6 +734,10 @@ async fn walk_selected_scopes(
                 );
                 continue;
             };
+            if rss_yield.is_cancelled() {
+                ready_titles.push_front(title_work);
+                break;
+            }
             let cycle = Arc::clone(cycle);
             let scope_count = title_work
                 .ready
@@ -736,7 +765,10 @@ async fn walk_selected_scopes(
                     &cycle,
                     season_due_counts,
                     dl_snapshot,
-                    TitleWalkOptions::background(yield_token.clone(), deadline),
+                    TitleWalkOptions {
+                        rss_yield: Some(rss_yield.clone()),
+                        ..TitleWalkOptions::background(yield_token.clone(), deadline)
+                    },
                     |_, _| {},
                 )
                 .await;
@@ -809,7 +841,14 @@ async fn walk_selected_scopes(
                 .copied()
                 .filter(|index| unreached.contains(targets[*index].title_id.as_str())),
         );
-        round.stop = WalkStopReason::combine(round.stop, WalkStopReason::Deadline);
+        round.stop = WalkStopReason::combine(
+            round.stop,
+            if rss_yield.is_cancelled() {
+                WalkStopReason::RssPriority
+            } else {
+                WalkStopReason::Deadline
+            },
+        );
     }
     Some(round)
 }
@@ -1548,6 +1587,8 @@ pub(crate) struct TitleWalkOptions {
     /// operator's walk that wants this title (see `AcquisitionTitleWalkLocks`),
     /// so the two paths use one code path.
     cancellation: tokio_util::sync::CancellationToken,
+    /// Cooperative RSS yield, never passed to in-flight HTTP or grab work.
+    rss_yield: Option<tokio_util::sync::CancellationToken>,
     /// Who the walk's grabs are recorded against on their grab events. This is
     /// attribution only: the walk authorizes nothing, and whoever asked for it
     /// was authorized before it started. The background cycle and searches run
@@ -1571,6 +1612,7 @@ impl TitleWalkOptions {
             intent: AcquisitionWalkIntent::Background,
             season_filter: None,
             cancellation: yield_token,
+            rss_yield: None,
             initiated_by: DomainEventActor::system(),
             deadline,
             query_budget: Some(BACKGROUND_TITLE_WALK_QUERY_BUDGET),
@@ -1579,6 +1621,13 @@ impl TitleWalkOptions {
 
     /// Why the walk should start no further stage, given what it has spent.
     fn stop_reason(&self, stats: &TitleWalkStats) -> Option<WalkStopReason> {
+        if self
+            .rss_yield
+            .as_ref()
+            .is_some_and(|token| token.is_cancelled())
+        {
+            return Some(WalkStopReason::RssPriority);
+        }
         if deadline_passed(self.deadline) {
             return Some(WalkStopReason::Deadline);
         }
@@ -1691,6 +1740,7 @@ impl TitleWalkStats {
 /// to another title.
 struct TitleWalkSession {
     options: TitleWalkOptions,
+    search: crate::catalog::release_search::WalkSearchContext,
     proposals: Vec<GrabProposal>,
     stats: TitleWalkStats,
 }
@@ -1699,6 +1749,7 @@ impl TitleWalkSession {
     fn new(options: TitleWalkOptions) -> Self {
         Self {
             options,
+            search: Default::default(),
             proposals: Vec::new(),
             stats: TitleWalkStats::default(),
         }
@@ -2035,17 +2086,10 @@ async fn plan_series_pack_for_title(
             return Ok(None);
         }
     };
-    let mut owned_episode_ids = match app
-        .services
-        .library
-        .media_files
-        .list_media_files_for_title(&title.id)
-        .await
-    {
+    let mut owned_episode_ids = match reads.primary_file_cutoffs(app).await {
         Ok(files) => files
-            .into_iter()
-            .filter(|file| file.role.is_primary())
-            .filter_map(|file| file.episode_id)
+            .iter()
+            .filter_map(|file| file.episode_id.clone())
             .collect::<HashSet<_>>(),
         Err(error) => {
             warn!(
@@ -2144,7 +2188,7 @@ async fn plan_series_pack_for_title(
     }
     session.stats.queries += 1;
     let search_outcome = app
-        .search_and_score_subject_restricted_with_fired_indexers(
+        .search_and_score_subject_with_context(
             search_title,
             &title_subject,
             "background_acquisition_series_pack",
@@ -2153,6 +2197,7 @@ async fn plan_series_pack_for_title(
             Some(searchable.into_iter().collect()),
             intent.background_value(target),
             now,
+            &mut session.search,
         )
         .await?;
     app.link_search_session_coverage_scope(
@@ -3048,7 +3093,7 @@ struct BackgroundAcquisitionTitleContext {
     /// The title's catalog and media-file reads for the length of this walk.
     /// Every due scope of the title is evaluated against the same rows, so
     /// they are read once per walk rather than once per scope.
-    reads: crate::acquisition::title_reads::TitleCatalogReads,
+    reads: Arc<crate::acquisition::title_reads::TitleCatalogReads>,
     submissions: Vec<DownloadSubmission>,
     tracked_states:
         HashMap<crate::contracts::ClientJobLocator, scryer_domain::TrackedDownloadState>,
@@ -3126,7 +3171,7 @@ impl BackgroundAcquisitionTitleContext {
         Ok(Self {
             title,
             episodes_by_id,
-            reads,
+            reads: Arc::new(reads),
             submissions,
             tracked_states,
             convergence_inputs: Default::default(),
@@ -3177,6 +3222,8 @@ where
         .await;
     }
     let mut session = TitleWalkSession::new(options);
+    session.search.reads = Some(Arc::clone(&context.reads));
+    session.search.rss_yield = session.options.rss_yield.clone();
     // A title stops for the cycle's deadline or its own search budget only
     // after it has walked a scope, so a resumed title always gets further than
     // its pack stages and the backlog keeps moving.
@@ -3190,7 +3237,12 @@ where
             );
             break;
         }
-        if scopes_walked > 0
+        if (scopes_walked > 0
+            || session
+                .options
+                .rss_yield
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled()))
             && let Some(stop) = session.options.stop_reason(&session.stats)
         {
             // In-flight work has finished; nothing further is admitted. The
@@ -3249,6 +3301,18 @@ where
         } else {
             metrics::counter!("scryer_background_acquisition_target_work_total", "outcome" => "completed")
                 .increment(1);
+        }
+
+        if session.search.interrupted {
+            title_work.ready.push_front(work);
+            session.stats.unwalked_target_indices = title_work
+                .ready
+                .iter()
+                .filter(|work| matches!(work.kind, BackgroundAcquisitionWorkKind::Scope))
+                .map(|work| work.target_index)
+                .collect();
+            session.stats.stopped = Some(WalkStopReason::RssPriority);
+            break;
         }
 
         match work.kind {
@@ -3428,13 +3492,19 @@ where
 {
     if !respect_title_monitoring {
         if app.location_owned_title_ids().await?.contains(title_id) {
-            return Err(AppError::validation_refused(crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE, "This title is being moved. Search is available when the move finishes."));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE,
+                "This title is being moved. Search is available when the move finishes.",
+            ));
         }
         let excluded = app.non_wanted_state_scope_keys().await?;
         if scope_keys
             .is_some_and(|keys| !keys.is_empty() && keys.iter().all(|key| excluded.contains(key)))
         {
-            return Err(AppError::validation_refused(crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING, "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish."));
+            return Err(AppError::validation_refused(
+                crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING,
+                "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish.",
+            ));
         }
     }
     let title = app
@@ -3443,7 +3513,12 @@ where
         .titles
         .get_by_id(title_id)
         .await?
-        .ok_or_else(|| AppError::not_found_reason(crate::error_reasons::catalog::TITLE_NOT_FOUND, format!("title {title_id}")))?;
+        .ok_or_else(|| {
+            AppError::not_found_reason(
+                crate::error_reasons::catalog::TITLE_NOT_FOUND,
+                format!("title {title_id}"),
+            )
+        })?;
 
     let now = Utc::now();
     let targets = app
@@ -3534,10 +3609,16 @@ where
         .iter()
         .all(|target| excluded.contains(&target.scope_key))
     {
-        return Err(AppError::validation_refused(crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING, "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish."));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::MATCHING_EPISODES_PAUSED_ALREADY_DOWNLOADING,
+            "The matching episodes are paused or already downloading. Resume paused acquisition or wait for the download to finish.",
+        ));
     }
     if app.location_owned_title_ids().await?.contains(title_id) {
-        return Err(AppError::validation_refused(crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE, "This title is being moved. Search is available when the move finishes."));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::TITLE_BEING_MOVED_SEARCH_UNAVAILABLE,
+            "This title is being moved. Search is available when the move finishes.",
+        ));
     }
 
     // Resolved but not read by an interactive walk (see `AcquisitionWalkIntent`);
@@ -3565,6 +3646,7 @@ where
             intent: AcquisitionWalkIntent::Interactive,
             season_filter,
             cancellation,
+            rss_yield: None,
             initiated_by,
             deadline: None,
             query_budget: None,
@@ -3729,8 +3811,10 @@ async fn process_single_target(
     };
     let item = &mut item;
     if item.status == AcquisitionScopeStatus::Paused {
-        return Err(AppError::validation_refused(crate::error_reasons::acquisition::PAUSED_WHILE_SEARCH_WAITING, "Acquisition was paused while this search was waiting. Resume it before searching."
-                ));
+        return Err(AppError::validation_refused(
+            crate::error_reasons::acquisition::PAUSED_WHILE_SEARCH_WAITING,
+            "Acquisition was paused while this search was waiting. Resume it before searching.",
+        ));
     }
 
     // Item-aware gate: skip only when an active/recent submission blocks this
@@ -4242,7 +4326,7 @@ async fn process_single_target(
                     let pack_subject = pack_subject.resolve(app).await?;
                     session.stats.queries += 1;
                     match app
-                        .search_and_evaluate_subject_restricted(
+                        .search_and_evaluate_subject_with_context(
                             &search_title,
                             &pack_subject,
                             "background_acquisition_season_pack",
@@ -4253,10 +4337,11 @@ async fn process_single_target(
                             // an interactive walk takes the operator lane.
                             intent.background_value(target),
                             *now,
+                            &mut session.search,
                         )
                         .await
                     {
-                        Ok(results) => results,
+                        Ok(outcome) => outcome.results,
                         Err(err) => {
                             warn!(
                                 title_id = title.id.as_str(),
@@ -4428,7 +4513,7 @@ async fn process_single_target(
 
     session.stats.queries += 1;
     let search_outcome = match app
-        .search_and_score_subject_restricted(
+        .search_and_score_subject_with_context(
             &search_title,
             &subject,
             "background_acquisition",
@@ -4437,6 +4522,7 @@ async fn process_single_target(
             Some(uncovered),
             intent.background_value(target),
             *now,
+            &mut session.search,
         )
         .await
     {
@@ -4526,13 +4612,9 @@ async fn process_single_target(
     let db_blocklist = app.load_title_release_blocklist_signatures(&title.id).await;
     let existing_files = context
         .reads
-        .media_files(app)
+        .primary_file_cutoffs(app)
         .await
-        .unwrap_or_default()
-        .iter()
-        .filter(|file| file.role.is_primary())
-        .cloned()
-        .collect::<Vec<_>>();
+        .unwrap_or_default();
     let cutoff_scope = app.cutoff_scope_for(&subject.submission_scope).await;
     let analyzed_cutoff_quality =
         crate::acquisition::decision_helpers::analyzed_cutoff_quality_for_scope(
@@ -7286,10 +7368,7 @@ mod task_runner_tests {
             Held
         );
         assert_eq!(
-            cadence.pass_for(
-                BackgroundAcquisitionTrigger::PollTick,
-                woken_at + secs(300)
-            ),
+            cadence.pass_for(BackgroundAcquisitionTrigger::PollTick, woken_at + secs(300)),
             Full
         );
     }

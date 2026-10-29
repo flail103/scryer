@@ -178,6 +178,9 @@ pub(super) struct RecordedIndexerSearch {
 #[derive(Default, Clone)]
 pub(super) struct TrackingIndexerClient {
     pub(super) searches: Arc<Mutex<Vec<RecordedIndexerSearch>>>,
+    pub(super) search_started: Arc<tokio::sync::Notify>,
+    pub(super) search_gate: Option<Arc<tokio::sync::Semaphore>>,
+    pub(super) search_cancellations: Arc<Mutex<Vec<tokio_util::sync::CancellationToken>>>,
     /// The learning context each search carried; the search client reads its
     /// lane from it (search semaphore, corpus reuse, request pacing).
     pub(super) learning_contexts: Arc<Mutex<Vec<Option<crate::IndexerSearchLearningContext>>>>,
@@ -298,12 +301,35 @@ impl IndexerClient for TrackingIndexerClient {
         learning_context: Option<crate::IndexerSearchLearningContext>,
         _cancel_token: tokio_util::sync::CancellationToken,
     ) -> AppResult<IndexerSearchResponse> {
+        if self.search_gate.is_some() && query.is_empty() {
+            return Ok(IndexerSearchResponse {
+                results: Vec::new(),
+                next_cursor: None,
+                completion: crate::IndexerSearchCompletion::Complete,
+                indexer_outcomes: Vec::new(),
+                api_current: None,
+                api_max: None,
+                grab_current: None,
+                grab_max: None,
+            });
+        }
         self.learning_contexts.lock().await.push(learning_context);
         self.searches.lock().await.push(RecordedIndexerSearch {
             query: query.clone(),
             season,
             episode,
         });
+        self.search_cancellations
+            .lock()
+            .await
+            .push(_cancel_token.clone());
+        self.search_started.notify_one();
+        if let Some(gate) = &self.search_gate {
+            tokio::select! {
+                _ = _cancel_token.cancelled() => return Err(AppError::canceled("test query cancelled")),
+                permit = gate.acquire() => permit.expect("query gate remains open").forget(),
+            }
+        }
         let mut routed_indexer_ids = indexer_routing
             .iter()
             .flat_map(|plan| plan.entries.iter())

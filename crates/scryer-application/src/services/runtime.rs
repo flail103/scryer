@@ -1084,6 +1084,7 @@ pub struct AppRuntimeAcquisitionState {
     /// [`AcquisitionTitleWalkLocks`] for why the two callers take it
     /// differently.
     pub(crate) title_walk_locks: AcquisitionTitleWalkLocks,
+    pub(crate) walk_priority: AcquisitionWalkPriority,
     /// Consecutive background cycles each facet was deferred behind an active
     /// library scan, reported so a starved facet is visible in the logs.
     pub(crate) scan_blocked_facet_streaks:
@@ -2645,6 +2646,7 @@ impl AppRuntimeState {
                 download_submission_guards: DownloadSubmissionGuardTable::default(),
                 download_failure_guards: DownloadFailureGuardTable::default(),
                 title_walk_locks: AcquisitionTitleWalkLocks::default(),
+                walk_priority: AcquisitionWalkPriority::default(),
                 scan_blocked_facet_streaks: Arc::default(),
                 interrupted_walk_scope_keys: Arc::default(),
                 release_candidate_passwords: Arc::new(std::sync::Mutex::new(HashMap::new())),
