@@ -99,6 +99,10 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+[profile.dev]
+debug = 0
+split-debuginfo = "off"
+
 [profile.test]
 debug = 0
 split-debuginfo = "off"
@@ -301,10 +305,16 @@ opt-level = 3
 opt-level = 3
 
 # Generated GraphQL dispatch must fit normal worker stacks in development and tests.
+[profile.dev.package.scryer]
+opt-level = 1
+
 [profile.dev.package.scryer-interface]
 opt-level = 1
 
 [profile.dev.package.scryer-interface-system]
+opt-level = 1
+
+[profile.test.package.scryer]
 opt-level = 1
 
 [profile.test.package.scryer-interface]
