@@ -800,7 +800,7 @@ pub use types::{
     LibraryScanUnmatchedSearchAttempt, LoginFailureTimingClass, LoginVerificationChallengeRecord,
     LoginVerificationMethod, LoginVerificationRequirement, LoginVerificationSatisfied,
     ManualImportSelection, ManualImportSelectionCandidate, MdblistSummary, MediaFileAssociations,
-    MediaRequestCounts, MissingEpisodeCandidate, MissingScopeCandidates,
+    MediaFileCutoffSummary, MediaRequestCounts, MissingEpisodeCandidate, MissingScopeCandidates,
     MissingSeriesMovieLinkCandidate, MissingTitleCandidate, MovieAvailabilityDecision,
     MovieAvailabilityProjection, MovieAvailabilityStatus, OAuthAuthorizationCodeRecord,
     OAuthAuthorizationSource, OAuthClientRegistrationRecord, OAuthConnectedAppRecord,

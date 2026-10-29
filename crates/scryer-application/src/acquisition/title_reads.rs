@@ -28,8 +28,9 @@ pub(crate) struct TitleCatalogReads {
     title_id: String,
     episodes: OnceCell<Arc<Vec<Episode>>>,
     collections: OnceCell<Arc<Vec<Collection>>>,
+    anime_numbering_bridge: OnceCell<Option<scryer_domain::AnimeNumberingBridge>>,
     media_files: OnceCell<Arc<Vec<TitleMediaFile>>>,
-    primary_media_files: OnceCell<Arc<Vec<TitleMediaFile>>>,
+    primary_file_cutoffs: OnceCell<Arc<Vec<crate::MediaFileCutoffSummary>>>,
     collection_episodes: Mutex<HashMap<String, Arc<Vec<Episode>>>>,
     collection_external_ids: Mutex<HashMap<String, Arc<Vec<ScopedExternalId>>>>,
     episode_external_ids: OnceCell<Arc<HashMap<String, Vec<ScopedExternalId>>>>,
@@ -42,8 +43,9 @@ impl TitleCatalogReads {
             title_id: title_id.to_string(),
             episodes: OnceCell::new(),
             collections: OnceCell::new(),
+            anime_numbering_bridge: OnceCell::new(),
             media_files: OnceCell::new(),
-            primary_media_files: OnceCell::new(),
+            primary_file_cutoffs: OnceCell::new(),
             collection_episodes: Mutex::new(HashMap::new()),
             collection_external_ids: Mutex::new(HashMap::new()),
             episode_external_ids: OnceCell::new(),
@@ -93,22 +95,35 @@ impl TitleCatalogReads {
             .cloned()
     }
 
-    /// The primary-file projection is shared too: per-scope cutoff checks
-    /// must not clone the title's entire file list again for every episode.
-    pub(crate) async fn primary_media_files(
+    pub(crate) async fn anime_numbering_bridge(
         &self,
         app: &AppUseCase,
-    ) -> AppResult<Arc<Vec<TitleMediaFile>>> {
-        self.primary_media_files
+    ) -> AppResult<Option<scryer_domain::AnimeNumberingBridge>> {
+        self.anime_numbering_bridge
+            .get_or_try_init(|| {
+                app.services
+                    .catalog
+                    .shows
+                    .get_anime_numbering_bridge(&self.title_id)
+            })
+            .await
+            .cloned()
+    }
+
+    /// Compact ownership and cutoff facts shared across scopes. Full incumbent
+    /// payloads are loaded separately for the episode sets being scored.
+    pub(crate) async fn primary_file_cutoffs(
+        &self,
+        app: &AppUseCase,
+    ) -> AppResult<Arc<Vec<crate::MediaFileCutoffSummary>>> {
+        self.primary_file_cutoffs
             .get_or_try_init(|| async {
-                let files = self.media_files(app).await?;
-                Ok(Arc::new(
-                    files
-                        .iter()
-                        .filter(|file| file.role.is_primary())
-                        .cloned()
-                        .collect(),
-                ))
+                app.services
+                    .library
+                    .media_files
+                    .list_primary_file_cutoffs_for_title(&self.title_id)
+                    .await
+                    .map(Arc::new)
             })
             .await
             .cloned()

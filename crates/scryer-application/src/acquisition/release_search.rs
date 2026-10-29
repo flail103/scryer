@@ -469,7 +469,7 @@ pub(crate) struct AutoCandidateEvaluationContext<'a> {
     pub(crate) now: &'a DateTime<Utc>,
     pub(crate) dl_snapshot: Option<&'a crate::acquisition_workflow::DownloadClientSnapshot>,
     pub(crate) db_blocklist: &'a crate::app_usecase_discovery::TitleReleaseBlocklistSignatures,
-    pub(crate) existing_files: &'a [TitleMediaFile],
+    pub(crate) existing_files: &'a [crate::MediaFileCutoffSummary],
     pub(crate) delay_profiles: &'a [DelayProfile],
     pub(crate) failed_routes: Option<&'a [crate::acquisition_workflow::DownloadRouteKey]>,
     /// Admission threshold per indexer id, resolved once for the batch.
@@ -1456,28 +1456,58 @@ fn normalized_release_identity(value: &str) -> String {
 /// direction that matters: `Show.S01E01.1080p-GRP` is a substring of
 /// `/data/TV/Show/Show.S01E01.1080p-GRP.PROPER.mkv`, so the PROPER of a release
 /// already on disk reported "already active" and could never be grabbed.
-fn release_identities(file: &TitleMediaFile) -> impl Iterator<Item = String> + '_ {
-    [
-        file.grabbed_release_title.as_deref(),
-        file.scene_name.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(normalized_release_identity)
-    .chain(
-        [
-            file.original_file_path.as_deref(),
-            Some(file.file_path.as_str()),
-        ]
+fn release_identities(file: &impl ReleaseIdentityFile) -> impl Iterator<Item = String> + '_ {
+    file.release_names()
         .into_iter()
         .flatten()
-        .filter_map(|path| {
-            std::path::Path::new(path)
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(normalized_release_identity)
-        }),
-    )
+        .map(normalized_release_identity)
+        .chain(
+            file.release_paths()
+                .into_iter()
+                .flatten()
+                .filter_map(|path| {
+                    std::path::Path::new(path)
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .map(normalized_release_identity)
+                }),
+        )
+}
+
+trait ReleaseIdentityFile {
+    fn file_id(&self) -> &str;
+    fn release_names(&self) -> [Option<&str>; 2];
+    fn release_paths(&self) -> [Option<&str>; 2];
+}
+
+impl ReleaseIdentityFile for TitleMediaFile {
+    fn file_id(&self) -> &str {
+        &self.id
+    }
+    fn release_names(&self) -> [Option<&str>; 2] {
+        [
+            self.grabbed_release_title.as_deref(),
+            self.scene_name.as_deref(),
+        ]
+    }
+    fn release_paths(&self) -> [Option<&str>; 2] {
+        [self.original_file_path.as_deref(), Some(&self.file_path)]
+    }
+}
+
+impl ReleaseIdentityFile for crate::MediaFileCutoffSummary {
+    fn file_id(&self) -> &str {
+        &self.id
+    }
+    fn release_names(&self) -> [Option<&str>; 2] {
+        [
+            self.grabbed_release_title.as_deref(),
+            self.scene_name.as_deref(),
+        ]
+    }
+    fn release_paths(&self) -> [Option<&str>; 2] {
+        [self.original_file_path.as_deref(), Some(&self.file_path)]
+    }
 }
 
 /// Has this exact release already landed in the scope? The anti-loop guard: a
@@ -1490,9 +1520,9 @@ fn release_identities(file: &TitleMediaFile) -> impl Iterator<Item = String> + '
 /// the row's scalar column. The subject already holds exactly the primary files
 /// occupying the scope, whatever its shape, so membership by file id is
 /// span-correct by construction.
-fn candidate_matches_existing_media_file(
+fn candidate_matches_existing_media_file<F: ReleaseIdentityFile>(
     candidate: &IndexerSearchResult,
-    existing_files: &[TitleMediaFile],
+    existing_files: &[F],
     subject: &crate::admission::AdmissionSubject,
 ) -> bool {
     let release_title = normalized_release_identity(&candidate.title);
@@ -1510,7 +1540,7 @@ fn candidate_matches_existing_media_file(
 
     existing_files
         .iter()
-        .filter(|file| in_scope.contains(file.id.as_str()))
+        .filter(|file| in_scope.contains(file.file_id()))
         .any(|file| release_identities(file).any(|identity| identity == release_title))
 }
 
@@ -2393,12 +2423,16 @@ impl AppUseCase {
             });
             if let Some((season, number)) = official
                 && let (Ok(season), Ok(number)) = (i32::try_from(season), i32::try_from(number))
-                && let Ok(bridge) = self
-                    .services
-                    .catalog
-                    .shows
-                    .get_anime_numbering_bridge(&title.id)
-                    .await
+                && let Ok(bridge) = match reads.filter(|reads| reads.covers(&title.id)) {
+                    Some(reads) => reads.anime_numbering_bridge(self).await,
+                    None => {
+                        self.services
+                            .catalog
+                            .shows
+                            .get_anime_numbering_bridge(&title.id)
+                            .await
+                    }
+                }
                 && let Some(anidb_id) =
                     community_cour_anidb_id(title, season, number, bridge.as_ref())
             {
@@ -2812,6 +2846,10 @@ impl AppUseCase {
                             )
                     })
         };
+        let existing_file_summaries: Vec<_> = existing_files
+            .iter()
+            .map(crate::MediaFileCutoffSummary::from)
+            .collect();
         let evaluation_context = AutoCandidateEvaluationContext {
             title,
             subject,
@@ -2831,7 +2869,7 @@ impl AppUseCase {
             now: &now,
             dl_snapshot: Some(&dl_snapshot),
             db_blocklist: &db_blocklist,
-            existing_files: &existing_files,
+            existing_files: &existing_file_summaries,
             delay_profiles: &delay_profiles,
             failed_routes: None,
             minimum_seeders: &minimum_seeders,
@@ -3484,12 +3522,30 @@ impl AppUseCase {
         item: &AcquisitionScopeState,
         episode: Option<&Episode>,
     ) -> AppResult<ResolvedReleaseSearchSubject> {
-        self.resolve_pending_release_search_subject_for_wanted_item(
+        self.resolve_release_search_subject_for_wanted_item_with_reads(
             owner_title,
             search_title,
             item,
             episode,
             None,
+        )
+        .await
+    }
+
+    pub(crate) async fn resolve_release_search_subject_for_wanted_item_with_reads(
+        &self,
+        owner_title: &Title,
+        search_title: &Title,
+        item: &AcquisitionScopeState,
+        episode: Option<&Episode>,
+        reads: Option<&crate::acquisition::title_reads::TitleCatalogReads>,
+    ) -> AppResult<ResolvedReleaseSearchSubject> {
+        self.resolve_pending_release_search_subject_for_wanted_item(
+            owner_title,
+            search_title,
+            item,
+            episode,
+            reads,
         )
         .await?
         .resolve(self)
@@ -3511,13 +3567,17 @@ impl AppUseCase {
         // Anime whose community numbering differs from TVDB's needs the extra
         // community-numbered query forms; every other title reads `None` here
         // and searches exactly as before.
-        let anime_numbering_bridge = self
-            .services
-            .catalog
-            .shows
-            .get_anime_numbering_bridge(&search_title.id)
-            .await
-            .unwrap_or_default();
+        let anime_numbering_bridge = match reads.filter(|reads| reads.covers(&search_title.id)) {
+            Some(reads) => reads.anime_numbering_bridge(self).await,
+            None => {
+                self.services
+                    .catalog
+                    .shows
+                    .get_anime_numbering_bridge(&search_title.id)
+                    .await
+            }
+        }
+        .unwrap_or_default();
         // Every absolute number this subject carries is on the title's one
         // absolute scale; see `AbsoluteScale`. A failed read fails this item
         // rather than guessing the raw scale: a contiguous title searched on
@@ -6523,6 +6583,16 @@ mod tests {
         assert!(!candidate_matches_existing_media_file(
             &candidate, &existing, &elsewhere
         ));
+        let compact: Vec<_> = existing
+            .iter()
+            .map(crate::MediaFileCutoffSummary::from)
+            .collect();
+        assert!(candidate_matches_existing_media_file(
+            &candidate, &compact, &occupied
+        ));
+        assert!(!candidate_matches_existing_media_file(
+            &candidate, &compact, &elsewhere
+        ));
     }
 
     #[test]
@@ -7356,6 +7426,12 @@ mod tests {
                     ),
                     "the identical release was not recognised: {file:?}"
                 );
+                let compact = crate::MediaFileCutoffSummary::from(&file);
+                assert!(candidate_matches_existing_media_file(
+                    &make_candidate(release, None),
+                    std::slice::from_ref(&compact),
+                    &subject,
+                ));
             }
         }
 

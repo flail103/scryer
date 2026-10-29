@@ -1194,12 +1194,7 @@ impl AppUseCase {
             };
             // Read once per title and reused for every release scored against
             // it; `None` for every title with no stored bridge.
-            let bridge = self
-                .services
-                .catalog
-                .shows
-                .get_anime_numbering_bridge(title_id)
-                .await;
+            let bridge = reads.anime_numbering_bridge(self).await;
             let anime_numbering_bridge = if catalog_reads.is_some() {
                 bridge?
             } else {
@@ -1304,23 +1299,24 @@ impl AppUseCase {
                     || (catalog_reads.is_some()
                         && matches!(prepared.primary_episode_ids, Some(None)))
                 {
-                    prepared.primary_episode_ids = Some(match reads.media_files(self).await {
-                        Ok(files) => Some(
-                            files
-                                .iter()
-                                .filter(|file| file.role.is_primary())
-                                .filter_map(|file| file.episode_id.clone())
-                                .collect::<std::collections::HashSet<_>>(),
-                        ),
-                        Err(error) => {
-                            tracing::warn!(
-                                title_id,
-                                error = %error,
-                                "release scoring: failed to load media ownership; rejecting series packs"
-                            );
-                            None
-                        }
-                    });
+                    prepared.primary_episode_ids = Some(
+                        match reads.primary_file_cutoffs(self).await {
+                            Ok(files) => Some(
+                                files
+                                    .iter()
+                                    .filter_map(|file| file.episode_id.clone())
+                                    .collect::<std::collections::HashSet<_>>(),
+                            ),
+                            Err(error) => {
+                                tracing::warn!(
+                                    title_id,
+                                    error = %error,
+                                    "release scoring: failed to load media ownership; rejecting series packs"
+                                );
+                                None
+                            }
+                        },
+                    );
                 }
                 !prepared
                     .primary_episode_ids

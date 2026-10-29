@@ -11977,6 +11977,15 @@ async fn rss_does_not_grab_paused_scope() {
 
 #[tokio::test]
 async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
+    assert_rss_title_visit_read_budget(MediaFacet::Series).await;
+}
+
+#[tokio::test]
+async fn rss_anime_title_visit_reuses_catalog_reads_through_subject_resolution() {
+    assert_rss_title_visit_read_budget(MediaFacet::Anime).await;
+}
+
+async fn assert_rss_title_visit_read_budget(facet: MediaFacet) {
     let submissions = Arc::new(TrackingDownloadSubmissionRepo::default());
     let wanted = Arc::new(TrackingAcquisitionScopeStateRepo::default());
     let results = [
@@ -12010,7 +12019,7 @@ async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
             &user,
             NewTitle {
                 name: "Cascade Falls".into(),
-                facet: MediaFacet::Series,
+                facet: facet.clone(),
                 monitored: true,
                 content_status: Some("Continuing".into()),
                 ..Default::default()
@@ -12018,9 +12027,25 @@ async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
         )
         .await
         .expect("series");
-    wanted
-        .remember_title_facet(&title.id, MediaFacet::Series)
-        .await;
+    wanted.remember_title_facet(&title.id, facet.clone()).await;
+    if facet == MediaFacet::Anime {
+        shows
+            .replace_anime_numbering_bridge(
+                &title.id,
+                Some(&scryer_domain::AnimeNumberingBridge {
+                    source: Default::default(),
+                    generated_on: "2026-01-01".into(),
+                    corroborating_order: None,
+                    seasons: vec![scryer_domain::AnimeCommunitySeason {
+                        index: 1,
+                        absolute_start: Some(1),
+                        ..Default::default()
+                    }],
+                }),
+            )
+            .await
+            .expect("numbering bridge");
+    }
     let season = app
         .create_collection(
             &user,
@@ -12060,6 +12085,7 @@ async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
         shows.title_collection_reads.load(Ordering::SeqCst),
         files.title_file_reads.load(Ordering::SeqCst),
     ];
+    let bridge_reads_before = shows.anime_bridge_reads.load(Ordering::SeqCst);
     let report = app.run_scheduled_rss_sync().await.expect("RSS cycle");
     assert_eq!(
         report.releases_grabbed,
@@ -12084,6 +12110,11 @@ async fn rss_title_visit_reuses_catalog_reads_across_episodes_and_packs() {
         std::array::from_fn::<usize, 3, _>(|i| after[i] - before[i]),
         [2, 1, 1],
         "one shared evaluation read, plus the canonical submission guard's independent episode read"
+    );
+    assert_eq!(
+        shows.anime_bridge_reads.load(Ordering::SeqCst) - bridge_reads_before,
+        1,
+        "routing, scoring and subject resolution share the numbering bridge"
     );
 }
 

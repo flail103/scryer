@@ -901,6 +901,38 @@ pub struct MediaFileAssociations {
     pub series_movie_link_ids: Vec<String>,
 }
 
+/// A live primary file's ownership, cutoff and release identity facts, without
+/// analysis or listing payloads.
+/// One row per primary file-episode link, or one row for an unlinked primary file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaFileCutoffSummary {
+    pub id: String,
+    pub file_path: String,
+    pub original_file_path: Option<String>,
+    pub scene_name: Option<String>,
+    pub grabbed_release_title: Option<String>,
+    pub episode_id: Option<String>,
+    pub series_movie_link_ids: Vec<String>,
+    pub quality_label: Option<String>,
+    pub created_at: String,
+}
+
+impl From<&TitleMediaFile> for MediaFileCutoffSummary {
+    fn from(file: &TitleMediaFile) -> Self {
+        Self {
+            id: file.id.clone(),
+            file_path: file.file_path.clone(),
+            original_file_path: file.original_file_path.clone(),
+            scene_name: file.scene_name.clone(),
+            grabbed_release_title: file.grabbed_release_title.clone(),
+            episode_id: file.episode_id.clone(),
+            series_movie_link_ids: file.series_movie_link_ids.clone(),
+            quality_label: file.quality_label.clone(),
+            created_at: file.created_at.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TitleMediaFile {
     pub analysis_details: scryer_media_types::AnalysisDetails,

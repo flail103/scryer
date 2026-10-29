@@ -483,6 +483,94 @@ async fn pending_release_roundtrips_indexer_provenance() {
 }
 
 #[tokio::test]
+async fn rss_pending_query_excludes_history_and_preserves_explicit_replays() {
+    let ctx = TestContext::new().await;
+    seed_title(&ctx, "rss-owner").await;
+    seed_title(&ctx, "rss-foreign").await;
+    let wanted = seed_wanted_item(&ctx, "rss-owner", AcquisitionScopeStatus::Wanted).await;
+    let foreign_wanted =
+        seed_wanted_item(&ctx, "rss-foreign", AcquisitionScopeStatus::Wanted).await;
+    let statuses = [
+        PendingReleaseStatus::Waiting,
+        PendingReleaseStatus::Standby,
+        PendingReleaseStatus::Processing,
+        PendingReleaseStatus::NeedsReview,
+        PendingReleaseStatus::Grabbed,
+        PendingReleaseStatus::Expired,
+        PendingReleaseStatus::Superseded,
+        PendingReleaseStatus::Dismissed,
+    ];
+    let mut seeded = Vec::new();
+    for (index, status) in statuses.into_iter().enumerate() {
+        seeded.push(
+            seed_pending_release(&ctx, &wanted.id, "rss-owner", index as i32, 0, status).await,
+        );
+    }
+    let foreign = seed_pending_release(
+        &ctx,
+        &foreign_wanted.id,
+        "rss-foreign",
+        100,
+        0,
+        PendingReleaseStatus::Waiting,
+    )
+    .await;
+    let store =
+        scryer_infrastructure_library::media::libraries::state_store::PendingReleaseStore::new(
+            ctx.db.datastore(),
+            ctx.db.encryption_key_state(),
+        );
+    let active = store
+        .list_active_pending_releases_for_title("rss-owner", &[])
+        .await
+        .unwrap();
+    assert_eq!(active.len(), 4);
+    assert!(
+        seeded[..4]
+            .iter()
+            .all(|row| active.iter().any(|active| active.id == row.id))
+    );
+    store
+        .update_pending_release_status(&seeded[0].id, PendingReleaseStatus::Expired, None)
+        .await
+        .unwrap();
+    let mut replay_ids: Vec<_> = (0..401).map(|i| format!("missing-replay-{i}")).collect();
+    replay_ids.extend([
+        seeded[0].id.clone(),
+        seeded[4].id.clone(),
+        seeded[4].id.clone(),
+        foreign.id,
+    ]);
+    let replayed = store
+        .list_active_pending_releases_for_title("rss-owner", &replay_ids)
+        .await
+        .unwrap();
+    assert_eq!(
+        replayed.len(),
+        5,
+        "three active rows plus two unique explicit replays"
+    );
+    assert!(replayed.iter().all(|row| row.title_id == "rss-owner"));
+    assert_eq!(
+        replayed
+            .iter()
+            .find(|row| row.id == seeded[0].id)
+            .unwrap()
+            .status,
+        PendingReleaseStatus::Expired,
+        "state changes remain visible"
+    );
+    assert_eq!(
+        store
+            .list_active_pending_releases_for_title("rss-owner", &[])
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
 async fn standby_listing_returns_only_standby_rows() {
     let ctx = TestContext::new().await;
 

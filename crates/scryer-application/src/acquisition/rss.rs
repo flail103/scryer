@@ -2612,11 +2612,9 @@ impl AppUseCase {
         // item named `S04E20` belongs to the episode the bridge says it is, not
         // to the season-4 slot the catalog does not have. Loaded once per
         // title; `None` for every title with no stored bridge.
-        let anime_numbering_bridge = self
-            .services
-            .catalog
-            .shows
-            .get_anime_numbering_bridge(&title.id)
+        let anime_numbering_bridge = context
+            .reads
+            .anime_numbering_bridge(self)
             .await
             .unwrap_or_default();
 
@@ -3035,7 +3033,13 @@ impl AppUseCase {
 
             let search_title = series_movie_search_title(title, &link);
             let subject = match self
-                .resolve_release_search_subject_for_wanted_item(title, &search_title, &wanted, None)
+                .resolve_release_search_subject_for_wanted_item_with_reads(
+                    title,
+                    &search_title,
+                    &wanted,
+                    None,
+                    Some(&context.reads),
+                )
                 .await
             {
                 Ok(subject) => subject,
@@ -3245,14 +3249,15 @@ impl AppUseCase {
             None => None,
         };
         let search_title = self
-            .release_search_title_for_wanted_item(title, &wanted, episode.as_ref(), None)
+            .release_search_title_for_wanted_item(title, &wanted, episode.as_ref(), Some(reads))
             .await;
         let mut subject = match self
-            .resolve_release_search_subject_for_wanted_item(
+            .resolve_release_search_subject_for_wanted_item_with_reads(
                 title,
                 &search_title,
                 &wanted,
                 episode.as_ref(),
+                Some(reads),
             )
             .await
         {
@@ -3266,7 +3271,7 @@ impl AppUseCase {
             subject.submission_scope = scope.clone();
         }
         // Catalog rows belong to the title visit, shared across all scopes.
-        let existing_files = reads.primary_media_files(self).await.unwrap_or_default();
+        let existing_files = reads.primary_file_cutoffs(self).await.unwrap_or_default();
         let cutoff_scope = self.cutoff_scope_for(&subject.submission_scope).await;
         let analyzed_cutoff_quality =
             crate::acquisition::decision_helpers::analyzed_cutoff_quality_for_scope(
@@ -3386,11 +3391,17 @@ impl AppUseCase {
         };
         admission = admission.with_queued(queued);
 
+        let replay_ids: Vec<String> = scored
+            .iter()
+            .filter_map(|candidate| candidate.extra.get("_rss_reconstructed_pending_id"))
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .collect();
         let title_pending = self
             .services
             .workflow
             .pending_releases
-            .list_pending_releases_for_title(&title.id)
+            .list_active_pending_releases_for_title(&title.id, &replay_ids)
             .await
             .unwrap_or_default();
         let pending_scopes = title_pending

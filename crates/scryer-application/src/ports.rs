@@ -8331,6 +8331,21 @@ pub trait MediaFileRepository: Send + Sync {
 
     async fn list_media_files_for_title(&self, title_id: &str) -> AppResult<Vec<TitleMediaFile>>;
 
+    /// Compact ownership/cutoff facts for live primary links. SQL stores select
+    /// only these columns; the default supports in-memory repositories.
+    async fn list_primary_file_cutoffs_for_title(
+        &self,
+        title_id: &str,
+    ) -> AppResult<Vec<crate::MediaFileCutoffSummary>> {
+        Ok(self
+            .list_media_files_for_title(title_id)
+            .await?
+            .iter()
+            .filter(|file| file.role.is_primary())
+            .map(crate::MediaFileCutoffSummary::from)
+            .collect())
+    }
+
     /// Batch-load media files for many titles. Returns a flat list (each file
     /// carries `title_id`); callers group by that field. The default fans out to
     /// `list_media_files_for_title`; SQL stores override with a single `IN`
@@ -8967,6 +8982,29 @@ pub trait PendingReleaseRepository: Send + Sync {
         &self,
         title_id: &str,
     ) -> AppResult<Vec<PendingRelease>>;
+    /// Fresh active rows for RSS decisions, plus explicitly replayed rows whose
+    /// frozen listing must survive a status change since feed intake. Every
+    /// returned row belongs to `title_id`, including replayed IDs.
+    async fn list_active_pending_releases_for_title(
+        &self,
+        title_id: &str,
+        replay_ids: &[String],
+    ) -> AppResult<Vec<PendingRelease>> {
+        Ok(self
+            .list_pending_releases_for_title(title_id)
+            .await?
+            .into_iter()
+            .filter(|pending| {
+                matches!(
+                    pending.status,
+                    PendingReleaseStatus::Waiting
+                        | PendingReleaseStatus::Standby
+                        | PendingReleaseStatus::Processing
+                        | PendingReleaseStatus::NeedsReview
+                ) || replay_ids.contains(&pending.id)
+            })
+            .collect())
+    }
     /// Return one page of `waiting` pending releases matching `query` plus the
     /// total number of matching rows. Filtering, ordering, limit/offset, and the
     /// count are all computed in storage.
