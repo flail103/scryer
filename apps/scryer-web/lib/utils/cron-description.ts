@@ -19,6 +19,7 @@ const CRONSTRUE_LOCALE_BY_UI_LANGUAGE: Record<string, string> = {
   jpn: "ja",
   rus: "ru",
   nld: "nl",
+  ces: "cs",
 };
 
 const ENGLISH = "en";
@@ -37,6 +38,7 @@ const LOCALE_LOADERS: Record<string, () => Promise<unknown>> = {
   ja: () => import("cronstrue/locales/ja.js"),
   ru: () => import("cronstrue/locales/ru.js"),
   nl: () => import("cronstrue/locales/nl.js"),
+  cs: () => import("cronstrue/locales/cs.js"),
 };
 
 const loadedLocales = new Set<string>([ENGLISH]);
