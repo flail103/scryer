@@ -240,7 +240,7 @@ test("every plugin reason resolves to a sentence of its own in every locale", as
     "../i18n/locales",
   );
   const files = readdirSync(localesDir).filter((name) => name.endsWith(".ts"));
-  assert.equal(files.length, 13);
+  assert.equal(files.length, 14);
   for (const file of files) {
     const locale = (await import(path.join(localesDir, file)))
       .default as Record<string, string>;

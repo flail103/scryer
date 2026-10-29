@@ -17,7 +17,8 @@ export type LocaleCode =
   | "zh-TW"
   | "jpn"
   | "rus"
-  | "nld";
+  | "nld"
+  | "ces";
 
 export type LanguageOption = {
   code: LocaleCode;
@@ -52,6 +53,8 @@ const LOCALE_ALIASES: Record<string, LocaleCode> = {
   nl: "nld",
   "nl-nl": "nld",
   "nl-be": "nld",
+  cs: "ces",
+  "cs-cz": "ces",
 };
 
 const localeLoaders = new Map<DeferredLocaleCode, LocaleLoader>([
@@ -67,6 +70,7 @@ const localeLoaders = new Map<DeferredLocaleCode, LocaleLoader>([
   ["jpn", () => import("./locales/ja.ts")],
   ["rus", () => import("./locales/ru.ts")],
   ["nld", () => import("./locales/nl.ts")],
+  ["ces", () => import("./locales/cs.ts")],
 ]);
 
 const locales = new Map<LocaleCode, LocaleDictionary>([["eng", en]]);
@@ -86,6 +90,7 @@ export const AVAILABLE_LANGUAGES: LanguageOption[] = [
   { code: "jpn", label: "日本語" },
   { code: "rus", label: "Русский" },
   { code: "nld", label: "Nederlands" },
+  { code: "ces", label: "Čeština" },
 ];
 
 /**
