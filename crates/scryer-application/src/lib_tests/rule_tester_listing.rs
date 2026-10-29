@@ -97,6 +97,7 @@ async fn listing_inputs_reach_the_rules_a_release_name_is_tested_with() {
 
     let mut request = release_request(&title.id);
     request.listing = RuleSetTestListingInput {
+        protocol: None,
         published_at: Some("2025-01-01T12:00:00Z".into()),
         thumbs_up: Some(12),
         thumbs_down: Some(1),
@@ -137,6 +138,49 @@ async fn listing_inputs_reach_the_rules_a_release_name_is_tested_with() {
         ["freeleech"],
         "extra is bounded like a live listing's"
     );
+}
+
+#[tokio::test]
+async fn protocol_reaches_release_and_stored_file_rules() {
+    use scryer_rules::ReleaseProtocol::{Http, Torrent, Usenet};
+    let (app, user, media_files) = tester_app(at(2026, 3, 1));
+    let title = synthetic_movie(&app, &user).await;
+    let rules = r#"import rego.v1
+score_entry["usenet"] := 10 if { input.release.protocol == "usenet" }
+score_entry["torrent"] := 20 if { input.release.protocol == "torrent" }
+score_entry["http"] := 30 if { input.release.protocol == "http" }
+score_entry["unknown"] := 1 if { input.release.protocol == null }
+"#;
+    for (protocol, code, score) in [
+        (Some(Usenet), "usenet", 10),
+        (Some(Torrent), "torrent", 20),
+        (Some(Http), "http", 30),
+        (None, "unknown", 1),
+    ] {
+        let mut request = release_request(&title.id);
+        request.draft = Some(draft(rules));
+        request.listing.protocol = protocol;
+        let result = app.test_rule_set(&user, request).await.unwrap();
+        assert_eq!(draft_codes(&result), [code]);
+        assert_eq!(result.draft_contribution.score, score);
+        assert_eq!(result.listing.unwrap().protocol, protocol);
+
+        let snapshot =
+            serde_json::json!({"v":1,"captured_at":"2024-01-01T00:00:00Z","protocol":protocol})
+                .to_string();
+        let file_id = seed_stored_file(&media_files, &title.id, Some(snapshot)).await;
+        let mut request = stored_file_request(&title.id, &file_id);
+        request.draft = Some(draft(rules));
+        let result = app.test_rule_set(&user, request).await.unwrap();
+        assert_eq!(draft_codes(&result), [code]);
+        assert_eq!(result.draft_contribution.score, score);
+        assert_eq!(result.listing.unwrap().protocol, protocol);
+    }
+    let file_id = seed_stored_file(&media_files, &title.id, None).await;
+    let mut request = stored_file_request(&title.id, &file_id);
+    request.draft = Some(draft(rules));
+    let result = app.test_rule_set(&user, request).await.unwrap();
+    assert_eq!(draft_codes(&result), ["unknown"]);
 }
 
 #[tokio::test]
@@ -219,6 +263,7 @@ async fn a_stored_file_scores_from_its_frozen_snapshot_exactly_as_its_bar() {
     let mut extra = std::collections::BTreeMap::new();
     extra.insert("freeleech".to_string(), serde_json::json!(true));
     let snapshot = crate::quality::release_listing::ReleaseListingSnapshot {
+        protocol: None,
         grab_scoring: None,
         // 151 days old at the grab, 516 days old now.
         published_at: Some("2025-01-01T12:00:00Z".into()),

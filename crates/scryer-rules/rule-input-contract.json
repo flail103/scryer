@@ -5,6 +5,11 @@
       "path": "input.release",
       "fields": [
         {
+          "field": "protocol",
+          "type": "string?",
+          "descKey": "settings.refReleaseProtocol"
+        },
+        {
           "field": "raw_title",
           "type": "string",
           "descKey": "settings.refReleaseRawTitle"

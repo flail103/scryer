@@ -147,6 +147,7 @@ function listingFactLines(
         : String(listing.ageDays);
   return [
     [t("settings.ruleTestListingPublishedAt"), listing.publishedAt || unknown],
+    [t("settings.ruleTestListingProtocol"), listing.protocol || unknown],
     [t("settings.ruleTestResultAgeDays"), age],
     [
       t("settings.ruleTestListingThumbsUp"),
@@ -632,6 +633,45 @@ export function RuleSetTestPanel({
                     {t("settings.ruleTestListingFactsHelp")}
                   </p>
                   <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <p
+                        id="settings-rule-test-listing-protocol"
+                        className="mb-1 block text-sm font-medium"
+                      >
+                        {t("settings.ruleTestListingProtocol")}
+                      </p>
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        value={listing.protocol || "unknown"}
+                        onValueChange={(value) =>
+                          updateListing(
+                            "protocol",
+                            value === "unknown" ? "" : value,
+                          )
+                        }
+                        aria-labelledby="settings-rule-test-listing-protocol"
+                      >
+                        <ToggleGroupItem
+                          value="unknown"
+                          variant="outline"
+                          size="sm"
+                        >
+                          {t("settings.ruleTestListingUnknown")}
+                        </ToggleGroupItem>
+                        {["usenet", "torrent", "http"].map((protocol) => (
+                          <ToggleGroupItem
+                            key={protocol}
+                            value={protocol}
+                            variant="outline"
+                            size="sm"
+                          >
+                            {protocol}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    </div>
                     {LISTING_TEXT_FIELDS.map(([field, labelKey]) => (
                       <div key={field}>
                         <Label

@@ -68,6 +68,12 @@ for (const family of ["release", "request", "maintenance"] as RegoFamily[]) {
 }
 
 test("scoring fields, nullable group, arrays and family isolation", () => {
+  assert.equal(
+    regoFieldCompletions("release", "input.release").find(
+      (f) => f.path === "input.release.protocol",
+    )?.type,
+    "string?",
+  );
   assert.ok(
     regoFieldCompletions("release", "input.context").some(
       (f) => f.path === "input.context.tags",

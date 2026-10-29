@@ -171,6 +171,37 @@ test("controller reactivation permits a new request without reviving the old one
   assert.equal(controller.isCurrent(newRequest!), true);
 });
 
+test("protocol selections reach the tester and invalidate previous results", () => {
+  const selection = {
+    titleId: "title",
+    episodeId: null,
+    releaseName: "release",
+    sizeGib: "",
+    listing: EMPTY_RULE_SET_TEST_LISTING,
+  };
+  const before = ruleSetTestFingerprint(draft, selection, null, null, null);
+  for (const protocol of ["usenet", "torrent", "http"]) {
+    const listing = { ...EMPTY_RULE_SET_TEST_LISTING, protocol };
+    assert.deepEqual(listingInputFromDraft(listing), { value: { protocol } });
+    assert.notEqual(
+      ruleSetTestFingerprint(
+        draft,
+        { ...selection, listing },
+        null,
+        null,
+        null,
+      ),
+      before,
+    );
+  }
+  for (const protocol of ["", "unknown", "ftp"]) {
+    assert.deepEqual(
+      listingInputFromDraft({ ...EMPTY_RULE_SET_TEST_LISTING, protocol }),
+      { value: undefined },
+    );
+  }
+});
+
 test("size conversion preserves unknown values and rejects unsafe bytes", () => {
   assert.deepEqual(sizeBytesFromGib(""), { value: undefined });
   assert.deepEqual(sizeBytesFromGib("1"), { value: 1024 ** 3 });
@@ -261,6 +292,7 @@ test("listing facts parse into mutation input", () => {
   assert.deepEqual(
     listingInputFromDraft({
       publishedAt: "2024-01-31",
+      protocol: "torrent",
       thumbsUp: "12",
       thumbsDown: " 0 ",
       isPasswordProtected: "false",
@@ -270,6 +302,7 @@ test("listing facts parse into mutation input", () => {
     {
       value: {
         publishedAt: "2024-01-31T00:00:00Z",
+        protocol: "torrent",
         thumbsUp: 12,
         thumbsDown: 0,
         isPasswordProtected: false,
@@ -356,7 +389,7 @@ test("preview operation echoes the scored release and its listing facts", () => 
   assert.match(testRuleSetMutation, /releaseName\s+mediaFileId/);
   assert.match(
     testRuleSetMutation,
-    /listing \{\s+publishedAt\s+ageDays\s+thumbsUp\s+thumbsDown\s+isPasswordProtected\s+indexerLanguages\s+extra\s+capturedAt\s+\}/,
+    /listing \{\s+protocol\s+publishedAt\s+ageDays\s+thumbsUp\s+thumbsDown\s+isPasswordProtected\s+indexerLanguages\s+extra\s+capturedAt\s+\}/,
   );
 });
 

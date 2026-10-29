@@ -889,6 +889,7 @@ impl RefusalFact {
     }
 }
 
+pub use scryer_rules::ReleaseProtocol;
 /// Rule source facts retained by both validation and save refusals.
 pub use scryer_rules::validation::ValidationDiagnostic as RuleValidationDiagnostic;
 

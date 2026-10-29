@@ -2616,6 +2616,7 @@ export const testRuleSetMutation = `mutation TestRuleSet($input: TestRuleSetInpu
     releaseName
     mediaFileId
     listing {
+      protocol
       publishedAt
       ageDays
       thumbsUp

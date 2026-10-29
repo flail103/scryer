@@ -68,7 +68,7 @@ score_entry["poorly_seeded"] := -300 if {
 blocked_extensions := ["exe", "msi", "bat", "lnk"]
 
 score_entry["blocked_file_extension"] := scryer.block_score() if {
-    input.release.extra.protocol == "torrent"
+    input.release.protocol == "torrent"
     some part in split(lower(input.release.raw_title), ".")
     part in blocked_extensions
 }`,

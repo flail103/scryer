@@ -4,6 +4,7 @@ export type RuleSetTestMode = "release" | "storedFile";
 
 /** Listing-fact form fields, as typed. Empty strings mean "unknown". */
 export type RuleSetTestListingDraft = {
+  protocol: string;
   publishedAt: string;
   thumbsUp: string;
   thumbsDown: string;
@@ -16,6 +17,7 @@ export type RuleSetTestListingDraft = {
 };
 
 export const EMPTY_RULE_SET_TEST_LISTING: RuleSetTestListingDraft = {
+  protocol: "",
   publishedAt: "",
   thumbsUp: "",
   thumbsDown: "",
@@ -36,6 +38,7 @@ export type RuleSetTestSelection = {
 
 /** `TestRuleSetInput.listing`. Omitted facts are unknown to rules. */
 export type RuleSetTestListingInput = {
+  protocol?: "usenet" | "torrent" | "http";
   publishedAt?: string;
   thumbsUp?: number;
   thumbsDown?: number;
@@ -46,6 +49,7 @@ export type RuleSetTestListingInput = {
 
 /** `TestRuleSetPayload.listing`: the listing facts the rules read. */
 export type RuleSetTestListingFacts = {
+  protocol?: "usenet" | "torrent" | "http" | null;
   publishedAt?: string | null;
   ageDays?: number | null;
   thumbsUp?: number | null;
@@ -131,6 +135,13 @@ export function listingInputFromDraft(
   draft: RuleSetTestListingDraft,
 ): { value: RuleSetTestListingInput | undefined } | { error: string } {
   const value: RuleSetTestListingInput = {};
+  if (
+    draft.protocol === "usenet" ||
+    draft.protocol === "torrent" ||
+    draft.protocol === "http"
+  ) {
+    value.protocol = draft.protocol;
+  }
   const publishedAt = draft.publishedAt.trim();
   if (publishedAt) {
     const normalized = DATE_ONLY.test(publishedAt)

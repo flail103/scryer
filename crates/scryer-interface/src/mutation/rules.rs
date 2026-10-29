@@ -315,6 +315,9 @@ impl RulesMutations {
             release_name: result.release_name,
             media_file_id: result.media_file_id.map(ID::from),
             listing: result.listing.map(|listing| RuleSetTestListingPayload {
+                protocol: listing
+                    .protocol
+                    .map(|protocol| protocol.as_str().to_string()),
                 published_at: listing.published_at,
                 age_days: listing
                     .age_days
@@ -550,6 +553,10 @@ fn listing_input(
         }
     };
     Ok(scryer_application::RuleSetTestListingInput {
+        protocol: input
+            .protocol
+            .as_deref()
+            .and_then(scryer_application::ReleaseProtocol::parse),
         published_at: input.published_at,
         thumbs_up: input.thumbs_up,
         thumbs_down: input.thumbs_down,

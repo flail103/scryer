@@ -6758,6 +6758,9 @@ const en: LocaleDictionary = {
     "Indexer thumbs-down votes. An indexer listing fact frozen when the release was grabbed; null when the indexer did not report votes, and null for files that were scanned in, adopted, or imported before listing snapshots were kept",
   "settings.refReleaseExtra":
     "Indexer-specific listing attributes (flat values and lists of values), readable as input.release.extra.<key>. Indexer listing facts frozen when the release was grabbed; an empty object for files that were scanned in, adopted, or imported before listing snapshots were kept, so every input.release.extra.<key> lookup is undefined (not null) and a comparison such as == null does not match",
+  "settings.refReleaseProtocol":
+    "Download protocol: usenet, torrent, or http; null when unknown. Frozen from the listing for import and later rescoring. Historical files remain unknown unless their listing retained protocol metadata.",
+  "settings.ruleTestListingProtocol": "Download protocol",
 
   "settings.ruleTestModeLabel": "What to test",
   "settings.ruleTestModeRelease": "Release name",

@@ -49,6 +49,7 @@ pub struct RuleSetTestRequest {
 /// Indexer listing facts supplied to the tester for a release name.
 #[derive(Clone, Debug, Default)]
 pub struct RuleSetTestListingInput {
+    pub protocol: Option<scryer_rules::ReleaseProtocol>,
     /// Publish time, in any form a live listing's is kept in: RFC 2822
     /// (a newznab `pubDate`) or RFC 3339.
     pub published_at: Option<String>,
@@ -63,6 +64,7 @@ pub struct RuleSetTestListingInput {
 impl RuleSetTestListingInput {
     fn is_empty(&self) -> bool {
         self.published_at.is_none()
+            && self.protocol.is_none()
             && self.thumbs_up.is_none()
             && self.thumbs_down.is_none()
             && self.is_password_protected.is_none()
@@ -84,6 +86,7 @@ impl RuleSetTestListingInput {
             })
             .unwrap_or_default();
         ReleaseListingSnapshot {
+            protocol: self.protocol,
             grab_scoring: None,
             published_at: self
                 .published_at
@@ -102,6 +105,7 @@ impl RuleSetTestListingInput {
 /// The listing facts a preview scored with, and the age rules saw.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuleSetTestListingFacts {
+    pub protocol: Option<scryer_rules::ReleaseProtocol>,
     pub published_at: Option<String>,
     /// `input.release.age_days`: the age at `captured_at` for a stored file,
     /// the age now for a tested release name.
@@ -119,6 +123,7 @@ impl RuleSetTestListingFacts {
         let snapshot = &facts.snapshot;
         Self {
             published_at: snapshot.published_at.clone(),
+            protocol: snapshot.protocol,
             age_days: snapshot.age_days(facts.anchor),
             thumbs_up: snapshot.thumbs_up,
             thumbs_down: snapshot.thumbs_down,

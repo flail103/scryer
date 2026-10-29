@@ -2692,6 +2692,7 @@ mod tests {
             &resolved,
             &decision,
             crate::user_rule_input::ReleaseRuntimeInfo {
+                protocol: None,
                 size_bytes: None,
                 age_days: None,
                 thumbs_up: None,
@@ -2800,6 +2801,7 @@ mod tests {
         }])
         .expect("rule builds");
         let snapshot = crate::quality::release_listing::ReleaseListingSnapshot {
+            protocol: None,
             grab_scoring: None,
             published_at: Some("2024-01-02T03:04:05Z".to_string()),
             thumbs_up: None,
@@ -2910,6 +2912,7 @@ mod tests {
             &profile,
             &decision,
             crate::user_rule_input::ReleaseRuntimeInfo {
+                protocol: None,
                 size_bytes: None,
                 age_days: None,
                 thumbs_up: None,

@@ -126,6 +126,8 @@ pub struct TestRuleSetInput {
 /// Indexer listing facts a tested release name is scored with. The tester
 /// treats the release as a fresh, never-grabbed search result.
 pub struct RuleSetTestListingInput {
+    /// Download protocol: usenet, torrent, or http. Other values are unknown.
+    pub protocol: Option<String>,
     /// Publish time as an RFC 2822 (newznab `pubDate`) or RFC 3339
     /// timestamp, kept as written; `input.release.age_days` is measured from
     /// it to now.
@@ -279,6 +281,8 @@ pub struct RuleSetTestErrorPayload {
 #[derive(SimpleObject, Clone)]
 /// Indexer listing facts a scoring preview read, as rules saw them.
 pub struct RuleSetTestListingPayload {
+    /// Frozen download protocol: usenet, torrent, http, or null when unknown.
+    pub protocol: Option<String>,
     /// Publish time the listing reported, or null when unknown.
     pub published_at: Option<String>,
     /// `input.release.age_days`: whole days from publish to `capturedAt`, or

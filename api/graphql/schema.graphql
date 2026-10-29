@@ -27830,6 +27830,10 @@ treats the release as a fresh, never-grabbed search result.
 """
 input RuleSetTestListingInput {
 	"""
+	Download protocol: usenet, torrent, or http. Other values are unknown.
+	"""
+	protocol: String
+	"""
 	Publish time as an RFC 2822 (newznab `pubDate`) or RFC 3339
 	timestamp, kept as written; `input.release.age_days` is measured from
 	it to now.
@@ -27862,6 +27866,10 @@ input RuleSetTestListingInput {
 Indexer listing facts a scoring preview read, as rules saw them.
 """
 type RuleSetTestListingPayload {
+	"""
+	Frozen download protocol: usenet, torrent, http, or null when unknown.
+	"""
+	protocol: String
 	"""
 	Publish time the listing reported, or null when unknown.
 	"""

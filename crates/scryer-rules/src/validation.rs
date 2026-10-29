@@ -1814,6 +1814,7 @@ fn validate_score_entry_shape(value: &Value) -> Result<(), String> {
 fn synthetic_test_input() -> UserRuleInput {
     UserRuleInput {
         release: ReleaseDoc {
+            protocol: None,
             stereoscopy_tokens: vec![],
             stereoscopy: None,
             raw_title: "Test.Movie.2024.2160p.WEB-DL.H.265.DDP.5.1".to_string(),
