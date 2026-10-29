@@ -675,6 +675,37 @@ fn typed_torrent() -> IndexerSearchResult {
 }
 
 #[test]
+fn xml_and_json_redact_synthesized_poster_credentials_but_keep_archive_passwords() {
+    for poster in [
+        "https://member:poster-secret@images.example/poster.jpg?width=600&apikey=poster-key",
+        "https://images.example/poster.jpg?width=600&next=https%3A%2F%2Fother.example%2F%3Ftoken%3Dencoded-poster-secret",
+    ] {
+        let mut source = result(Vec::new());
+        source.extra = serde_json::from_value(serde_json::json!({"poster": poster})).unwrap();
+        source.password_hint = Some("https://archive.example/?token=archive-passphrase".into());
+        let xml_output = xml(&source, None);
+        let json = json_item(&source);
+        for output in [&xml_output, &json.to_string()] {
+            for secret in ["poster-secret", "poster-key", "encoded-poster-secret"] {
+                assert!(!output.contains(secret), "{output}");
+            }
+            assert!(output.contains("width=600"), "{output}");
+            assert!(output.contains("archive-passphrase"), "{output}");
+        }
+        assert!(
+            parsed_attributes(&xml_output)
+                .iter()
+                .any(|(_, name, _)| name == "coverurl")
+        );
+        assert!(
+            json_attributes(&json, "torznab:attr")
+                .iter()
+                .any(|(name, _)| name == "coverurl")
+        );
+    }
+}
+
+#[test]
 fn typed_only_torrent_synthesizes_prowlarr_attributes_in_order() {
     let result = typed_torrent();
     let output = xml(&result, None);

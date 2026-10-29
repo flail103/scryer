@@ -1828,14 +1828,18 @@ pub(crate) async fn graphql_handler(
             );
         }
     }
+    let rate_limit_provenance = rate_limit_provenance(&headers, remote_addr, &state.rate_limiter);
+    let initial_authentication_request = scryer_interface::InitialAuthenticationRequest {
+        client_ip: rate_limit_provenance.client_ip,
+    };
     let batch = match batch {
-        async_graphql::BatchRequest::Single(request) => async_graphql::BatchRequest::Single(
-            request.data(scryer_interface::InitialAuthenticationRequest),
-        ),
+        async_graphql::BatchRequest::Single(request) => {
+            async_graphql::BatchRequest::Single(request.data(initial_authentication_request))
+        }
         async_graphql::BatchRequest::Batch(requests) => async_graphql::BatchRequest::Batch(
             requests
                 .into_iter()
-                .map(|request| request.data(scryer_interface::InitialAuthenticationRequest))
+                .map(|request| request.data(initial_authentication_request))
                 .collect(),
         ),
     };
@@ -1864,7 +1868,6 @@ pub(crate) async fn graphql_handler(
         None
     };
     let client_ip = request_client_ip(&headers, Some(remote_addr)).unwrap_or(remote_addr.ip());
-    let rate_limit_provenance = rate_limit_provenance(&headers, remote_addr, &state.rate_limiter);
     let rate_limit_class = classify_graphql(&batch);
     let authentication_requests = batch
         .iter()

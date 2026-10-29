@@ -2614,12 +2614,12 @@ impl SettingsMutations {
         input: CompleteInitialAuthenticationInput,
     ) -> GqlResult<InitialAuthenticationPayload> {
         use scryer_application::initial_auth::refusal;
-        ctx.data::<scryer_interface_core::InitialAuthenticationRequest>()?;
+        let request = ctx.data::<scryer_interface_core::InitialAuthenticationRequest>()?;
         let app = app_from_ctx(ctx)?;
         let runtime = auth_runtime_from_ctx(ctx);
         runtime
             .initial_authentication
-            .verify(input.setup_code.as_deref())
+            .verify(request.client_ip, input.setup_code.as_deref())
             .map_err(to_gql_error)?;
         let password_mode = input.mode == InitialAuthenticationMode::Password;
         if password_mode != input.password.is_some()

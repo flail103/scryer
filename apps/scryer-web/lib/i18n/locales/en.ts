@@ -18,7 +18,7 @@ const en: LocaleDictionary = {
     "I understand that anyone allowed to reach this unauthenticated instance can act as administrator. Existing network restrictions still apply.",
   "initialAuth.code": "Setup code",
   "initialAuth.codeHelp":
-    "Find the one-time code in the server console or container/service output. Restarting Scryer replaces the code.",
+    "Find the one-time code in the server console or container/service output. On desktop, open logs/console.log in Scryer’s data folder. Restarting Scryer replaces the code.",
   "initialAuth.continue": "Save password and continue",
   "initialAuth.continueWithout": "Confirm no authentication and continue",
   "initialAuth.saving": "Saving…",
@@ -31,7 +31,8 @@ const en: LocaleDictionary = {
     "Authentication setup has already been completed. Refresh to continue.",
   "initialAuth.replaceRequired":
     "Sign in with the temporary administrator password and replace it.",
-  "initialAuth.invalidCode": "Enter the setup code from the server console.",
+  "initialAuth.invalidCode":
+    "Enter the setup code from the server console or, on desktop, logs/console.log in Scryer’s data folder.",
   "initialAuth.rateLimited":
     "Too many incorrect setup codes. Wait one minute and try again.",
   "initialAuth.modeConflict":
@@ -3407,6 +3408,8 @@ const en: LocaleDictionary = {
     "Unsupported password hash version.",
   "error.reason.SECURITY_PASSWORD_OUT_OF_RANGE":
     "Password must be at least {{minLength}} characters.",
+  "error.passwordLengthRequirement":
+    "Password does not meet the configured length requirement.",
   "error.reason.SECURITY_PASSWORD_REAUTHENTICATION_UNAVAILABLE_ACCOUNT":
     "Password reauthentication is unavailable for this account.",
   "error.reason.SECURITY_PASSWORD_REQUIRED": "Password is required.",

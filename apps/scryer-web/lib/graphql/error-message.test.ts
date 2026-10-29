@@ -29,7 +29,7 @@ test("initial authentication refusals use localized codes rather than server wor
       "Failed",
       (key, values) => t(key, "fr", values),
     ),
-    "Saisissez le code de configuration affiché dans la console du serveur.",
+    "Saisissez le code de configuration affiché dans la console du serveur ou, sur l’application de bureau, dans logs/console.log du dossier de données de Scryer.",
   );
   assert.equal(
     userFacingGraphQlErrorMessage(
@@ -40,7 +40,8 @@ test("initial authentication refusals use localized codes rather than server wor
   );
 });
 
-test("password refusals interpolate validated minima and retain missing-fact sentences", () => {
+test("password refusals interpolate validated minima and localize missing or malformed facts", async () => {
+  await loadLocaleDictionary("fr");
   for (const minLength of [8, 24, "16"]) {
     const error = {
       graphQLErrors: [
@@ -79,23 +80,27 @@ test("password refusals interpolate validated minima and retain missing-fact sen
     Infinity,
     "8e2",
   ]) {
-    assert.equal(
-      userFacingGraphQlErrorMessage(
+    const error = {
+      graphQLErrors: [
         {
-          graphQLErrors: [
-            {
-              message: "Password must have the configured minimum",
-              extensions: {
-                code: "VALIDATION_ERROR",
-                reason: "SECURITY_PASSWORD_OUT_OF_RANGE",
-                minLength,
-              },
-            },
-          ],
+          message: "Password must have the configured minimum",
+          extensions: {
+            code: "VALIDATION_ERROR",
+            reason: "SECURITY_PASSWORD_OUT_OF_RANGE",
+            minLength,
+          },
         },
-        "Failed",
+      ],
+    };
+    assert.equal(
+      userFacingGraphQlErrorMessage(error, "Failed"),
+      "Password does not meet the configured length requirement.",
+    );
+    assert.equal(
+      userFacingGraphQlErrorMessage(error, "Failed", (key, values) =>
+        t(key, "fr", values),
       ),
-      "Password must have the configured minimum",
+      "Le mot de passe ne respecte pas la longueur requise par la configuration.",
     );
   }
 });

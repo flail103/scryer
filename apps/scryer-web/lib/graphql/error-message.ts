@@ -504,11 +504,7 @@ export function userFacingGraphQlErrorMessage(
         if (Number.isSafeInteger(minLength) && minLength > 0) {
           return translate(key, { minLength });
         }
-        // Older servers have the requirement only in their sentence.
-        if (typeof entry.message === "string" && entry.message.trim()) {
-          return normalizeGraphQlErrorMessage(entry.message);
-        }
-        return fallback.trim();
+        return translate("error.passwordLengthRequirement");
       }
       if (key || codeKey) return translate(key ?? codeKey!);
     }

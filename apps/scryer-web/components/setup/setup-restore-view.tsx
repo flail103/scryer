@@ -28,8 +28,8 @@ import {
 } from "@/lib/utils/restore-error-message";
 
 const INSPECT_RESTORE_BUNDLE_OPERATION = `
-  mutation InspectRestoreBundle($bundleUpload: Upload!, $password: String) {
-    inspectRestoreBundle: startInspectRestoreBundle(bundleUpload: $bundleUpload, password: $password) {
+  mutation InspectRestoreBundle($bundleUpload: Upload!, $password: String, $setupCode: String) {
+    inspectRestoreBundle: startInspectRestoreBundle(bundleUpload: $bundleUpload, password: $password, setupCode: $setupCode) {
       id
       phase
       uploadId
@@ -51,8 +51,8 @@ const INSPECT_RESTORE_BUNDLE_OPERATION = `
 `;
 
 const APPLY_RESTORE_BUNDLE_OPERATION = `
-  mutation ApplyRestoreBundle($uploadId: ID!, $password: String) {
-    applyRestoreBundle: startApplyRestoreBundle(uploadId: $uploadId, password: $password) {
+  mutation ApplyRestoreBundle($uploadId: ID!, $password: String, $setupCode: String) {
+    applyRestoreBundle: startApplyRestoreBundle(uploadId: $uploadId, password: $password, setupCode: $setupCode) {
       id
     }
   }
@@ -106,6 +106,7 @@ interface SetupRestoreViewProps {
     values?: Record<string, string | number | boolean | null | undefined>,
   ) => string;
   onBack: () => void;
+  setupCode?: string | null;
 }
 
 function buildFrontendUrl(path: string): string {
@@ -162,6 +163,7 @@ async function waitForInspection(
   id: string,
   fallback: string,
   signal: AbortSignal,
+  setupCode?: string | null,
 ) {
   for (;;) {
     signal.throwIfAborted();
@@ -170,8 +172,9 @@ async function waitForInspection(
       signal,
       headers: createAuthHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
-        query: `query RestoreInspectionStatus {
-        inspectRestoreBundle: restoreStatus {
+        variables: { setupCode: setupCode ?? null },
+        query: `query RestoreInspectionStatus($setupCode: String) {
+        inspectRestoreBundle: restoreStatus(setupCode: $setupCode) {
           id phase uploadId reason message
           summary { formatVersion createdAt sourceScryerVersion sourceEngine sourceMigrationKey
             encrypted totalRows rowCounts { table rowCount } }
@@ -224,7 +227,11 @@ function formatDateTime(value: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
-export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
+export function SetupRestoreView({
+  t,
+  onBack,
+  setupCode,
+}: SetupRestoreViewProps) {
   const [selectedBundle, setSelectedBundle] = React.useState<File | null>(null);
   const [password, setPassword] = React.useState("");
   const [fileInputKey, setFileInputKey] = React.useState(0);
@@ -245,7 +252,12 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
     const id = sessionStorage.getItem(INSPECTION_ATTEMPT_KEY);
     if (id) {
       setInspecting(true);
-      void waitForInspection(id, t("status.failedToLoad"), controller.signal)
+      void waitForInspection(
+        id,
+        t("status.failedToLoad"),
+        controller.signal,
+        setupCode,
+      )
         .then((job) => {
           if (controller.signal.aborted) return;
           setUploadId(job.uploadId);
@@ -260,7 +272,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
         });
     }
     return () => inspectionAbort.current?.abort();
-  }, [t]);
+  }, [t, setupCode]);
 
   const bundleLooksEncrypted =
     selectedBundle?.name.toLowerCase().endsWith(".enc") ?? false;
@@ -315,6 +327,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
           variables: {
             bundleUpload: null,
             password: password.length > 0 ? password : null,
+            setupCode: setupCode ?? null,
           },
         }),
       );
@@ -340,6 +353,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
         result.id,
         t("status.failedToLoad"),
         controller.signal,
+        setupCode,
       );
       if (controller.signal.aborted) return;
       setUploadId(inspected.uploadId);
@@ -350,7 +364,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
     } finally {
       if (!controller.signal.aborted) setInspecting(false);
     }
-  }, [password, requiresPassword, selectedBundle, t]);
+  }, [password, requiresPassword, selectedBundle, t, setupCode]);
 
   const handleApply = React.useCallback(async () => {
     if (!uploadId || !summary) {
@@ -370,6 +384,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
           variables: {
             uploadId,
             password: summary.encrypted ? password : null,
+            setupCode: setupCode ?? null,
           },
         }),
       });
@@ -383,7 +398,7 @@ export function SetupRestoreView({ t, onBack }: SetupRestoreViewProps) {
       setApplying(false);
       setError(restoreErrorMessage(nextError, t, t("status.failedToUpdate")));
     }
-  }, [password, summary, t, uploadId]);
+  }, [password, summary, t, uploadId, setupCode]);
 
   return (
     <SetupPanel className="w-full space-y-6 bg-[linear-gradient(180deg,rgba(12,18,35,0.82),rgba(8,13,26,0.72))]">

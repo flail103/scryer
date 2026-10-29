@@ -9,13 +9,97 @@ use axum::{
 };
 use scryer_application::initial_auth::{SetupState, refusal};
 
+// Standard stderr deliberately treats a missing native handle as a successful
+// no-op on some platforms. Setup must observe the real output failure.
+pub(crate) fn print_setup_code(code: &str) -> std::io::Result<()> {
+    operator_stderr()
+        .and_then(|mut output| write_setup_code(&mut output, code))
+        .map_err(|error| {
+            std::io::Error::new(error.kind(), format!(
+                "cannot write the initial setup code to process stderr: {error}; configure console/service output capture or supply SCRYER_ADMIN_PASSWORD or SCRYER_ADMIN_PASSWORD_FILE"
+            ))
+        })
+}
+
+#[cfg(unix)]
+fn operator_stderr() -> std::io::Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    // SAFETY: fcntl validates the descriptor. A successful result is a new,
+    // non-inheritable descriptor, owned by the returned File.
+    let descriptor = unsafe { libc::fcntl(libc::STDERR_FILENO, libc::F_DUPFD_CLOEXEC, 0) };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let output = unsafe { std::fs::File::from_raw_fd(descriptor) };
+    let metadata = output.metadata()?;
+    // Rust startup can replace a closed standard descriptor with /dev/null.
+    if metadata.file_type().is_char_device()
+        && let Ok(null) = std::fs::metadata("/dev/null")
+        && metadata.rdev() == null.rdev()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "process stderr discards output",
+        ));
+    }
+    Ok(output)
+}
+
+#[cfg(windows)]
+fn operator_stderr() -> std::io::Result<std::fs::File> {
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::{
+        Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Console::{GetStdHandle, STD_ERROR_HANDLE},
+            Threading::GetCurrentProcess,
+        },
+    };
+    // SAFETY: these calls only inspect/duplicate this process's standard handle.
+    let handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "process stderr has no output handle",
+        ));
+    }
+    let process = unsafe { GetCurrentProcess() };
+    let mut duplicate = std::ptr::null_mut();
+    if unsafe {
+        DuplicateHandle(
+            process,
+            handle,
+            process,
+            &mut duplicate,
+            0,
+            0,
+            DUPLICATE_SAME_ACCESS,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: DuplicateHandle transferred a valid, owned handle to us.
+    Ok(unsafe { std::fs::File::from_raw_handle(duplicate) })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn operator_stderr() -> std::io::Result<std::fs::File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "native setup-code output is unavailable",
+    ))
+}
+
 // Format the complete operator-only record before writing. Formatting directly
 // into stderr emits fragments that container logs can interleave with stdout.
 pub(crate) fn write_setup_code(
     output: &mut impl std::io::Write,
     code: &str,
 ) -> std::io::Result<()> {
-    output.write_all(format!("Scryer one-time setup code: {code}\n").as_bytes())
+    output.write_all(format!("Scryer one-time setup code: {code}\n").as_bytes())?;
+    output.flush()
 }
 
 #[derive(Clone)]
@@ -38,20 +122,10 @@ pub(crate) fn refused(reason: &str) -> Response {
 pub(crate) async fn setup_state(
     state: &AuthState,
 ) -> scryer_application::AppResult<Option<SetupState>> {
-    let setup = state.app.initial_authentication_state().await?;
-    // A concurrent completion can commit before its resolver publishes runtime
-    // settings. Do not admit an authless administrator in that interval.
-    if matches!(setup, Some(SetupState::Complete))
-        && state.auth_runtime.initial_authentication.is_available()
-    {
-        let settings = state.app.refresh_initial_authentication_settings().await?;
-        state.auth_runtime.apply_saved_security_settings(
-            settings.form_login_enabled,
-            settings.skip_login_for_local_ips,
-        );
-        state.auth_runtime.initial_authentication.consume();
-    }
-    Ok(setup)
+    state
+        .auth_runtime
+        .initial_authentication_state(&state.app)
+        .await
 }
 
 pub(crate) async fn admit_http(
@@ -134,6 +208,15 @@ pub(crate) fn allows_graphql(request: &async_graphql::Request, stage: &SetupStat
                 Selection::Field(field) => match (mutation, field.node.name.node.as_str(), stage) {
                     (false, "authRuntimeState", _) => true,
                     (true, "completeInitialAuthentication", SetupState::Choice) => true,
+                    (false, "restoreStatus", SetupState::Choice) => true,
+                    (
+                        true,
+                        "startInspectRestoreBundle"
+                        | "inspectRestoreBundle"
+                        | "startApplyRestoreBundle"
+                        | "applyRestoreBundle",
+                        SetupState::Choice,
+                    ) => true,
                     (
                         true,
                         "login" | "completeRequiredPasswordChange",
@@ -223,6 +306,99 @@ mod tests {
         }
         let error = write_setup_code(&mut UnavailableWriter, "ABC-234").unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[tokio::test]
+    async fn setup_code_requires_real_operator_output() {
+        const CHILD_MODE: &str = "SCRYER_TEST_SETUP_CODE_OUTPUT";
+        const CODE: &str = "ABC-234";
+        if let Some(mode) = std::env::var_os(CHILD_MODE) {
+            if mode == "closed" {
+                #[cfg(unix)]
+                // SAFETY: only this isolated child test owns its stderr descriptor.
+                assert_eq!(unsafe { libc::close(libc::STDERR_FILENO) }, 0);
+                #[cfg(windows)]
+                // SAFETY: only this isolated child test changes its standard handle.
+                assert_ne!(
+                    unsafe {
+                        windows_sys::Win32::System::Console::SetStdHandle(
+                            windows_sys::Win32::System::Console::STD_ERROR_HANDLE,
+                            std::ptr::null_mut(),
+                        )
+                    },
+                    0
+                );
+            }
+            let result = print_setup_code(CODE);
+            if mode == "captured" {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(!error.to_string().contains(CODE));
+            }
+            return;
+        }
+        let modes = if cfg!(unix) {
+            &["captured", "closed", "discarded"][..]
+        } else {
+            &["captured", "closed"][..]
+        };
+        for mode in modes {
+            let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "initial_auth::tests::setup_code_requires_real_operator_output",
+                    "--nocapture",
+                ])
+                .env(CHILD_MODE, mode)
+                .kill_on_drop(true)
+                .stdout(std::process::Stdio::piped())
+                .stderr(if *mode == "discarded" {
+                    std::process::Stdio::null()
+                } else {
+                    std::process::Stdio::piped()
+                });
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                child.spawn().unwrap().wait_with_output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if *mode == "captured" {
+                assert_eq!(
+                    output.stderr,
+                    format!("Scryer one-time setup code: {CODE}\n").as_bytes()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn setup_code_flush_failure_is_propagated() {
+        struct FlushFailure;
+        impl std::io::Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        assert_eq!(
+            write_setup_code(&mut FlushFailure, "ABC-234")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
     }
 
     #[test]
@@ -568,6 +744,327 @@ mod tests {
             .await
             .unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn initial_auth_code_limits_isolate_http_clients_for_setup_and_restore() {
+        async fn request(
+            router: axum::Router,
+            peer: &str,
+            forwarded: &str,
+            body: serde_json::Value,
+        ) -> serde_json::Value {
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/graphql")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", forwarded)
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                peer.parse::<std::net::SocketAddr>().unwrap(),
+            ));
+            let response =
+                tokio::time::timeout(std::time::Duration::from_secs(60), router.oneshot(request))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+        for proxied in [false, true] {
+            let mut context = fixture().await;
+            let now = std::time::Instant::now();
+            context.auth_runtime.initial_authentication = std::sync::Arc::new(
+                scryer_application::initial_auth::SetupChallenge::with_clock(move || now),
+            );
+            context.schema = scryer_interface::build_schema_with_log_buffer_and_restore(
+                context.app.clone(),
+                context.auth_runtime.clone(),
+                None,
+                None,
+            );
+            let code = context
+                .auth_runtime
+                .initial_authentication
+                .initialize()
+                .unwrap();
+            let mut state = http_state(&context);
+            state.rate_limiter = crate::rate_limit::ScryerRateLimiter::for_network_test(
+                if proxied { &["127.0.0.1"] } else { &[] },
+                // Keep this regression independent of the generic request quota;
+                // setup proof still limits failures for configured bypass clients.
+                &["192.0.2.0/24"],
+            );
+            let router = axum::Router::new()
+                .route(
+                    "/graphql",
+                    axum::routing::post(middleware::graphql_handler).with_state(state.clone()),
+                )
+                .layer(axum::middleware::from_fn_with_state(state, admit_http));
+            let attacker = if proxied {
+                "127.0.0.1:12345"
+            } else {
+                "192.0.2.1:12345"
+            };
+            let operator = if proxied {
+                "127.0.0.1:12345"
+            } else {
+                "192.0.2.2:12345"
+            };
+            for _ in 0..5 {
+                let body = request(
+                    router.clone(),
+                    attacker,
+                    "192.0.2.1",
+                    serde_json::json!({
+                        "query": "{ restoreStatus(setupCode: \"wrong\") { id } }",
+                    }),
+                )
+                .await;
+                assert_eq!(
+                    body["errors"][0]["extensions"]["reason"],
+                    refusal::CODE_INVALID,
+                    "{body}"
+                );
+            }
+            let mutation = serde_json::json!({
+                "query": "mutation($input: CompleteInitialAuthenticationInput!) { completeInitialAuthentication(input: $input) { completed } }",
+                "variables": {"input": {"mode": "NO_AUTHENTICATION", "acknowledgeNoAuthentication": true, "setupCode": code}},
+            });
+            let forwarded = if proxied { "192.0.2.1" } else { "192.0.2.2" };
+            let limited = request(router.clone(), attacker, forwarded, mutation.clone()).await;
+            assert_eq!(
+                limited["errors"][0]["extensions"]["reason"],
+                refusal::CODE_RATE_LIMITED,
+                "{limited}"
+            );
+            let restored = request(
+                router.clone(),
+                operator,
+                "192.0.2.2",
+                serde_json::json!({
+                    "query": "query($code: String) { restoreStatus(setupCode: $code) { id } }",
+                    "variables": {"code": code},
+                }),
+            )
+            .await;
+            assert!(restored.get("errors").is_none(), "{restored}");
+            let completed = request(router, operator, "192.0.2.2", mutation).await;
+            assert_eq!(
+                completed["data"]["completeInitialAuthentication"]["completed"], true,
+                "{completed}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_auth_terminal_admission_is_cached_until_restore() {
+        for completed in [false, true] {
+            let context = fixture().await;
+            if completed {
+                context
+                    .app
+                    .complete_initial_authentication(None, true)
+                    .await
+                    .unwrap();
+            } else {
+                sqlx::query(
+                    "DELETE FROM settings_values WHERE id = 'initial-authentication-setup'",
+                )
+                .execute(&context.db.pool)
+                .await
+                .unwrap();
+            }
+            let state = http_state(&context);
+            let expected = completed.then_some(SetupState::Complete);
+            assert_eq!(setup_state(&state).await.unwrap(), expected);
+            // Removing the database proves settled HTTP admission does not read it.
+            context.db.pool.close().await;
+            assert_eq!(setup_state(&state).await.unwrap(), expected);
+            let directory = tempfile::tempdir().unwrap();
+            context
+                .app
+                .restore_coordinator()
+                .start(
+                    directory.path(),
+                    "fixture-upload",
+                    scryer_application::RestoreJobKind::Apply,
+                )
+                .unwrap();
+            assert!(
+                setup_state(&state).await.is_err(),
+                "restore must invalidate settled admission and fail closed on unreadable state"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_auth_restore_controls_require_code_and_do_not_grant_other_access() {
+        let mut context = fixture().await;
+        let code = context
+            .auth_runtime
+            .initial_authentication
+            .initialize()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        context.schema = scryer_interface::build_schema_with_log_buffer_and_restore(
+            context.app.clone(),
+            context.auth_runtime.clone(),
+            None,
+            Some(scryer_interface::RestoreContext {
+                data_dir: directory.path().to_path_buf(),
+                datastore_config: scryer_interface::context::RestoreDatastoreConfig {
+                    engine: scryer_interface::context::RestoreDatastoreEngine::Sqlite,
+                    migration_mode: scryer_interface::context::RestoreMigrationMode::Apply,
+                },
+                datastore: scryer_interface::context::RestoreDatastoreHandle::unavailable(),
+                restart: scryer_interface::RestoreRestartHandle::new(|| {
+                    panic!("no restore was staged")
+                }),
+            }),
+        );
+        let router = http_router(&context);
+        for query in [
+            "query($code: String) { result: restoreStatus(setupCode: $code) { id } }",
+            "mutation($code: String) { startApplyRestoreBundle(uploadId: \"../invalid\", setupCode: $code) { id } }",
+        ] {
+            let (_, body) = graphql(
+                router.clone(),
+                "/graphql",
+                serde_json::json!({"query": query, "variables": {"code": "wrong"}}),
+            )
+            .await;
+            assert_eq!(
+                body["errors"][0]["extensions"]["reason"],
+                refusal::CODE_INVALID,
+                "{body}"
+            );
+        }
+        let (_, body) = graphql(router.clone(), "/graphql", serde_json::json!({
+            "query": "query($code: String) { ...Fields } fragment Fields on QueryRoot { renamed: restoreStatus(setupCode: $code) { id } }",
+            "variables": {"code": code},
+        })).await;
+        assert!(body.get("errors").is_none(), "{body}");
+        assert!(body["data"]["renamed"].is_null());
+        let (_, body) = graphql(router.clone(), "/graphql", serde_json::json!({
+            "query": "mutation($code: String) { startApplyRestoreBundle(uploadId: \"../invalid\", setupCode: $code) { id } }",
+            "variables": {"code": code},
+        })).await;
+        assert_eq!(
+            body["errors"][0]["extensions"]["reason"], "INTERFACE_RESTORE_UPLOAD_ID_INVALID",
+            "{body}"
+        );
+        let direct = context
+            .schema
+            .execute(
+                async_graphql::Request::new(
+                    "query($code: String) { restoreStatus(setupCode: $code) { id } }",
+                )
+                .variables(async_graphql::Variables::from_json(
+                    serde_json::json!({"code": code}),
+                )),
+            )
+            .await;
+        assert_eq!(
+            direct.errors[0].extensions.as_ref().unwrap().get("reason"),
+            Some(&async_graphql::Value::from(refusal::REQUIRED))
+        );
+        // Exercise the browser's multipart upload boundary as well as JSON controls.
+        for supplied_code in ["wrong", code.as_str()] {
+            let operations = serde_json::json!({
+                "query": "mutation($file: Upload!, $code: String) { startInspectRestoreBundle(bundleUpload: $file, setupCode: $code) { id } }",
+                "variables": {"file": null, "code": supplied_code},
+            });
+            let body = format!(
+                "--fixture-boundary\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{operations}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{{\"0\":[\"variables.file\"]}}\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"0\"; filename=\"fixture.tar.zst\"\r\nContent-Type: application/octet-stream\r\n\r\ninvalid-fixture-bundle\r\n--fixture-boundary--\r\n"
+            );
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/graphql")
+                .header(
+                    "content-type",
+                    "multipart/form-data; boundary=fixture-boundary",
+                )
+                .body(Body::from(body))
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+            ));
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                router.clone().oneshot(request),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            if supplied_code == "wrong" {
+                assert_eq!(
+                    body["errors"][0]["extensions"]["reason"],
+                    refusal::CODE_INVALID,
+                    "{body}"
+                );
+                assert!(context.app.restore_coordinator().snapshot().is_none());
+            } else {
+                assert!(body.get("errors").is_none(), "{body}");
+                let id = body["data"]["startInspectRestoreBundle"]["id"]
+                    .as_str()
+                    .unwrap();
+                let coordinator = context.app.restore_coordinator();
+                tokio::time::timeout(std::time::Duration::from_secs(60), async {
+                    loop {
+                        let changed = coordinator.changed.notified();
+                        tokio::pin!(changed);
+                        changed.as_mut().enable();
+                        let status = coordinator.snapshot().unwrap();
+                        assert_eq!(status.id, id);
+                        if !status.phase.active() {
+                            break;
+                        }
+                        changed.await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
+        }
+        for query in [
+            "query($code: String) { restoreStatus(setupCode: $code) { id } users { id } }",
+            "mutation { completeSetup { completed } }",
+            "query { ...Fields } fragment Fields on Query { renamed: users { id } }",
+        ] {
+            let (status, _) = graphql(
+                router.clone(),
+                "/graphql",
+                serde_json::json!({"query": query, "variables": {"code": code}}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+        }
+        let (status, _) = graphql(
+            router,
+            "/graphql",
+            serde_json::json!([
+                {"query": "{ restoreStatus { id } }"}, {"query": "{ users { id } }"}
+            ]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            context.app.initial_authentication_state().await.unwrap(),
+            Some(SetupState::Choice)
+        );
+        context
+            .auth_runtime
+            .initial_authentication
+            .verify("127.0.0.1".parse().unwrap(), Some(&code))
+            .unwrap();
     }
 
     #[tokio::test]
@@ -964,12 +1461,6 @@ mod tests {
         use scryer_infrastructure_runtime::sqlite_backup::{
             export_backup_bundle_from_sqlite, restore_backup_bundle_into_sqlite_pool,
         };
-        let context = fixture().await;
-        context
-            .app
-            .complete_initial_authentication(Some("destination-password".into()), false)
-            .await
-            .unwrap();
         let directory = tempfile::tempdir().unwrap();
         let source_path = directory.path().join("source.db");
         let source = SqliteServices::new(source_path.to_str().unwrap())
@@ -1003,33 +1494,43 @@ mod tests {
         )
         .await
         .unwrap();
-        restore_backup_bundle_into_sqlite_pool(
-            &context.db.pool,
-            &bundle,
-            Some("fixture-passphrase"),
-        )
-        .await
-        .unwrap();
-        scryer_infrastructure_datastore::migrations::run_migrations(
-            &context.db.pool,
-            scryer_infrastructure_datastore::MigrationMode::Apply,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            context.app.initial_authentication_state().await.unwrap(),
-            None
-        );
-        assert!(
-            context
-                .users
-                .get_by_username("admin")
-                .await
-                .unwrap()
-                .unwrap()
-                .password_hash
-                .is_none()
-        );
+        for completed in [false, true] {
+            let context = fixture().await;
+            if completed {
+                context
+                    .app
+                    .complete_initial_authentication(Some("destination-password".into()), false)
+                    .await
+                    .unwrap();
+            }
+            restore_backup_bundle_into_sqlite_pool(
+                &context.db.pool,
+                &bundle,
+                Some("fixture-passphrase"),
+            )
+            .await
+            .unwrap();
+            scryer_infrastructure_datastore::migrations::run_migrations(
+                &context.db.pool,
+                scryer_infrastructure_datastore::MigrationMode::Apply,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                context.app.initial_authentication_state().await.unwrap(),
+                None
+            );
+            assert!(
+                context
+                    .users
+                    .get_by_username("admin")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .password_hash
+                    .is_none()
+            );
+        }
         source.pool.close().await;
     }
 }
