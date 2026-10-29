@@ -181,9 +181,9 @@ pub(crate) struct BackgroundAcquisitionCycleOutcome {
     /// interactive walk over a large title runs for minutes, so a re-arm here
     /// would run a full convergence cycle every re-arm interval for the whole
     /// job — each one advancing the cold cursor and spending indexer evaluation
-    /// budget. The job wakes the poller itself when it releases the lock (see
-    /// [`run_interactive_title_acquisition_walk`]), so exactly one cycle
-    /// follows it.
+    /// budget. The job does not wake the poller when it releases the lock
+    /// either (see [`run_interactive_title_acquisition_walk`]): the cursor
+    /// comes back to the title on the next walk.
     pub skipped_locked_titles: usize,
     /// The soonest a cooling host is expected back, when the scheduler snapshot
     /// named one. An exhausted quota carries no instant at all, and an untimed
@@ -687,13 +687,14 @@ async fn walk_selected_scopes(
             };
             // A title an operator's interactive walk holds is skipped, not
             // waited on: the cycle has other titles to get through and the
-            // cursor comes back to this one. The skip is counted for telemetry
-            // but does not re-arm the retry timer — the job notifies the wake
-            // when it releases the lock, so one cycle follows it instead of one
-            // cycle per retry interval for the length of the walk. The reverse
-            // holds too: an operator's walk that arrives while this cycle holds
-            // the title cancels `yield_token`, and the walk hands the title over
-            // at its next stage.
+            // cursor comes back to this one on the next walk. The skip is
+            // counted for telemetry but does not re-arm the retry timer, and
+            // the job does not wake the poller when it releases the lock: a
+            // cycle that followed an operator's season or episode search would
+            // walk the whole title straight after it, and the operator asked
+            // for one season. The reverse holds too: an operator's walk that
+            // arrives while this cycle holds the title cancels `yield_token`,
+            // and the walk hands the title over at its next stage.
             let Some((walk_guard, yield_token)) = app
                 .runtime
                 .acquisition
@@ -3358,28 +3359,6 @@ fn acquisition_walk_stage_label(
     }
 }
 
-/// Wakes the convergence poller when an interactive walk gives its title lock
-/// back, so exactly one cycle follows the job.
-///
-/// The cycle skips a locked title rather than waiting, and deliberately does not
-/// re-arm its retry timer for the skip — a walk over a large title runs for
-/// minutes, and a timer would spend a whole cycle every interval for the length
-/// of it. This is the other half of that decision: one wake when the title is
-/// free again, on every exit path including cancellation and error.
-struct InteractiveWalkLease {
-    guard: Option<crate::services::TitleWalkGuard>,
-    wake: Arc<tokio::sync::Notify>,
-}
-
-impl Drop for InteractiveWalkLease {
-    fn drop(&mut self) {
-        // Release before waking: the cycle this wakes takes the title lock with
-        // `try_acquire` and would skip the title all over again if it ran first.
-        drop(self.guard.take());
-        self.wake.notify_one();
-    }
-}
-
 /// Run one title — optionally one season of it — through the same staged walk
 /// the convergence cycle runs, under interactive intent.
 ///
@@ -3536,10 +3515,14 @@ where
             }
         }
     };
-    let _walk_lease = InteractiveWalkLease {
-        guard: Some(walk_guard),
-        wake: Arc::clone(&app.runtime.acquisition.acquisition_wake),
-    };
+    // Held to the end of the walk and simply dropped. Releasing it does not
+    // wake the convergence poller: a woken cycle runs a full, gap-exempt walk
+    // with no season filter, and when its batch lands on this title — likely,
+    // since the cycle skipped the title while the job held it — it searches
+    // every missing season right after the operator asked for one. The cycle
+    // skipped the title without re-arming its retry timer, and its cursor comes
+    // back to the title on the next walk.
+    let _walk_guard = walk_guard;
     if cancellation.is_cancelled() {
         return Ok(TitleWalkStats::default());
     }
@@ -6537,9 +6520,9 @@ pub async fn start_background_acquisition_poller(
     // the scope waits out the full tick. Only a cooldown that expires *inside*
     // the poll interval arms it — an untimed deferral (an exhausted quota) and
     // a title an interactive walk holds both wait for the tick, the latter
-    // because the job wakes the poller itself when it releases the lock. One
-    // pending deadline at a time, and floored so a condition that has just
-    // lifted cannot spin the loop.
+    // until the next walk, since the job does not wake the poller when it
+    // releases the lock. One pending deadline at a time, and floored so a
+    // condition that has just lifted cannot spin the loop.
     let mut deferred_retry_at: Option<tokio::time::Instant> = None;
 
     loop {
