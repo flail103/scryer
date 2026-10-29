@@ -24,6 +24,11 @@ pub(super) fn archive_import_has_pending_sources(row: &SqlRow) -> AppResult<bool
     Ok(payload["archive_processing_pending"].as_bool() == Some(true))
 }
 
+/// Identities per import lookup query: far below SQLite's 1000-deep expression
+/// limit, and at three parameters per identity below even the legacy 999
+/// bound-parameter limit.
+const IMPORT_IDENTITY_CHUNK: usize = 200;
+
 #[derive(Clone)]
 pub struct ImportStore {
     datastore: StoreDatastore,
@@ -547,27 +552,43 @@ impl ImportRepository for ImportStore {
         if identities.is_empty() {
             return Ok(Vec::new());
         }
-        let mut args = Vec::with_capacity(identities.len() * 3);
-        let clauses = identities
-            .iter()
-            .map(|identity| {
-                args.push(SqlArg::Text(normalize_download_client_id(
-                    identity.client_id.as_deref(),
-                )));
-                args.push(SqlArg::Text(identity.client_type.clone()));
-                args.push(SqlArg::Text(identity.item_id.clone()));
-                "(COALESCE(source_client_id, '') = {} AND source_system = {} AND source_ref = {})"
-            })
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        fetch_imports(
-            self.datastore.read_exec(),
-            &format!(
-                "SELECT {IMPORT_COLUMNS} FROM imports WHERE {clauses} ORDER BY updated_at DESC"
-            ),
-            &args,
-        )
-        .await
+        // SQLite rejects an OR chain deeper than 1000 terms and caps bound
+        // parameters, so the identities are queried in chunks.
+        let mut records = Vec::new();
+        for chunk in identities.chunks(IMPORT_IDENTITY_CHUNK) {
+            let mut args = Vec::with_capacity(chunk.len() * 3);
+            let clauses = chunk
+                .iter()
+                .map(|identity| {
+                    args.push(SqlArg::Text(normalize_download_client_id(
+                        identity.client_id.as_deref(),
+                    )));
+                    args.push(SqlArg::Text(identity.client_type.clone()));
+                    args.push(SqlArg::Text(identity.item_id.clone()));
+                    "(COALESCE(source_client_id, '') = {} AND source_system = {} AND source_ref = {})"
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            records.extend(
+                fetch_imports(
+                    self.datastore.read_exec(),
+                    &format!(
+                        "SELECT {IMPORT_COLUMNS} FROM imports WHERE {clauses} ORDER BY updated_at DESC"
+                    ),
+                    &args,
+                )
+                .await?,
+            );
+        }
+        // Callers keep the first record per identity, so the merged rows must
+        // keep the single-query contract: newest `updated_at` first overall.
+        if identities.len() > IMPORT_IDENTITY_CHUNK {
+            records.sort_by_cached_key(|record| {
+                let parsed = chrono::DateTime::parse_from_rfc3339(&record.updated_at).ok();
+                std::cmp::Reverse((parsed.is_some(), parsed, record.updated_at.clone()))
+            });
+        }
+        Ok(records)
     }
 
     async fn list_completed_manual_imports(
@@ -1753,5 +1774,76 @@ mod tests {
             .expect("another title's selection survives");
         assert_eq!(kept.candidates.len(), 1);
         assert_eq!(candidate_count(&store, "kept-title-selection").await, 1);
+    }
+
+    #[tokio::test]
+    async fn imports_load_for_more_identities_than_one_query_allows() {
+        let store = store().await;
+        let StoreDatastore::Sqlite { pool, .. } = &store.datastore else {
+            panic!("fixture store should be sqlite");
+        };
+        const IDENTITY_COUNT: usize = 1_200;
+        let identity = |index: usize| source_identity(&format!("fixture-job-{index:04}"));
+        let insert = "INSERT INTO imports
+             (id, source_client_id, source_system, source_ref, import_type, status, created_at, updated_at)
+             VALUES (?, 'client-1', 'nzbget', ?, ?, 'completed', ?, ?)";
+        let mut tx = pool.begin().await.expect("begin fixture insert");
+        // The newer record for the doubled identity is written first so the
+        // expected order cannot come from insertion order.
+        sqlx::query(insert)
+            .bind("import-0000-newer")
+            .bind("fixture-job-0000")
+            .bind("manual_import")
+            .bind("2026-01-02T00:00:00+00:00")
+            .bind("2026-01-02T00:00:00+00:00")
+            .execute(&mut *tx)
+            .await
+            .expect("insert newer fixture import");
+        for index in 0..IDENTITY_COUNT {
+            sqlx::query(insert)
+                .bind(format!("import-{index:04}"))
+                .bind(format!("fixture-job-{index:04}"))
+                .bind("series_download")
+                .bind("2026-01-01T00:00:00+00:00")
+                .bind("2026-01-01T00:00:00+00:00")
+                .execute(&mut *tx)
+                .await
+                .expect("insert fixture import");
+        }
+        tx.commit().await.expect("commit fixture insert");
+
+        // The doubled identity is requested again at the end so it falls in
+        // both the first and the last chunk.
+        let mut identities = (0..IDENTITY_COUNT).map(identity).collect::<Vec<_>>();
+        identities.push(identity(0));
+
+        let records = store
+            .list_imports_for_identities(&identities)
+            .await
+            .expect("load imports for every identity");
+
+        assert_eq!(records.len(), IDENTITY_COUNT + 1);
+        // Reduce the way the queue enrichment does: first record per identity.
+        let mut newest = std::collections::HashMap::new();
+        for record in &records {
+            let key = ClientJobLocator::new(
+                record.source_client_id.as_deref(),
+                &record.source_system,
+                &record.source_ref,
+            );
+            newest.entry(key).or_insert(record);
+        }
+        assert_eq!(newest.len(), IDENTITY_COUNT);
+        for index in 0..IDENTITY_COUNT {
+            let record = newest
+                .get(&identity(index))
+                .unwrap_or_else(|| panic!("missing import for identity {index}"));
+            let expected_id = if index == 0 {
+                "import-0000-newer".to_string()
+            } else {
+                format!("import-{index:04}")
+            };
+            assert_eq!(record.id, expected_id);
+        }
     }
 }
