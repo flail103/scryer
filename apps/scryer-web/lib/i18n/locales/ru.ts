@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const ru: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "Scryer не может подключиться к шлюзу метаданных, поскольку системные часы расходятся более чем на 5 минут. Синхронизируйте системные часы и перезапустите Scryer.",
   "httpRelease.refusal.detailsUnavailable":
     "Сведения об этом релизе больше недоступны. Повторите поиск, чтобы скачать его.",
   "httpRelease.refusal.live":

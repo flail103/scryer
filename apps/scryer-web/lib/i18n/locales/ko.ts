@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const ko: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "시스템 시계가 5분 이상 차이 나서 Scryer가 메타데이터 게이트웨이에 연결할 수 없습니다. 시스템 시계를 동기화한 후 Scryer를 다시 시작하세요.",
   "httpRelease.refusal.detailsUnavailable":
     "이 릴리스의 세부 정보를 더 이상 사용할 수 없습니다. 다시 검색해서 가져오세요.",
   "httpRelease.refusal.live":

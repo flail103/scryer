@@ -1,5 +1,6 @@
 /** Stable public reasons and their localization keys. Unknown future reasons use server copy. */
 export const PUBLIC_ERROR_REASON_KEYS: Readonly<Record<string, string>> = {
+  METADATA_GATEWAY_CLOCK_SKEW: "error.reason.METADATA_GATEWAY_CLOCK_SKEW",
   EXTERNAL_ACCOUNT_LINK_FAILED: "error.reason.EXTERNAL_ACCOUNT_LINK_FAILED",
   CATALOG_TAG_INVALID: "error.reason.CATALOG_TAG_INVALID",
   SETTINGS_DELAY_PROFILE_CATALOG_INVALID:

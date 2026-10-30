@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const zh_TW: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "系統時鐘偏差超過 5 分鐘，Scryer 無法連線至中繼資料閘道。請同步系統時鐘並重新啟動 Scryer。",
   "httpRelease.refusal.detailsUnavailable":
     "此發布的詳細資料已無法使用。請重新搜尋以取得。",
   "httpRelease.refusal.live": "此發布是直播，無法下載。",

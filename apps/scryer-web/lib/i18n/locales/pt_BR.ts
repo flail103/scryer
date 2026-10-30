@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const pt_BR: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "O Scryer não consegue se conectar ao gateway de metadados porque o relógio do sistema está com uma diferença de mais de 5 minutos. Sincronize o relógio do sistema e reinicie o Scryer.",
   "httpRelease.refusal.detailsUnavailable":
     "Os detalhes deste lançamento não estão mais disponíveis. Pesquise novamente para baixá-lo.",
   "httpRelease.refusal.live":

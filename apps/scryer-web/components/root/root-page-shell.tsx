@@ -873,6 +873,7 @@ function AuthenticatedHomePage({
     dismissSmgScryerUpdateReminder,
     refreshSmgNotices,
   } = useSmgNotices({
+    t,
     settingsSubscriptionEnabled: canSubscribeToLibraryEvents,
   });
   const overviewRouteKey = JSON.stringify([

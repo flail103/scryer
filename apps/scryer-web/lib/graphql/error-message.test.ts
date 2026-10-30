@@ -21,6 +21,55 @@ function coded(
   return { graphQLErrors: [{ message, extensions: { code, reason } }] };
 }
 
+test("metadata gateway clock skew uses its translated reason, not server text", async () => {
+  const error = coded("METADATA_GATEWAY_CLOCK_SKEW");
+  assert.equal(
+    userFacingGraphQlErrorMessage(error, "Failed"),
+    "Scryer cannot connect to the metadata gateway because your system clock is off by more than 5 minutes. Synchronize your system clock and restart Scryer.",
+  );
+  for (const language of [
+    "fra",
+    "deu",
+    "spa",
+    "ita",
+    "por",
+    "kor",
+    "zho",
+    "zh-HK",
+    "zh-TW",
+    "jpn",
+    "rus",
+    "nld",
+    "ces",
+  ]) {
+    await loadLocaleDictionary(language);
+    const translated = userFacingGraphQlErrorMessage(
+      error,
+      "Failed",
+      (key, values) => t(key, language, values),
+    );
+    assert.notEqual(translated, "This sentence was reworded");
+    assert.notEqual(translated, userFacingGraphQlErrorMessage(error, "Failed"));
+    assert.ok(translated.includes("Scryer"));
+  }
+  assert.equal(
+    hasGraphQlErrorReason(
+      error,
+      "METADATA_GATEWAY_CLOCK_SKEW",
+      "VALIDATION_ERROR",
+    ),
+    true,
+  );
+  assert.equal(
+    hasGraphQlErrorReason(
+      coded("OTHER_AUTH_FAILURE"),
+      "METADATA_GATEWAY_CLOCK_SKEW",
+      "VALIDATION_ERROR",
+    ),
+    false,
+  );
+});
+
 test("initial authentication refusals use localized codes rather than server wording", async () => {
   await loadLocaleDictionary("fr");
   assert.equal(

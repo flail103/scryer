@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const en: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "Scryer cannot connect to the metadata gateway because your system clock is off by more than 5 minutes. Synchronize your system clock and restart Scryer.",
   "initialAuth.title": "Set up access to Scryer",
   "initialAuth.description":
     "Before continuing, choose whether this instance requires sign-in.",

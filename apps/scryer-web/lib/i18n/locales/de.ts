@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const de: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "Scryer kann keine Verbindung zum Metadaten-Gateway herstellen, da Ihre Systemuhr um mehr als 5 Minuten abweicht. Synchronisieren Sie Ihre Systemuhr und starten Sie Scryer neu.",
   "httpRelease.refusal.detailsUnavailable":
     "Die Details dieses Releases sind nicht mehr verfügbar. Suche erneut, um es zu holen.",
   "httpRelease.refusal.live":
