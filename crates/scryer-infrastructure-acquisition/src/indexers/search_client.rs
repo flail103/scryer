@@ -232,6 +232,7 @@ type SearchPermit = Option<OwnedSemaphorePermit>;
 
 #[derive(Clone)]
 struct StrategyTierContext {
+    title_context: scryer_application::IndexerSearchTitleContext,
     client: Arc<dyn IndexerClient>,
     search_limit: SearchAdmission,
     rate_limiter: IndexerRateLimiter,
@@ -396,6 +397,7 @@ fn prepare_search_strategies(
                 "absolute_episode": absolute_episode,
                 "year": context.year,
                 "tagged_aliases": sorted_aliases,
+                "title_context": context.title_context,
             }),
         );
 
@@ -408,6 +410,7 @@ fn prepare_search_strategies(
         }
 
         let request = IndexerSearchStrategyRequest {
+            title_context: context.title_context.clone(),
             page_cursor: None,
             page_budget: None,
             result_limit: None,
@@ -5576,6 +5579,7 @@ impl MultiIndexerSearchClient {
 
             set.spawn(async move {
                 let StrategyTierContext {
+                    title_context: _,
                     client,
                     search_limit,
                     rate_limiter,
@@ -6304,6 +6308,7 @@ impl IndexerClient for MultiIndexerSearchClient {
             absolute_episode,
             year,
             tagged_aliases,
+            Default::default(),
             learning_context,
             cancel_token,
             page_sink,
@@ -6328,6 +6333,7 @@ impl IndexerClient for MultiIndexerSearchClient {
         absolute_episode: Option<u32>,
         year: Option<i32>,
         tagged_aliases: Vec<scryer_domain::TaggedAlias>,
+        title_context: scryer_application::IndexerSearchTitleContext,
         learning_context: Option<IndexerSearchLearningContext>,
         cancel_token: CancellationToken,
         page_sink: IndexerSearchPageSink,
@@ -7383,7 +7389,9 @@ impl IndexerClient for MultiIndexerSearchClient {
                                 let request_cancel_token = task_cancel_token.child_token();
                                 let request_deadline =
                                     effective_request_deadline(search_timeout, deadline_at);
-                                let rss_strategy = IndexerSearchStrategyRequest { page_cursor: None, page_budget: rss_poll_page_budget, result_limit: rss_poll_item_cap, first_page_gate: None,
+                                let rss_strategy = IndexerSearchStrategyRequest {
+                                    title_context: Default::default(),
+                                    page_cursor: None, page_budget: rss_poll_page_budget, result_limit: rss_poll_item_cap, first_page_gate: None,
                                     strategy_id: String::new(),
                                     labels: Vec::new(),
                                     query,
@@ -7772,6 +7780,7 @@ impl IndexerClient for MultiIndexerSearchClient {
             let search_query = query.clone();
             let category_for_indexer = category.clone();
             let tagged_aliases_for_indexer = tagged_aliases.clone();
+            let title_context_for_indexer = title_context.clone();
             let numbering_context_for_indexer = numbering_context.clone();
             let stats_tracker = self.stats_tracker.clone();
             let search_learning = self.search_learning.clone();
@@ -7901,6 +7910,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 let mut query_budget_wait: Option<std::time::Duration> = None;
 
                 let primary_context = StrategyTierContext {
+                        title_context: title_context_for_indexer.clone(),
                         client: client.clone(),
                         search_limit: search_limit.clone(),
                         rate_limiter: rate_limiter.clone(),
@@ -8342,6 +8352,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     );
 
                     let fallback_context = StrategyTierContext {
+                            title_context: title_context_for_indexer.clone(),
                             client,
                             search_limit,
                             rate_limiter,
@@ -10583,6 +10594,7 @@ mod tests {
         generic_query_only: bool,
     ) -> IndexerSearchStrategyRequest {
         let context = StrategyTierContext {
+            title_context: Default::default(),
             client: Arc::new(MockIndexerClient {
                 calls: Arc::new(AtomicUsize::new(0)),
             }),
@@ -12685,6 +12697,7 @@ mod tests {
             strategy_id: strategy_id.to_string(),
             labels: vec![format!("strategy:{strategy_id}")],
             request: IndexerSearchStrategyRequest {
+                title_context: Default::default(),
                 page_cursor: None,
                 page_budget: None,
                 result_limit: None,
@@ -12718,6 +12731,7 @@ mod tests {
         let (page_tx, _page_rx) = tokio::sync::mpsc::channel(4);
         let mut outcomes = MultiIndexerSearchClient::execute_plan_strategy_tier(
             StrategyTierContext {
+                title_context: Default::default(),
                 client,
                 search_limit: Some(Arc::new(Semaphore::new(1))),
                 rate_limiter: IndexerRateLimiter::new(),
@@ -12747,6 +12761,7 @@ mod tests {
 
     fn year_tier_context(year: Option<i32>) -> StrategyTierContext {
         StrategyTierContext {
+            title_context: Default::default(),
             client: Arc::new(ProtocolPlanIndexerClient {
                 mode: PlanFailureMode::MissingEvent,
             }),
@@ -12779,6 +12794,23 @@ mod tests {
             omit_request_facet: false,
             label: "freetext".into(),
         }
+    }
+
+    #[test]
+    fn prepared_strategies_carry_title_context_and_fingerprint_episode_changes() {
+        let mut context = year_tier_context(None);
+        context.title_context = scryer_application::IndexerSearchTitleContext {
+            scene_titles: vec!["Synthetic Series".into()],
+            episode_title: Some("First episode".into()),
+            air_date: None,
+        };
+        let first =
+            prepare_search_strategies(&context, vec![freetext_strategy("Synthetic Series")]);
+        assert_eq!(first[0].request.title_context, context.title_context);
+        context.title_context.episode_title = Some("Second episode".into());
+        let second =
+            prepare_search_strategies(&context, vec![freetext_strategy("Synthetic Series")]);
+        assert_ne!(first[0].strategy_id, second[0].strategy_id);
     }
 
     #[test]
@@ -18039,6 +18071,7 @@ mod tests {
         deadline_at: Option<tokio::time::Instant>,
     ) -> StrategyTierContext {
         StrategyTierContext {
+            title_context: Default::default(),
             client,
             search_limit: Some(Arc::new(Semaphore::new(4))),
             rate_limiter: limiter.clone(),
