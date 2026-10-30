@@ -3485,6 +3485,10 @@ fn run_clippy_ci(ctx: &TaskContext) -> Result<()> {
         install.args(["install", "--locked", "cargo-xwin"]);
         run_checked(&mut install)?;
     }
+    let mut target = ctx.command_in("rustup", &ctx.repo_root);
+    target.args(["target", "add", WINDOWS_CLIPPY_TARGET]);
+    run_checked(&mut target)?;
+
     println!("Running cargo clippy for {WINDOWS_CLIPPY_TARGET}");
     let mut command = ctx.command_in("cargo", &ctx.repo_root);
     command.args(["xwin", "clippy", "--target", WINDOWS_CLIPPY_TARGET]);
@@ -3492,6 +3496,12 @@ fn run_clippy_ci(ctx: &TaskContext) -> Result<()> {
     command.args(["--exclude", WINDOWS_CLIPPY_EXCLUDED_PACKAGE]);
     command.args(&unoptimized);
     command.args(["--", "-D", "warnings"]);
+    // Clippy never links, so regorus's Spectre library lookup only needs a real directory.
+    command.env(
+        "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc",
+        &ctx.repo_root,
+    );
+    command.env("SCRYER_SKIP_WINDOWS_RESOURCES", "1");
     run_checked(&mut command)
 }
 
