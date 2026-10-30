@@ -815,7 +815,7 @@ async fn run_backfill_job_over_one_file(stale_catalog_size: bool) -> JobRunRecor
 }
 
 /// The job runner persists a run with an unhashable file as a warning.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_backfill_job_run_with_a_failing_file_is_persisted_as_a_warning() {
     let run = run_backfill_job_over_one_file(true).await;
 
@@ -828,7 +828,7 @@ async fn a_backfill_job_run_with_a_failing_file_is_persisted_as_a_warning() {
 }
 
 /// The same job over a healthy file completes without a warning.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_clean_backfill_job_run_is_persisted_as_completed() {
     let run = run_backfill_job_over_one_file(false).await;
 
