@@ -531,6 +531,29 @@ fn configured_title_folder_path_prefers_title_year_over_parsed_release_year() {
 }
 
 #[test]
+fn title_folder_tmdb_token_uses_the_titles_entity_kind() {
+    for (facet, expected) in [
+        (MediaFacet::Series, "136315"),
+        (MediaFacet::Anime, "136315"),
+        (MediaFacet::Movie, "9001"),
+    ] {
+        let mut title = test_movie_title("Fixture Show");
+        title.facet = facet;
+        title.year = Some(2022);
+        title.external_ids = vec![
+            ExternalId::with_kind("tvdb", "series", "4242"),
+            ExternalId::with_kind("tmdb", "movie", "9001"),
+            ExternalId::with_kind("tmdb", "series", "136315"),
+        ];
+        let tokens = build_title_folder_tokens(&title, None);
+        assert_eq!(
+            render_title_folder_template("{title} ({year}) [tmdbid-{tmdb_id}]", &tokens),
+            format!("Fixture Show (2022) [tmdbid-{expected}]")
+        );
+    }
+}
+
+#[test]
 fn title_folder_tokens_include_external_ids_and_prefer_normalized_imdb() {
     let mut title = test_movie_title("Movie");
     title.imdb_id = Some("https://www.imdb.com/title/tt0468569/".to_string());
@@ -993,6 +1016,29 @@ async fn existing_title_folder_spelling_wins_for_case_only_path_changes() {
         existing,
         "persisted folder spelling must match the directory entry on disk"
     );
+}
+
+#[test]
+fn title_folder_spelling_lookup_runs_only_for_case_only_changes() {
+    assert!(AppUseCase::rename_folder_differs_only_by_case(
+        Some("/library/movies/Example Title"),
+        "/library/movies/example title",
+    ));
+    assert!(
+        !AppUseCase::rename_folder_differs_only_by_case(
+            Some("/library/movies/Example Title"),
+            "/library/movies/Other Title",
+        ),
+        "a real rename must not scan the library root"
+    );
+    assert!(!AppUseCase::rename_folder_differs_only_by_case(
+        Some("/library/movies/Example Title"),
+        "/library/movies/Example Title",
+    ));
+    assert!(!AppUseCase::rename_folder_differs_only_by_case(
+        None,
+        "/library/movies/Example Title",
+    ));
 }
 
 #[test]

@@ -527,7 +527,7 @@ pub fn from_pending_import_item(
             .collect(),
         size_bytes: item.size_bytes.map(Long::from),
         created_at: parse_datetime(&item.created_at, "pending import created_at")
-            .map_err(scryer_application::AppError::Validation)?,
+            .map_err(scryer_application::AppError::Repository)?,
     })
 }
 
