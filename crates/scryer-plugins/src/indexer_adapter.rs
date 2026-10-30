@@ -47,6 +47,7 @@ pub struct WasmIndexerClient {
     indexer_id: String,
     indexer_name: String,
     indexer_base_url: String,
+    credential_parameter: Option<String>,
     host_caps: Option<scryer_plugin_sdk::PluginSearchCaps>,
     indexer_error_recorder: Arc<dyn IndexerErrorRecorder>,
     /// Counts outbound indexer requests. Defaults to the null tracker so the
@@ -222,7 +223,7 @@ impl WasmIndexerClient {
                     ))
                 })?;
             Some(
-                crate::newznab_profiles::resolve_newznab_profile_bytes(
+                crate::newznab_profiles::resolve_newznab_profile(
                     descriptor.indexer().ok_or_else(|| {
                         AppError::Repository(
                             "Newznab plugin descriptor is not an indexer".to_string(),
@@ -240,6 +241,17 @@ impl WasmIndexerClient {
         } else {
             None
         };
+        let credential_parameter = provider_profile
+            .as_ref()
+            .map(|profile| profile.api_key_parameter.clone());
+        let provider_profile = provider_profile
+            .map(|profile| {
+                serde_json::to_vec(&scryer_plugin_sdk::PluginProviderProfile::Newznab(profile))
+            })
+            .transpose()
+            .map_err(|error| {
+                AppError::Repository(format!("failed to serialize Newznab profile: {error}"))
+            })?;
         let mut host_config = inputs
             .config_entries
             .into_iter()
@@ -310,6 +322,7 @@ impl WasmIndexerClient {
             host_caps,
             accounting: scryer_application::IndexerAccountingContext::for_config(&config),
             indexer_base_url,
+            credential_parameter,
             indexer_id: config.id,
             indexer_name,
             indexer_error_recorder,
@@ -2055,6 +2068,7 @@ fn host_search_response(
             });
 
             response_attributes.original = result.attributes;
+            response_attributes.credential_parameter = client.credential_parameter.clone();
             IndexerSearchResult {
                 indexer_id: None,
                 source: source.clone(),
@@ -4908,12 +4922,20 @@ mod tests {
     /// The bundled Newznab component, configured against a closed local port.
     /// The probes below are actions the component answers without HTTP.
     fn builtin_newznab_client(policy: IndexerMemoryPolicy) -> WasmIndexerClient {
+        builtin_newznab_client_with_config(policy, None)
+    }
+
+    fn builtin_newznab_client_with_config(
+        policy: IndexerMemoryPolicy,
+        config_json: Option<String>,
+    ) -> WasmIndexerClient {
         let asset = crate::builtins::NEWZNAB;
         let wasm = crate::builtins::decode_builtin_wasm(asset).expect("bundled Newznab wasm");
         let descriptor: PluginDescriptor =
             serde_json::from_str(asset.descriptor_json).expect("bundled Newznab descriptor");
         let mut config = sample_indexer_config("newznab", None);
         config.base_url = "http://127.0.0.1:9".to_string();
+        config.config_json = config_json;
         let mut client = WasmIndexerClient::new_component_with_plugin_settings(
             wasm,
             descriptor,
@@ -4929,6 +4951,36 @@ mod tests {
             .expect("fresh component")
             .memory_policy = policy;
         client
+    }
+
+    #[tokio::test]
+    async fn configured_credential_parameter_reaches_host_search_metadata() {
+        let client = builtin_newznab_client_with_config(
+            IndexerMemoryPolicy::default(),
+            Some(serde_json::json!({"provider_profile": "custom", "api_key_parameter": "access.key"}).to_string()),
+        );
+        assert_eq!(client.credential_parameter.as_deref(), Some("access.key"));
+        let response = serde_json::from_value(serde_json::json!({
+            "results": [{"title": "Fixture", "download_url": "https://indexer.invalid/?access.key=secret"}]
+        })).unwrap();
+        let response = host_search_response(
+            &client,
+            PluginSearchCallResponse {
+                response,
+                completion: IndexerSearchCompletion::Complete,
+            },
+        );
+        assert_eq!(
+            response.results[0]
+                .response_attributes
+                .credential_parameter
+                .as_deref(),
+            Some("access.key")
+        );
+        assert_eq!(
+            response.results[0].download_url.as_deref(),
+            Some("https://indexer.invalid/?access.key=secret")
+        );
     }
 
     async fn run_probe_action(client: &WasmIndexerClient, operation: IndexerErrorOperation) {

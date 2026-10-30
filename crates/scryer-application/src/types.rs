@@ -2267,6 +2267,8 @@ pub struct ReleaseCandidateProvenance {
 /// indexer asserted nothing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IndexerResponseAttributes {
+    /// Host-resolved credential query name for public feed redaction; never a plugin claim.
+    pub credential_parameter: Option<String>,
     /// Lossless source metadata in feed order, alongside the normalized claims.
     pub original: Vec<scryer_plugin_sdk::PluginReleaseAttribute>,
     pub tvdb_id: Option<String>,

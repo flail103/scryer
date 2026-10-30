@@ -114,7 +114,13 @@ fn public_attribute_value<'a>(
         }
         "password" => Some(Cow::Borrowed(&attribute.value)),
         _ => Some(Cow::Owned(
-            scryer_application::url_redaction::redact_url_credentials(&attribute.value),
+            scryer_application::url_redaction::redact_url_credentials_with_parameter(
+                &attribute.value,
+                item.result
+                    .response_attributes
+                    .credential_parameter
+                    .as_deref(),
+            ),
         )),
     }
 }
@@ -231,7 +237,10 @@ fn synthesized_attributes(result: &IndexerSearchResult) -> Vec<(&'static str, St
             let value = if name == "password" {
                 value
             } else {
-                scryer_application::url_redaction::redact_url_credentials(&value)
+                scryer_application::url_redaction::redact_url_credentials_with_parameter(
+                    &value,
+                    result.response_attributes.credential_parameter.as_deref(),
+                )
             };
             attributes.push((name, value));
         }

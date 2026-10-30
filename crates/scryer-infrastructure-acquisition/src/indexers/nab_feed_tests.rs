@@ -675,6 +675,28 @@ fn typed_torrent() -> IndexerSearchResult {
 }
 
 #[test]
+fn xml_and_json_redact_configured_credentials_in_original_and_synthesized_attributes() {
+    for parameter in ["key", "access.key"] {
+        let url = format!(
+            "https://indexer.invalid/details?{parameter}=upstream-secret&id=42&user=reader"
+        );
+        let mut source = result(vec![
+            attribute(Some("torznab"), "unknown-metadata", &url),
+            attribute(Some("torznab"), "password", "archive-passphrase"),
+        ]);
+        source.response_attributes.credential_parameter = Some(parameter.into());
+        source.extra.insert("poster".into(), serde_json::json!(url));
+        for output in [xml(&source, None), json_item(&source).to_string()] {
+            assert!(!output.contains("upstream-secret"), "{output}");
+            assert!(output.contains("id=42"), "{output}");
+            assert!(output.contains("user=reader"), "{output}");
+            assert!(output.contains("archive-passphrase"), "{output}");
+            assert!(output.contains("coverurl"), "{output}");
+        }
+    }
+}
+
+#[test]
 fn xml_and_json_redact_synthesized_poster_credentials_but_keep_archive_passwords() {
     for poster in [
         "https://member:poster-secret@images.example/poster.jpg?width=600&apikey=poster-key",

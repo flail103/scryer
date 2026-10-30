@@ -242,6 +242,7 @@ pub(super) fn result_heap(result: &IndexerSearchResult) -> usize {
         .sum::<usize>();
     let attrs = &result.response_attributes;
     bytes += optional(&attrs.tvdb_id)
+        + optional(&attrs.credential_parameter)
         + optional(&attrs.tmdb_id)
         + optional(&attrs.imdb_id)
         + strings(&attrs.categories)
