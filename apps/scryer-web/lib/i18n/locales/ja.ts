@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const ja: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "システム時計が5分以上ずれているため、Scryerはメタデータゲートウェイに接続できません。システム時計を同期してScryerを再起動してください。",
   "httpRelease.refusal.detailsUnavailable":
     "このリリースの詳細は利用できなくなりました。もう一度検索して取得してください。",
   "httpRelease.refusal.live":

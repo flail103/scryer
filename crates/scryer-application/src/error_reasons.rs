@@ -1,5 +1,11 @@
 //! Stable conditions owned by application policy. Sentences remain display-only.
 
+pub mod metadata_gateway {
+    /// The system clock is outside the metadata gateway's request-signing window.
+    pub const CLOCK_SKEW: &str = "METADATA_GATEWAY_CLOCK_SKEW";
+    pub const ALL: &[&str] = &[CLOCK_SKEW];
+}
+
 pub mod indexer_clients {
     /// Client management requires an authenticated interactive session.
     pub const INTERACTIVE_SESSION_REQUIRED: &str = "INDEXER_CLIENTS_INTERACTIVE_SESSION_REQUIRED";
@@ -5859,6 +5865,7 @@ mod tests {
     #[test]
     fn every_area_reason_is_distinct_and_screaming_snake() {
         let areas: &[(&str, &[&str])] = &[
+            ("METADATA_GATEWAY_", metadata_gateway::ALL),
             ("SCRIPTS_", scripts::ALL),
             ("LIBRARY_", library::ALL),
             ("EXTERNAL_IMPORT_", external_import::ALL),

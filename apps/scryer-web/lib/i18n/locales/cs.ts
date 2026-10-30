@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const cs: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "Scryer se nemůže připojit k bráně metadat, protože se systémové hodiny liší o více než 5 minut. Synchronizujte systémové hodiny a restartujte Scryer.",
   "httpRelease.refusal.detailsUnavailable":
     "Podrobnosti tohoto vydání už nejsou dostupné. Vyhledejte ho znovu a stáhněte ho.",
   "httpRelease.refusal.live":

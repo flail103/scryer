@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const zh_CN: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "系统时钟偏差超过 5 分钟，Scryer 无法连接到元数据网关。请同步系统时钟并重启 Scryer。",
   "httpRelease.refusal.detailsUnavailable":
     "此发布的详细信息已不可用。请重新搜索以获取。",
   "httpRelease.refusal.live": "此发布是直播，无法下载。",

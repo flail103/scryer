@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "../types";
 
 const nl: LocaleDictionary = {
+  "error.reason.METADATA_GATEWAY_CLOCK_SKEW":
+    "Scryer kan geen verbinding maken met de metadatagateway omdat uw systeemklok meer dan 5 minuten afwijkt. Synchroniseer uw systeemklok en start Scryer opnieuw.",
   "httpRelease.refusal.detailsUnavailable":
     "De details van deze release zijn niet meer beschikbaar. Zoek opnieuw om hem op te halen.",
   "httpRelease.refusal.live":
