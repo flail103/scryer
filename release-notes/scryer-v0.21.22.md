@@ -4,7 +4,7 @@ These changes are relative to v0.21.21.
 
 ## Highlights
 
-- Share your Scryer indexers with Sonarr, Radarr, Prowlarr, and other tools through new Newznab and Torznab endpoints, with per-client keys and indexer grants. Indexer clients are in beta.
+- Share your Scryer indexers with ancillary tools such as Lidarr and ebook managers through new Newznab and Torznab endpoints, with per-client keys and indexer grants. Indexer clients are in beta.
 - Arrange the dashboard with a per-user grid: move, resize, add, and remove panels, with a saved layout for each screen size.
 - New instances now require an explicit authentication choice on first run, protected by a one-time setup code.
 - Backup restores now run as supervised background jobs with exclusive maintenance access, and only encrypted `.enc` bundles can be restored.
@@ -32,7 +32,7 @@ These changes are relative to v0.21.21.
 - Creating, changing, rotating, or revoking a client uses the same verification step as personal API keys, so users with multi-factor authentication must verify first.
 - Each client shows when it was last used and how its latest request ended. Tables become cards on narrow screens.
 - Feeds carry typed release facts even when an indexer does not return a Nab feed, including seeders, peers, info hash, volume factors, seed requirements, languages, and external IDs. Upstream attributes pass through without loss.
-- Every feed item has a `pubDate`, so one release without a parseable date no longer makes Sonarr reject the whole feed. Magnet links stay out of feeds, and download links point to Scryer.
+- Every feed item has a `pubDate`, so one release without a parseable date no longer makes a client reject the whole feed. Magnet links stay out of feeds, and download links point to Scryer.
 - Upstream credentials are redacted from feed attributes, including configured indexer credentials. Archive passwords remain in the feed because they belong to the release.
 
 ## Dashboard
