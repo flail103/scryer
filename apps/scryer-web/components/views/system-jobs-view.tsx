@@ -783,14 +783,14 @@ export function SystemJobsView({ state }: { state: SystemJobsViewState }) {
             <Button
               size="sm"
               variant="destructive"
-              aria-label={t("jobs.action.cancelSearch")}
-              title={t("jobs.action.cancelSearch")}
+              aria-label={t("label.cancel")}
+              title={t("label.cancel")}
               onClick={(event) => {
                 event.stopPropagation();
                 void onCancelAcquisitionSearch(activeRun.id);
               }}
             >
-              {t("jobs.action.cancelSearch")}
+              {t("label.cancel")}
             </Button>
           ) : job.manualTriggerAllowed ? (
             <Button
@@ -1038,7 +1038,7 @@ export function SystemJobsView({ state }: { state: SystemJobsViewState }) {
     customJobs.find((entry) => jobInstanceKey(entry.job) === selectedInstanceKey)?.script ?? null;
 
   const renderMobileCards = (rows: JobTableRow[]) =>
-    rows.map(({ instanceKey, job, lastRun, status, isDisabled }) => (
+    rows.map(({ instanceKey, job, activeRun, lastRun, status, isDisabled }) => (
       <div
         key={instanceKey}
         className={`${JOBS_INSET_CLASS} p-4`}
@@ -1115,7 +1115,20 @@ export function SystemJobsView({ state }: { state: SystemJobsViewState }) {
           >
             {t("jobs.recentRuns")}
           </button>
-          {job.manualTriggerAllowed ? (
+          {activeRun?.jobKey === "ACQUISITION_SEARCH" ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              aria-label={t("label.cancel")}
+              title={t("label.cancel")}
+              onClick={(event) => {
+                event.stopPropagation();
+                void onCancelAcquisitionSearch(activeRun.id);
+              }}
+            >
+              {t("label.cancel")}
+            </Button>
+          ) : job.manualTriggerAllowed ? (
             <Button
               size="sm"
               variant="primary"

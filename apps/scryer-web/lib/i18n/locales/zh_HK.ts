@@ -629,7 +629,6 @@ const zh_HK: LocaleDictionary = {
   "jobs.column.lastRun": "上次運行",
   "jobs.column.status": "狀態",
   "jobs.action.run": "運行",
-  "jobs.action.cancelSearch": "取消搜尋",
   "jobs.action.runNow": "立即運行",
   "jobs.cancelSearchRequested": "已請求取消。當前搜尋步驟完成後，其餘步驟將停止。",
   "jobs.cancelSearchNotRunning": "此搜尋已不在執行。",

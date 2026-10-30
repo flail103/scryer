@@ -468,7 +468,6 @@ const zh_CN: LocaleDictionary = {
   "jobs.column.lastRun": "上次运行",
   "jobs.column.status": "状态",
   "jobs.action.run": "运行",
-  "jobs.action.cancelSearch": "取消搜索",
   "jobs.action.runNow": "立即运行",
   "jobs.cancelSearchRequested": "已请求取消。当前搜索步骤完成后，其余步骤将停止。",
   "jobs.cancelSearchNotRunning": "此搜索已不在运行。",

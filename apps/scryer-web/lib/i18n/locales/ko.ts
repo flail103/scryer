@@ -475,7 +475,6 @@ const ko: LocaleDictionary = {
   "jobs.column.lastRun": "마지막 실행",
   "jobs.column.status": "상태",
   "jobs.action.run": "실행",
-  "jobs.action.cancelSearch": "검색 취소",
   "jobs.action.runNow": "지금 실행",
   "jobs.cancelSearchRequested": "취소를 요청했습니다. 현재 검색 단계가 끝난 뒤 나머지 단계가 중지됩니다.",
   "jobs.cancelSearchNotRunning": "이 검색은 더 이상 실행 중이 아닙니다.",

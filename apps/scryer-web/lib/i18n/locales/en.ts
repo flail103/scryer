@@ -746,7 +746,6 @@ const en: LocaleDictionary = {
   "jobs.column.lastRun": "Last run",
   "jobs.column.status": "Status",
   "jobs.action.run": "Run",
-  "jobs.action.cancelSearch": "Cancel search",
   "jobs.action.runNow": "Run now",
   "jobs.cancelSearchRequested": "Cancellation requested. The current search step will finish before the remaining steps stop.",
   "jobs.cancelSearchNotRunning": "This search is no longer running.",

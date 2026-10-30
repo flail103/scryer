@@ -548,7 +548,6 @@ const nl: LocaleDictionary = {
   "jobs.column.lastRun": "Laatste run",
   "jobs.column.status": "Status",
   "jobs.action.run": "Uitvoeren",
-  "jobs.action.cancelSearch": "Zoekopdracht annuleren",
   "jobs.action.runNow": "Nu uitvoeren",
   "jobs.cancelSearchRequested": "Annulering aangevraagd. De huidige zoekstap wordt afgerond voordat de overige stappen stoppen.",
   "jobs.cancelSearchNotRunning": "Deze zoekopdracht wordt niet meer uitgevoerd.",

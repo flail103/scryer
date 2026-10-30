@@ -663,7 +663,6 @@ const ru: LocaleDictionary = {
     "jobs.column.status": "Статус",
     "jobs.column.trigger": "Запуск",
     "jobs.action.run": "Запустить",
-    "jobs.action.cancelSearch": "Отменить поиск",
     "jobs.action.runNow": "Запустить сейчас",
     "jobs.cancelSearchRequested": "Запрошена отмена. Текущий шаг поиска завершится, после чего остальные шаги остановятся.",
     "jobs.cancelSearchNotRunning": "Этот поиск уже не выполняется.",

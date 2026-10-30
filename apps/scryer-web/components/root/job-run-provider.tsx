@@ -2,6 +2,7 @@ import * as React from "react";
 import { useClient } from "urql";
 
 import { toast } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
 import { useTranslate } from "@/lib/context/translate-context";
 import { acquisitionProgress, automaticSearchOutcomeKey, shouldRestoreAutomaticSearch } from "@/lib/utils/automatic-search";
 import {
@@ -451,12 +452,18 @@ export function JobRunProvider({
         id: run.id,
         description,
         duration: Infinity,
-        action: run.jobKey === "ACQUISITION_SEARCH"
-          ? {
-            label: t("jobs.action.cancelSearch"),
-            onClick: () => void cancelAcquisitionSearch(run.id),
-          }
-          : undefined,
+        action: run.jobKey === "ACQUISITION_SEARCH" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            aria-label={t("label.cancel")}
+            title={t("label.cancel")}
+            onClick={() => void cancelAcquisitionSearch(run.id)}
+          >
+            {t("label.cancel")}
+          </Button>
+        ) : undefined,
       });
     }
 
