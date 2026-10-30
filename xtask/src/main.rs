@@ -216,14 +216,8 @@ struct CiArgs {
 
 #[derive(Subcommand)]
 enum CiCommand {
-    Clippy(ClippyArgs),
+    Clippy,
     Winget(WingetArgs),
-}
-
-#[derive(Args)]
-struct ClippyArgs {
-    #[arg(long)]
-    linux_only: bool,
 }
 
 #[derive(Args)]
@@ -391,12 +385,7 @@ fn delegate_sdk(ctx: &TaskContext, args: &SdkArgs) -> Result<()> {
 fn delegate_ci(ctx: &TaskContext, args: &CiArgs) -> Result<()> {
     let mut forwarded = vec!["ci".to_string()];
     match &args.command {
-        CiCommand::Clippy(clippy) => {
-            forwarded.push("clippy".to_string());
-            if clippy.linux_only {
-                forwarded.push("--linux-only".to_string());
-            }
-        }
+        CiCommand::Clippy => forwarded.push("clippy".to_string()),
         CiCommand::Winget(winget) => {
             forwarded.push("winget".to_string());
             forwarded.push("--version".to_string());

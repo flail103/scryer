@@ -503,7 +503,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_TERM_COLOR: always
-      RUST_MIN_STACK: "4194304"
+      RUST_MIN_STACK: "16777216"
       AWS_LC_SYS_USE_SYSTEM: "0"
       AWS_LC_SYS_STATIC: "1"
       AWS_LC_SYS_SMALL: "0"
@@ -740,12 +740,8 @@ jobs:
           export SCRYER_SMG_REGISTRATION_SECRET="${{ secrets.SMG_REGISTRATION_SECRET }}"
           export SCRYER_SMG_GRAPHQL_URL="https://smg.scryer.media/graphql"
           export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=. -C link-arg=-fuse-ld=mold -W linker-messages"
-          export RUST_MIN_STACK="4194304"
-          if [ "$NEXTEST_LANE" = "scryer-graphql" ] || [ "$NEXTEST_LANE" = "scryer-binaries" ]; then
-            # Unoptimized generated GraphQL dispatch plus nested scans exceeds 4 MiB.
-            # The binary's Arr-compat tests run the same GraphQL mutations for parity.
-            export RUST_MIN_STACK="16777216"
-          fi
+          # Unoptimized generated GraphQL dispatch plus nested scans exceeds 4 MiB.
+          export RUST_MIN_STACK="16777216"
           python3 .github/scripts/nextest_matrix.py run "$NEXTEST_LANE" 2>&1 | tee rust-nextest.log
 
       # Saved whether or not tests passed: compiled components stay valid.

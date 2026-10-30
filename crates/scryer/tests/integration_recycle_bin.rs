@@ -804,24 +804,8 @@ async fn recycle_bin_settings_list_only_bins_of_manageable_libraries() {
     assert_eq!(scoped.effective_paths, vec![default_bin_for(&library_a)]);
 }
 
-#[test]
-fn graphql_recycle_bin_settings_and_scoped_item_args_work() {
-    // macOS otherwise masks mutation-dispatch overflows with its larger stack.
-    std::thread::Builder::new()
-        .stack_size(2 * 1024 * 1024)
-        .spawn(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build GraphQL test runtime")
-                .block_on(graphql_recycle_bin_settings_and_scoped_item_args_work_impl());
-        })
-        .expect("spawn bounded-stack GraphQL test")
-        .join()
-        .expect("bounded-stack GraphQL test should not panic");
-}
-
-async fn graphql_recycle_bin_settings_and_scoped_item_args_work_impl() {
+#[tokio::test]
+async fn graphql_recycle_bin_settings_and_scoped_item_args_work() {
     let ctx = TestContext::new().await;
     seed_recycle_bin_setting_definition(&ctx).await;
 

@@ -304,25 +304,6 @@ opt-level = 3
 [profile.rc.package.zstd-sys]
 opt-level = 3
 
-# Generated GraphQL dispatch must fit normal worker stacks in development and tests.
-[profile.dev.package.scryer]
-opt-level = 1
-
-[profile.dev.package.scryer-interface]
-opt-level = 1
-
-[profile.dev.package.scryer-interface-system]
-opt-level = 1
-
-[profile.test.package.scryer]
-opt-level = 1
-
-[profile.test.package.scryer-interface]
-opt-level = 1
-
-[profile.test.package.scryer-interface-system]
-opt-level = 1
-
 [profile.dev.package.image]
 opt-level = 3
 
