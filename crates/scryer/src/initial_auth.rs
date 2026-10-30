@@ -9,6 +9,16 @@ use axum::{
 };
 use scryer_application::initial_auth::{SetupState, refusal};
 
+pub(crate) const REQUIRE_SETUP_CODE_ENV: &str = "SCRYER_REQUIRE_SETUP_CODE";
+
+/// Unset or blank leaves the code off. A value that is not a recognized boolean
+/// keeps it on, so a typo cannot silently drop a protection the operator asked for.
+pub(crate) fn setup_code_required(raw: Option<&str>) -> bool {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| crate::parse_env_bool_value(value) != Some(false))
+}
+
 // Standard stderr deliberately treats a missing native handle as a successful
 // no-op on some platforms. Setup must observe the real output failure.
 pub(crate) fn print_setup_code(code: &str) -> std::io::Result<()> {
@@ -1236,6 +1246,73 @@ mod tests {
                 // Ordinary authless admission again requires the web-client proof.
                 assert_eq!(status, StatusCode::FORBIDDEN, "{stale}");
             }
+        }
+    }
+
+    #[test]
+    fn initial_auth_setup_code_is_opt_in_and_fails_closed_on_unknown_values() {
+        for raw in [None, Some(""), Some("  "), Some("0"), Some("false")] {
+            assert!(!setup_code_required(raw), "{raw:?}");
+        }
+        for raw in ["1", "true", "on", "enabled"] {
+            assert!(setup_code_required(Some(raw)), "{raw}");
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_auth_choice_without_code_is_still_required_and_completes() {
+        for password_mode in [true, false] {
+            let context = fixture().await;
+            context
+                .auth_runtime
+                .initial_authentication
+                .initialize_without_code();
+            let router = crate::base_path::mount_router(
+                http_router(&context),
+                &crate::base_path::BasePath::from_raw(Some("/scryer")),
+            );
+            let (status, metadata) = graphql(router.clone(), "/scryer/graphql", serde_json::json!({"query":"{ authRuntimeState { initialAuthenticationStage initialAuthenticationCodeRequired } }"})).await;
+            assert_eq!(status, StatusCode::OK, "{metadata}");
+            assert_eq!(
+                metadata["data"]["authRuntimeState"]["initialAuthenticationStage"],
+                "choice"
+            );
+            assert_eq!(
+                metadata["data"]["authRuntimeState"]["initialAuthenticationCodeRequired"],
+                false
+            );
+            let (status, blocked) = graphql(
+                router.clone(),
+                "/scryer/graphql",
+                serde_json::json!({"query":"{ users { id } }"}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{blocked}");
+            let (_, restore) = graphql(
+                router.clone(),
+                "/scryer/graphql",
+                serde_json::json!({"query":"{ restoreStatus { id } }"}),
+            )
+            .await;
+            assert!(restore.get("errors").is_none(), "{restore}");
+            let query = "mutation Decide($input: CompleteInitialAuthenticationInput!) { completeInitialAuthentication(input: $input) { completed login { token } } }";
+            let input = serde_json::json!({"mode": if password_mode { "PASSWORD" } else { "NO_AUTHENTICATION" },
+                "password": password_mode.then_some("permanent-password"), "acknowledgeNoAuthentication": !password_mode});
+            let (_, result) = graphql(
+                router,
+                "/scryer/graphql",
+                serde_json::json!({"query":query,"variables":{"input":input}}),
+            )
+            .await;
+            assert_eq!(
+                result["data"]["completeInitialAuthentication"]["completed"], true,
+                "{result}"
+            );
+            assert_eq!(
+                context.app.initial_authentication_state().await.unwrap(),
+                Some(SetupState::Complete)
+            );
+            assert!(!context.auth_runtime.initial_authentication.is_available());
         }
     }
 

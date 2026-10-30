@@ -6,7 +6,7 @@ These changes are relative to v0.21.21.
 
 - Share your Scryer indexers with ancillary tools such as Lidarr and ebook managers through new Newznab and Torznab endpoints, with per-client keys and indexer grants. Indexer clients are in beta.
 - Arrange the dashboard with a per-user grid: move, resize, add, and remove panels, with a saved layout for each screen size.
-- New instances now require an explicit authentication choice on first run, protected by a one-time setup code.
+- New instances now require an explicit authentication choice on first run, with an optional one-time setup code for instances exposed before that choice is made.
 - Backup restores now run as supervised background jobs with exclusive maintenance access, and only encrypted `.enc` bundles can be restored.
 - Background searches leave out indexers that never answer for a media type, share pages between searches that read the same listing, and stop within their time budget.
 - RSS sync takes priority over background searches and now checks every due indexer each cycle.
@@ -15,7 +15,8 @@ These changes are relative to v0.21.21.
 ## Upgrade notes
 
 - Existing instances are not asked to make the new authentication choice. It applies only to newly created databases.
-- Automated deployments of a new instance must complete first-run authentication before Scryer becomes usable. The setup code is written to the server console or container output; desktop installs write it to `logs/console.log` in Scryer's data folder, and restarting Scryer replaces it. If console output cannot be captured, set `SCRYER_ADMIN_PASSWORD` or `SCRYER_ADMIN_PASSWORD_FILE`.
+- Automated deployments of a new instance must complete first-run authentication before Scryer becomes usable, or set `SCRYER_ADMIN_PASSWORD` or `SCRYER_ADMIN_PASSWORD_FILE`.
+- Until first-run setup is complete, anyone who can reach a new instance can make the authentication choice or restore a backup. If a new instance is reachable by others before you finish setup, set `SCRYER_REQUIRE_SETUP_CODE=true`. The setup code is then written to the server console or container output; desktop installs write it to `logs/console.log` in Scryer's data folder, and restarting Scryer replaces it.
 - Restore accepts only encrypted `.enc` backups. An older unencrypted bundle can no longer be restored, so keep the Scryer version that can read it if you still depend on one. The bundle file itself is left untouched.
 - RSS sync now wakes every 15 minutes by default instead of every 5, and each cycle considers all due indexers. `SCRYER_RSS_TICK_INDEXER_LIMIT` is removed; use `SCRYER_RSS_SYNC_TICK_SECS` to change how often the worker wakes.
 - The **Glow** preference is removed, along with every saved glow choice. The interface now always uses the look without glow.
@@ -47,7 +48,7 @@ These changes are relative to v0.21.21.
 ## First-run setup and restore
 
 - Choose between an administrator password and running without authentication on first run. Running without authentication requires acknowledging that anyone who can reach the instance can act as administrator.
-- The one-time setup code also authorizes restoring a backup during first-run setup. Failed code attempts are rate limited.
+- When `SCRYER_REQUIRE_SETUP_CODE` is set, the one-time setup code is needed for the first-run choice and for restoring a backup during first-run setup. Failed code attempts are rate limited.
 - Restores own their work independently of the browser, so a disconnected page does not stop them. The restore screen shows the current phase, import progress, and translated failure reasons.
 - A restore keeps its original deadline across restarts and survives a failed restart handoff. Once restored files are promoted, later startup problems are treated as ordinary startups rather than a recovery lock.
 - Scheduled and background work stops during a restore. A failed Apply before promotion releases the application and restarts it to bring that work back.

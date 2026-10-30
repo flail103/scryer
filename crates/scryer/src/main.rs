@@ -2481,11 +2481,21 @@ async fn bootstrap_application(
         initial_auth_state,
         Some(scryer_application::initial_auth::SetupState::Choice)
     ) {
-        // A loopback peer can be a reverse proxy without forwarding headers.
-        // Every browser choice therefore requires operator-controlled proof.
-        let code = auth_runtime.initial_authentication.initialize()?;
-        // Operator-only output: deliberately bypass tracing and its web log ring.
-        initial_auth::print_setup_code(&code)?;
+        // The choice itself is always required. Operators who expose a fresh
+        // instance before making it can also require console proof.
+        if initial_auth::setup_code_required(
+            std::env::var(initial_auth::REQUIRE_SETUP_CODE_ENV)
+                .ok()
+                .as_deref(),
+        ) {
+            let code = auth_runtime.initial_authentication.initialize()?;
+            // Operator-only output: deliberately bypass tracing and its web log ring.
+            initial_auth::print_setup_code(&code)?;
+        } else {
+            auth_runtime
+                .initial_authentication
+                .initialize_without_code();
+        }
     }
     let authless_access_policy = AuthlessAccessPolicy {
         allow_unauthenticated_public_access: auth_mode.allow_unauthenticated_public_access,

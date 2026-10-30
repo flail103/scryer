@@ -306,7 +306,7 @@ fn maintenance_html(migration_progress: Option<(usize, usize)>, restoring: bool)
   <form id="restore-retry" hidden>
     <p class="detail">Restore stopped safely. Enter the backup password to try again.</p>
     <label>Backup password <input id="restore-password" type="password" autocomplete="off"/></label>
-    <label>Setup code (for a first-run restore) <input id="restore-setup-code" autocomplete="one-time-code" maxlength="32"/></label>
+    <label>Setup code (if your first-run restore requires one) <input id="restore-setup-code" autocomplete="one-time-code" maxlength="32"/></label>
     <button type="submit">Retry restore</button>
     <p id="retry-message" class="detail" role="status"></p>
   </form>
@@ -335,9 +335,11 @@ fn maintenance_html(migration_progress: Option<(usize, usize)>, restoring: bool)
       if (token) headers.Authorization = "Bearer " + token;
       else if (!setupCode) {{
         var proofResponse = await fetch("{proof_url}", {{credentials: "include", signal: AbortSignal.timeout(10000)}});
-        if (!proofResponse.ok) throw new Error("Authentication is required to retry the restore.");
-        var proof = await proofResponse.json();
-        headers["x-scryer-web-client"] = proof.proof;
+        // First-run setup has no web-client proof; the server decides from here.
+        if (proofResponse.ok) {{
+          var proof = await proofResponse.json();
+          headers["x-scryer-web-client"] = proof.proof;
+        }}
       }}
       async function request(query, variables) {{
         var response = await fetch("{graphql_url}", {{method: "POST", credentials: "include", headers: headers, signal: AbortSignal.timeout(10000),

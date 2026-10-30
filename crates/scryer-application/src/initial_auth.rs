@@ -200,6 +200,13 @@ impl SetupChallenge {
         state.failures.clear();
         Ok(format!("{}-{}", &code[..3], &code[3..]))
     }
+    /// Opens setup with no code; the first client to answer makes the choice.
+    pub fn initialize_without_code(&self) {
+        let mut state = self.state.lock().expect("setup challenge lock poisoned");
+        state.verifier = None;
+        state.available = true;
+        state.failures.clear();
+    }
     pub fn code_required(&self) -> bool {
         self.state
             .lock()
@@ -403,7 +410,24 @@ mod tests {
     }
 
     #[test]
-    fn initial_auth_challenge_always_requires_a_code_and_is_single_use() {
+    fn initial_auth_challenge_without_code_admits_until_consumed() {
+        let challenge = SetupChallenge::default();
+        challenge.initialize_without_code();
+        assert!(!challenge.code_required());
+        assert!(challenge.is_available());
+        challenge.verify(CLIENT, None).unwrap();
+        challenge.consume();
+        assert_eq!(
+            challenge
+                .verify(CLIENT, None)
+                .unwrap_err()
+                .validation_reason(),
+            Some(refusal::ALREADY_COMPLETED)
+        );
+    }
+
+    #[test]
+    fn initial_auth_initialized_challenge_requires_a_code_and_is_single_use() {
         let challenge = SetupChallenge::default();
         assert!(challenge.verify(CLIENT, None).is_err());
         let code = challenge.initialize().unwrap();
