@@ -4457,7 +4457,11 @@ fn title_external_id_value(title: &Title, source: &str) -> Option<String> {
     title
         .external_ids
         .iter()
-        .find(|id| id.source.eq_ignore_ascii_case(source))
+        .find(|id| {
+            id.source.eq_ignore_ascii_case(source)
+                && crate::normalize::external_id_kind_fits_facet(id, &title.facet)
+                && !id.value.trim().is_empty()
+        })
         .map(|id| id.value.trim().to_string())
         .filter(|value| !value.is_empty())
 }

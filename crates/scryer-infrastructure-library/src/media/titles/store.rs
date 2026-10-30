@@ -3742,9 +3742,17 @@ fn merge_optional_title_text(target: &mut Option<String>, incoming: Option<Strin
 }
 
 fn merge_title_external_ids(target: &mut Vec<ExternalId>, incoming: Vec<ExternalId>) {
+    // Replace each provider's previous set once, not once per incoming id:
+    // a provider can supply several identities with distinct entity kinds.
+    target.retain(|candidate| {
+        !incoming
+            .iter()
+            .any(|external_id| external_id.source == candidate.source)
+    });
     for external_id in incoming {
-        target.retain(|candidate| candidate.source != external_id.source);
-        target.push(external_id);
+        if !target.contains(&external_id) {
+            target.push(external_id);
+        }
     }
 }
 
@@ -6365,6 +6373,29 @@ mod tests {
     use super::*;
 
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn external_id_merge_preserves_all_incoming_provider_identities() {
+        let tvdb = ExternalId::with_kind("tvdb", "series", "4242");
+        let series = ExternalId::with_kind("tmdb", "series", "136315");
+        let movie = ExternalId::with_kind("tmdb", "movie", "9001");
+        let another_movie = ExternalId::with_kind("tmdb", "movie", "9002");
+        let mut stored = vec![tvdb.clone(), ExternalId::new("tmdb", "obsolete")];
+        let incoming = vec![
+            series.clone(),
+            movie.clone(),
+            another_movie.clone(),
+            series.clone(),
+        ];
+
+        merge_title_external_ids(&mut stored, incoming.clone());
+        assert_eq!(stored, vec![tvdb, series, movie, another_movie]);
+        let first = stored.clone();
+        merge_title_external_ids(&mut stored, incoming);
+        assert_eq!(stored, first, "repeated hydration must be idempotent");
+        merge_title_external_ids(&mut stored, vec![]);
+        assert_eq!(stored, first, "absent metadata must preserve stored ids");
+    }
 
     #[tokio::test]
     async fn external_id_lookup_in_facet_respects_the_id_kind() {

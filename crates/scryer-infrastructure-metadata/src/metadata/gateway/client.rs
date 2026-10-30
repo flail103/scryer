@@ -2353,6 +2353,7 @@ fn movie_metadata_from_item_for_release_market(
     MovieMetadata {
         target_key: None,
         smg_id: m.id.or(m.title_id),
+        external_ids: external_ids_from_gateway(m.external_ids),
         primary_source,
         tvdb_id: m.tvdb_id,
         name: m.name,
@@ -2398,6 +2399,7 @@ fn series_metadata_from_item(s: SeriesItem) -> SeriesMetadata {
     SeriesMetadata {
         target_key: None,
         smg_id: s.id,
+        external_ids: external_ids_from_gateway(s.external_ids),
         primary_source,
         tvdb_id: s.tvdb_id.unwrap_or_default(),
         tmdb_id: s.tmdb_id,
@@ -3255,6 +3257,32 @@ mod tests {
             assert!(query.contains("tmdb_vote_average"));
             assert!(query.contains("tmdb_vote_count"));
         }
+    }
+
+    #[test]
+    fn metadata_items_preserve_all_gateway_external_ids() {
+        let ids = json!([
+            {"source": "tvdb", "kind": "series", "id": "4242"},
+            {"source": "tmdb", "kind": "series", "id": "136315"},
+            {"source": "tmdb", "kind": "movie", "id": "9001"},
+            {"source": "imdb", "kind": "series", "id": "tt1234567"},
+            {"source": "trakt", "kind": "series", "id": "123"},
+            {"source": "custom-provider", "kind": "", "id": "opaque-id"}
+        ]);
+        let expected = external_ids_from_gateway(serde_json::from_value(ids.clone()).unwrap());
+        let mut movie = minimal_movie_item_fields();
+        movie["external_ids"] = ids.clone();
+        let mut series = minimal_series_item_fields();
+        series["external_ids"] = ids;
+
+        assert_eq!(
+            super::movie_metadata_from_item(serde_json::from_value(movie).unwrap()).external_ids,
+            expected
+        );
+        assert_eq!(
+            super::series_metadata_from_item(serde_json::from_value(series).unwrap()).external_ids,
+            expected
+        );
     }
 
     fn minimal_movie_item_fields() -> serde_json::Value {
@@ -6169,6 +6197,8 @@ struct TitleRefFetch<T> {
 #[derive(Deserialize)]
 struct MovieItem {
     #[serde(default)]
+    external_ids: Vec<MetadataExternalIdItem>,
+    #[serde(default)]
     id: Option<i64>,
     #[serde(default)]
     title_id: Option<i64>,
@@ -6683,6 +6713,8 @@ struct ArtworkEpisodeItem {
 
 #[derive(Deserialize)]
 struct SeriesItem {
+    #[serde(default)]
+    external_ids: Vec<MetadataExternalIdItem>,
     /// SMG's title id; only the `titles` operation selects it.
     #[serde(default)]
     id: Option<i64>,
