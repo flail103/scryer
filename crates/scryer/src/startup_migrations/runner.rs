@@ -148,6 +148,12 @@ const MIGRATIONS: &[MigrationSpec] = &[
         phase: MigrationPhase::ApplicationReady,
         legacy_state_key: None,
     },
+    MigrationSpec {
+        id: super::_0019_show_tmdb_refresh::ID,
+        description: super::_0019_show_tmdb_refresh::DESCRIPTION,
+        phase: MigrationPhase::ApplicationReady,
+        legacy_state_key: None,
+    },
 ];
 
 #[derive(Clone)]
@@ -455,6 +461,10 @@ impl ApplicationMigrator {
                 }
                 "0011_long_tail_reconverge_default" => {
                     self.run_retryable(spec, migration_0011::migrate(self.settings.clone()))
+                        .await;
+                }
+                super::_0019_show_tmdb_refresh::ID => {
+                    self.run_retryable(spec, super::_0019_show_tmdb_refresh::migrate(&datastore))
                         .await;
                 }
                 // Starts from `spawn_empty_duplicate_title_folder_cleanup`, once
