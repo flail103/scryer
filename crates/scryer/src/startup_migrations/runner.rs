@@ -464,8 +464,11 @@ impl ApplicationMigrator {
                         .await;
                 }
                 super::_0019_show_tmdb_refresh::ID => {
-                    self.run_retryable(spec, super::_0019_show_tmdb_refresh::migrate(&datastore))
-                        .await;
+                    let datastore = datastore.clone();
+                    let restore = app.restore_coordinator().clone();
+                    std::mem::drop(self.spawn_retryable(restore, spec, async move {
+                        super::_0019_show_tmdb_refresh::migrate(&datastore).await
+                    }));
                 }
                 // Starts from `spawn_empty_duplicate_title_folder_cleanup`, once
                 // the library roots are reconciled.
