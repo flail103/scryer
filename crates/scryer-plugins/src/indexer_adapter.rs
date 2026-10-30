@@ -1694,7 +1694,7 @@ fn plugin_search_request_from_strategy(
     // A text strategy already names the alias the host chose. Supplying the
     // canonical name as its first scene title would override that choice in
     // plugins that prefer scene_titles over query (for example Nyaa).
-    if strategy.query.trim().is_empty() {
+    if !strategy.ids.is_empty() || strategy.query.trim().is_empty() {
         context.scene_titles = strategy.title_context.scene_titles;
     }
     context.episode_title = strategy.title_context.episode_title;
@@ -3638,6 +3638,8 @@ mod tests {
         };
         strategy.season = Some(26);
         strategy.episode = Some(14);
+        // ID strategies may carry numbering as their nonempty query.
+        strategy.query = "S26E14".into();
         let request = plugin_search_request_from_strategy(strategy, SearchMode::Interactive);
         let context = request.context.as_ref().unwrap();
         assert_eq!(
@@ -3649,8 +3651,8 @@ mod tests {
         assert_eq!(context.query_kind, PluginSearchQueryKind::Id);
         assert_eq!(request.season, Some(26));
         assert_eq!(request.episode, Some(14));
-        assert!(
-            request.query.is_empty(),
+        assert_eq!(
+            request.query, "S26E14",
             "catalog titles do not rewrite the provider query"
         );
     }

@@ -961,7 +961,7 @@ impl AppUseCase {
                     .or_else(|| {
                         source
                             .outcome
-                            .and_then(incomplete_indexer_reason)
+                            .and_then(interactive_indexer_failure_reason)
                             .map(|reason| reason.message)
                     });
         }

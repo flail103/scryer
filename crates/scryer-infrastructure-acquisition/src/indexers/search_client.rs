@@ -1580,6 +1580,31 @@ fn completion_is_contained(completion: &IndexerSearchCompletion) -> bool {
     }
 }
 
+/// Preserve operationally successful partial reasons across strategy tiers.
+/// Unattested replies withhold coverage but do not erase a provider limit;
+/// failures and unexplained partials must still surface as failures.
+fn merge_operational_partial_reason(
+    current: Option<IndexerSearchIncompleteReason>,
+    completion: IndexerSearchCompletion,
+) -> Option<IndexerSearchIncompleteReason> {
+    match completion {
+        IndexerSearchCompletion::Complete
+        | IndexerSearchCompletion::Partial {
+            reason: Some(IndexerSearchIncompleteReason::Unattested),
+            ..
+        } => current,
+        IndexerSearchCompletion::Partial {
+            reason:
+                Some(
+                    IndexerSearchIncompleteReason::PageCeilingReached
+                    | IndexerSearchIncompleteReason::SaturatedPartition,
+                ),
+            ..
+        } => current.map(|_| IndexerSearchIncompleteReason::PageCeilingReached),
+        IndexerSearchCompletion::Partial { .. } => None,
+    }
+}
+
 /// The wait before a contained strategy is asked again: one hour after the
 /// first containment, then doubling from the wait it last served, capped at a
 /// day.
@@ -7897,7 +7922,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 let mut page_chains: HashMap<String, PageChain> = HashMap::new();
                 let mut any_strategy_fired = false;
                 let mut all_strategies_complete = true;
-                let mut only_unattested_incompleteness = true;
+                let mut operational_partial_reason = Some(IndexerSearchIncompleteReason::Unattested);
                 let mut primary_attempted;
                 let mut primary_had_error;
                 let mut primary_usable_result_count = 0_usize;
@@ -7951,7 +7976,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                             // open with it, not contained.
                             if plan.served_open > 0 {
                                 all_strategies_complete = false;
-                                only_unattested_incompleteness = false;
+                                operational_partial_reason = None;
                                 contained.note_open();
                             }
                         }
@@ -7993,7 +8018,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 primary_had_error = primary_selection.deferred_count > 0;
                 if primary_selection.deferred_count > 0 {
                     all_strategies_complete = false;
-                    only_unattested_incompleteness = false;
+                    operational_partial_reason = None;
                 }
                 contained.note_selection(&primary_selection);
                 primary_usable_result_count = primary_usable_result_count
@@ -8013,7 +8038,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                 } else {
                     primary_had_error = true;
                     all_strategies_complete = false;
-                    only_unattested_incompleteness = false;
+                    operational_partial_reason = None;
                     contained.note_open();
                     StrategyTierOutcomes::Legacy(tokio::task::JoinSet::new())
                 };
@@ -8041,7 +8066,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     batch_had_timeout |= outcome.timed_out;
                     if !outcome.request_fired {
                         all_strategies_complete = false;
-                        only_unattested_incompleteness = false;
+                        operational_partial_reason = None;
                         contained.note_open();
                         if let Some(wait) = outcome.over_query_budget {
                             query_budget_wait =
@@ -8070,13 +8095,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                         Ok(mut response) => {
                             if response.completion != IndexerSearchCompletion::Complete {
                                 all_strategies_complete = false;
-                                only_unattested_incompleteness &= matches!(
-                                    response.completion,
-                                    IndexerSearchCompletion::Partial {
-                                        reason: Some(IndexerSearchIncompleteReason::Unattested),
-                                        ..
-                                    }
-                                );
+                                operational_partial_reason = merge_operational_partial_reason(operational_partial_reason, response.completion);
                             }
                             let contained_retry_at =
                                 contained.observe(
@@ -8262,7 +8281,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                             }
                             primary_had_error = true;
                             all_strategies_complete = false;
-                            only_unattested_incompleteness = false;
+                            operational_partial_reason = None;
                             contained.note_open();
                             // The endpoint does not implement the facet-scoped
                             // function it was asked for. That is a wrong request
@@ -8387,7 +8406,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                                 page_chains.extend(plan.page_chains);
                                 if plan.served_open > 0 {
                                     all_strategies_complete = false;
-                                    only_unattested_incompleteness = false;
+                                    operational_partial_reason = None;
                                     contained.note_open();
                                 }
                             }
@@ -8424,7 +8443,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                     };
                     if fallback_selection.deferred_count > 0 {
                         all_strategies_complete = false;
-                        only_unattested_incompleteness = false;
+                        operational_partial_reason = None;
                     }
                     contained.note_selection(&fallback_selection);
                     let fallback_live = fallback_selection.live;
@@ -8441,7 +8460,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                         )
                     } else {
                         all_strategies_complete = false;
-                        only_unattested_incompleteness = false;
+                        operational_partial_reason = None;
                         contained.note_open();
                         StrategyTierOutcomes::Legacy(tokio::task::JoinSet::new())
                     };
@@ -8469,7 +8488,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                         batch_had_timeout |= outcome.timed_out;
                         if !outcome.request_fired {
                             all_strategies_complete = false;
-                            only_unattested_incompleteness = false;
+                            operational_partial_reason = None;
                             contained.note_open();
                             if let Some(wait) = outcome.over_query_budget {
                                 query_budget_wait =
@@ -8497,15 +8516,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                             Ok(mut response) => {
                                 if response.completion != IndexerSearchCompletion::Complete {
                                     all_strategies_complete = false;
-                                    only_unattested_incompleteness &= matches!(
-                                        response.completion,
-                                        IndexerSearchCompletion::Partial {
-                                            reason: Some(
-                                                IndexerSearchIncompleteReason::Unattested
-                                            ),
-                                            ..
-                                        }
-                                    );
+                                    operational_partial_reason = merge_operational_partial_reason(operational_partial_reason, response.completion);
                                 }
                                 let contained_retry_at = contained.observe(
                                 &outcome.strategy_id,
@@ -8672,7 +8683,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                                     );
                                 }
                                 all_strategies_complete = false;
-                                only_unattested_incompleteness = false;
+                                operational_partial_reason = None;
                                 contained.note_open();
                                 if let Some(diagnostics) = search_diagnostics.as_ref() {
                                     diagnostics
@@ -8849,8 +8860,7 @@ impl IndexerClient for MultiIndexerSearchClient {
                                 reason: if query_budget_wait.is_some() {
                                     Some(IndexerSearchIncompleteReason::QueryBudgetExhausted)
                                 } else {
-                                    only_unattested_incompleteness
-                                        .then_some(IndexerSearchIncompleteReason::Unattested)
+                                    operational_partial_reason
                                 },
                                 retry_after: scheduler_retry_after.or(query_budget_wait),
                             }
@@ -12794,6 +12804,33 @@ mod tests {
             omit_request_facet: false,
             label: "freetext".into(),
         }
+    }
+
+    #[test]
+    fn strategy_aggregation_preserves_provider_limits_without_hiding_failures() {
+        let partial = |reason| IndexerSearchCompletion::Partial {
+            reason,
+            retry_after: None,
+        };
+        let limit = Some(IndexerSearchIncompleteReason::PageCeilingReached);
+        let unattested = Some(IndexerSearchIncompleteReason::Unattested);
+        assert_eq!(
+            merge_operational_partial_reason(unattested, partial(limit)),
+            limit
+        );
+        assert_eq!(
+            merge_operational_partial_reason(limit, partial(unattested)),
+            limit
+        );
+        assert_eq!(
+            merge_operational_partial_reason(
+                limit,
+                partial(Some(IndexerSearchIncompleteReason::UpstreamFailure))
+            ),
+            None
+        );
+        assert_eq!(merge_operational_partial_reason(limit, partial(None)), None);
+        assert_eq!(merge_operational_partial_reason(None, partial(limit)), None);
     }
 
     #[test]
