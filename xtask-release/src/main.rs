@@ -4330,6 +4330,13 @@ fn run_scryer_rust_validation(ctx: &TaskContext, prefix: &'static str) -> Result
             "RUSTSEC-2026-0095",
             "RUSTSEC-2026-0096",
             "RUSTSEC-2026-0114",
+            // Wasmtime's compiled-code cache pins zstd 0.13 upstream. It only calls
+            // zstd::decode_all and zstd::encode_all on its own local cache files, which
+            // never reach the reused contexts, seekable API or streaming write decoder
+            // these cover. Remove them once wasmtime moves to zstd 0.14.3.
+            "RUSTSEC-2026-0391",
+            "RUSTSEC-2026-0398",
+            "RUSTSEC-2026-0403",
         ];
         warn(format!(
             "Ignoring advisories pending upstream fixes: {}",
