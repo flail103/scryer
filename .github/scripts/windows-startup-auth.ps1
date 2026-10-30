@@ -1,10 +1,9 @@
-# Complete the fresh-install decision through the same operator proof as the UI.
-# Keep the captured stderr private: it contains the one-time setup credential.
+# Complete the fresh-install decision the same way the UI does. Startup smoke
+# runs never set SCRYER_REQUIRE_SETUP_CODE, so the choice carries no setup code.
 function Get-ScryerStartupProof {
   param(
     [string]$BaseUrl,
-    [Microsoft.PowerShell.Commands.WebRequestSession]$Session,
-    [string]$StderrPath
+    [Microsoft.PowerShell.Commands.WebRequestSession]$Session
   )
 
   $request = @{
@@ -21,19 +20,11 @@ function Get-ScryerStartupProof {
       throw "Authless web client proof was refused without an initial-setup challenge"
     }
 
-    $codes = [regex]::Matches(
-      (Get-Content -LiteralPath $StderrPath -Raw),
-      '(?m)^Scryer one-time setup code: ([A-Z2-9]{3}-[A-Z2-9]{3})\r?$'
-    )
-    if ($codes.Count -eq 0) {
-      throw "Current Scryer process has not emitted its setup code"
-    }
     $payload = @{
       query = 'mutation($input: CompleteInitialAuthenticationInput!) { completeInitialAuthentication(input: $input) { completed } }'
       variables = @{ input = @{
         mode = "NO_AUTHENTICATION"
         acknowledgeNoAuthentication = $true
-        setupCode = $codes[$codes.Count - 1].Groups[1].Value
       } }
     } | ConvertTo-Json -Depth 5 -Compress
     $setup = Invoke-RestMethod -Uri "$BaseUrl/graphql" -Method Post -ContentType "application/json" -Body $payload -WebSession $Session -TimeoutSec 5

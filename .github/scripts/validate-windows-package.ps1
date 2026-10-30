@@ -235,7 +235,7 @@ function Invoke-ScryerStartupSmoke {
           throw "SPA returned HTTP $($spa.StatusCode)"
         }
 
-        $proof = Get-ScryerStartupProof -BaseUrl $baseUrl -Session $session -StderrPath $stderrPath
+        $proof = Get-ScryerStartupProof -BaseUrl $baseUrl -Session $session
 
         $payload = @{ query = "query { scryerVersion }" } | ConvertTo-Json -Compress
         $api = Invoke-WebRequest -Uri "$baseUrl/graphql" -Method Post -ContentType "application/json" -Body $payload -Headers @{ "X-Scryer-Web-Client" = $proof } -WebSession $session -TimeoutSec 5
