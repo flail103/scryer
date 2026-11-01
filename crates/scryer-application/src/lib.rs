@@ -843,10 +843,11 @@ pub use types::{
     IndexerSearchPageMetadata, IndexerSearchPageReservation, IndexerSearchPageSink,
     IndexerSearchPlanCapability, IndexerSearchPlanRequest, IndexerSearchPlanSummary,
     IndexerSearchResponse, IndexerSearchResult, IndexerSearchStrategyEvent,
-    IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, NewIndexerError,
-    RawTextSearchPage, RawTextSearchRequest, ReleaseCandidateProvenance, ReleaseSearchSubjectKind,
-    ReleaseStrategyKind, extract_magnet_info_hash, indexer_search_identity, is_valid_magnet_uri,
-    search_relevant_indexer_caps, search_relevant_managed_indexer_metadata,
+    IndexerSearchStrategyEventSink, IndexerSearchStrategyRequest, IndexerSearchTitleContext,
+    NewIndexerError, RawTextSearchPage, RawTextSearchRequest, ReleaseCandidateProvenance,
+    ReleaseSearchSubjectKind, ReleaseStrategyKind, extract_magnet_info_hash,
+    indexer_search_identity, is_valid_magnet_uri, search_relevant_indexer_caps,
+    search_relevant_managed_indexer_metadata,
 };
 pub use types::{
     EXTERNAL_IMPORT_MONITOR_APPLY_SESSION_ID, EXTERNAL_IMPORT_MONITOR_APPLY_SESSION_PREFIX,
